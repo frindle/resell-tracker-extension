@@ -66,9 +66,13 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
       console.log('[WM] skipping order', orderNumber, '- no date found in:', blockText.slice(0, 200));
       continue;
     }
-    // Append current year if missing
-    const rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear}`;
-    const orderDate = new Date(rawDateStr);
+    // Append current year if missing; if result is in the future, use prior year
+    let rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear}`;
+    let orderDate = new Date(rawDateStr);
+    if (!isNaN(orderDate.getTime()) && orderDate > new Date()) {
+      rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear - 1}`;
+      orderDate = new Date(rawDateStr);
+    }
     if (isNaN(orderDate.getTime())) {
       console.log('[WM] skipping order', orderNumber, '- bad date:', dateMatch[1]);
       continue;
