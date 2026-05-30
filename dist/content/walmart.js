@@ -291,14 +291,21 @@
         }
       }
       var syncing = false;
-      function waitForOrdersToLoad(previousFirstId = "", timeoutMs = 1e4) {
+      function getFirstBlockFingerprint() {
+        const block = document.querySelector('[data-testid*="orderGroup"]');
+        if (!block) return "";
+        const caption = block.querySelector('[id^="caption-"]');
+        if (caption?.id) return caption.id;
+        return (block.textContent ?? "").replace(/\s+/g, " ").slice(0, 80);
+      }
+      function waitForOrdersToLoad(previousFingerprint = "", timeoutMs = 12e3) {
         return new Promise((resolve) => {
           const start = Date.now();
           function check() {
             const blocks = document.querySelectorAll('[data-testid*="orderGroup"]');
             if (blocks.length > 0 && (blocks[0].textContent ?? "").length > 100) {
-              const firstId = blocks[0].dataset.testid ?? blocks[0].id ?? (blocks[0].textContent ?? "").slice(0, 50);
-              if (!previousFirstId || firstId !== previousFirstId) {
+              const fp = getFirstBlockFingerprint();
+              if (!previousFingerprint || fp !== previousFingerprint) {
                 resolve();
                 return;
               }
@@ -357,13 +364,12 @@
             }
             console.log("[WM] page", page, "scraped:", orders.length, "total:", allOrders.length, "hasOlder:", hasOlder);
             if (hasOlder) break;
-            const blocks = document.querySelectorAll('[data-testid*="orderGroup"]');
-            const firstId = blocks[0] ? blocks[0].dataset.testid ?? (blocks[0].textContent ?? "").slice(0, 60) : "";
+            const fingerprint = getFirstBlockFingerprint();
             if (!clickNextPage()) {
               console.log("[WM] no next page button, done");
               break;
             }
-            await waitForOrdersToLoad(firstId, 12e3);
+            await waitForOrdersToLoad(fingerprint);
             page++;
           }
           console.log("[WM] done scraping, total orders:", allOrders.length);

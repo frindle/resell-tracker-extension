@@ -154,15 +154,24 @@ async function fetchOrderDetail(orderUrl: string): Promise<{ address: string; tr
 
 let syncing = false;
 
-function waitForOrdersToLoad(previousFirstId = '', timeoutMs = 10000): Promise<void> {
+function getFirstBlockFingerprint(): string {
+  const block = document.querySelector('[data-testid*="orderGroup"]');
+  if (!block) return '';
+  // Use caption element id (contains actual order number) as the stable fingerprint
+  const caption = block.querySelector('[id^="caption-"]');
+  if (caption?.id) return caption.id;
+  // Fall back to a slice of text content (order numbers, dates, amounts — changes per page)
+  return (block.textContent ?? '').replace(/\s+/g, ' ').slice(0, 80);
+}
+
+function waitForOrdersToLoad(previousFingerprint = '', timeoutMs = 12000): Promise<void> {
   return new Promise(resolve => {
     const start = Date.now();
     function check() {
       const blocks = document.querySelectorAll('[data-testid*="orderGroup"]');
       if (blocks.length > 0 && (blocks[0].textContent ?? '').length > 100) {
-        // If waiting for page change, ensure first block differs from previous page
-        const firstId = (blocks[0] as HTMLElement).dataset.testid ?? blocks[0].id ?? (blocks[0].textContent ?? '').slice(0, 50);
-        if (!previousFirstId || firstId !== previousFirstId) { resolve(); return; }
+        const fp = getFirstBlockFingerprint();
+        if (!previousFingerprint || fp !== previousFingerprint) { resolve(); return; }
       }
       if (Date.now() - start > timeoutMs) { resolve(); return; }
       setTimeout(check, 400);
@@ -223,13 +232,9 @@ async function startSync() {
 
       if (hasOlder) break;
 
-      const blocks = document.querySelectorAll('[data-testid*="orderGroup"]');
-      const firstId = blocks[0]
-        ? ((blocks[0] as HTMLElement).dataset.testid ?? (blocks[0].textContent ?? '').slice(0, 60))
-        : '';
-
+      const fingerprint = getFirstBlockFingerprint();
       if (!clickNextPage()) { console.log('[WM] no next page button, done'); break; }
-      await waitForOrdersToLoad(firstId, 12000);
+      await waitForOrdersToLoad(fingerprint);
       page++;
     }
 
