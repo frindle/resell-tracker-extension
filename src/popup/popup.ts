@@ -41,10 +41,17 @@ async function triggerSync(platform: 'Amazon' | 'Walmart') {
 
   const scriptFile = platform === 'Amazon' ? 'content/amazon.js' : 'content/walmart.js';
 
-  // Inject content script if not already present (e.g. tab was open before extension load)
-  try {
-    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: [scriptFile] });
-  } catch { /* already injected — ignore */ }
+  // Ping to check if content script is already loaded; inject only if not
+  const alive = await chrome.tabs.sendMessage(tab.id, { type: 'PING' }).catch(() => null);
+  if (!alive) {
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: [scriptFile] });
+    } catch {
+      setStatus(platform, 'Injection failed — refresh the tab', 'fail');
+      setSyncBtn(platform, false);
+      return;
+    }
+  }
 
   chrome.tabs.sendMessage(tab.id, { type: 'START_SYNC', platform }).catch(() => {
     setStatus(platform, 'Injection failed — refresh the tab', 'fail');

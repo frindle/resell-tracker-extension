@@ -195,6 +195,7 @@
       var import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min());
       init_storage();
       init_api();
+      console.log("[WM] content script loaded", location.href);
       function parseMoney(text) {
         return parseFloat(text.replace(/[^0-9.-]/g, "")) || 0;
       }
@@ -206,46 +207,28 @@
         chrome.runtime.sendMessage({ type: "SET_BADGE", text, color }).catch(() => {
         });
       }
-      async function fetchOrderPage(page = 1) {
-        try {
-          const url = `https://www.walmart.com/orders?page=${page}`;
-          const res = await fetch(url, { credentials: "include" });
-          if (!res.ok) return null;
-          const html = await res.text();
-          return new DOMParser().parseFromString(html, "text/html");
-        } catch {
-          return null;
-        }
-      }
-      async function fetchOrderDetail(orderNumber) {
-        try {
-          const url = `https://www.walmart.com/orders/${orderNumber}`;
-          const res = await fetch(url, { credentials: "include" });
-          if (!res.ok) return null;
-          const html = await res.text();
-          return new DOMParser().parseFromString(html, "text/html");
-        } catch {
-          return null;
-        }
-      }
-      function parseOrdersFromDoc(doc, sinceDate) {
+      function scrapeCurrentPage(sinceDate) {
         const orders = [];
         let hasOlder = false;
-        const nextDataEl = doc.getElementById("__NEXT_DATA__");
+        const seen = /* @__PURE__ */ new Set();
+        const nextDataEl = document.getElementById("__NEXT_DATA__");
+        console.log("[WM] __NEXT_DATA__ found:", !!nextDataEl?.textContent, "len:", nextDataEl?.textContent?.length);
         if (nextDataEl?.textContent) {
           try {
             const json = JSON.parse(nextDataEl.textContent);
             const pageProps = json?.props?.pageProps ?? json?.props ?? {};
+            console.log("[WM] pageProps keys:", Object.keys(pageProps).join(","), JSON.stringify(pageProps).slice(0, 300));
             const orderList = pageProps?.initialData?.data?.customer?.orderHistoryData?.orderHistory?.orders ?? pageProps?.orders ?? pageProps?.data?.orders ?? [];
             for (const raw of orderList) {
               const item = raw;
               const orderNumber = String(item.orderNo ?? item.orderId ?? item.id ?? "").replace(/\D/g, "");
-              if (!orderNumber) continue;
+              if (!orderNumber || seen.has(orderNumber)) continue;
+              seen.add(orderNumber);
               const rawDate = String(item.orderDate ?? item.placedDate ?? item.createdDate ?? "");
               if (!rawDate) continue;
               const orderDate = new Date(rawDate);
               if (isNaN(orderDate.getTime())) continue;
-              if (orderDate < sinceDate) {
+              if (orderDate.toISOString().split("T")[0] < sinceDate.toISOString().split("T")[0]) {
                 hasOlder = true;
                 continue;
               }
@@ -268,28 +251,31 @@
                 sourceUrl: `https://www.walmart.com/orders/${orderNumber}`
               });
             }
-            return { orders, hasOlder };
+            if (orders.length > 0 || orderList.length > 0) {
+              return { orders, hasOlder };
+            }
           } catch {
           }
         }
-        const blocks = Array.from(doc.querySelectorAll(
+        const blocks = Array.from(document.querySelectorAll(
           '[data-automation-id*="order-card"], [data-testid*="order"], .order-card, article[class*="order"]'
         ));
+        console.log("[WM] DOM blocks found:", blocks.length, "url:", location.href);
         for (const block of blocks) {
           const orderNumEl = block.querySelector('[data-automation-id*="order-number"], [class*="order-number"], [class*="orderNumber"]');
           const orderNumber = (orderNumEl?.textContent ?? "").replace(/\D/g, "");
-          if (!orderNumber) continue;
+          if (!orderNumber || seen.has(orderNumber)) continue;
+          seen.add(orderNumber);
           const dateEl = block.querySelector('[data-automation-id*="order-date"], [class*="order-date"], time');
           const rawDate = dateEl?.getAttribute("datetime") ?? dateEl?.textContent ?? "";
           const orderDate = new Date(rawDate);
           if (isNaN(orderDate.getTime())) continue;
-          if (orderDate < sinceDate) {
+          if (orderDate.toISOString().split("T")[0] < sinceDate.toISOString().split("T")[0]) {
             hasOlder = true;
             continue;
           }
           const statusEl = block.querySelector('[data-automation-id*="delivery-status"], [class*="status"]');
-          const statusText = (statusEl?.textContent ?? "").toLowerCase();
-          if (/cancel|return|refund/.test(statusText)) continue;
+          if (/cancel|return|refund/.test((statusEl?.textContent ?? "").toLowerCase())) continue;
           const totalEl = block.querySelector('[data-automation-id*="order-total"], [class*="total"]');
           const cost = parseMoney(totalEl?.textContent ?? "0");
           const itemEl = block.querySelector('[data-automation-id*="product-name"], [class*="product-name"]');
@@ -308,18 +294,28 @@
         }
         return { orders, hasOlder };
       }
-      async function enrichWithDetails(orders, onProgress) {
-        for (let i = 0; i < orders.length; i++) {
-          const o = orders[i];
-          onProgress(`Fetching details ${i + 1}/${orders.length}\u2026`);
-          const doc = await fetchOrderDetail(o.orderNumber);
-          if (!doc) continue;
-          const html = doc.documentElement.innerHTML;
-          const addrEl = doc.querySelector('[data-automation-id*="shipping-address"], [class*="shipping-address"]');
-          if (addrEl) {
-            o.shippingAddress = (addrEl.textContent ?? "").replace(/\s+/g, " ").trim();
-          }
-          const numbers = [];
+      function getNextPageUrl() {
+        const nextEl = document.querySelector(
+          '[aria-label="Next page"]:not([disabled]) a, [data-automation-id*="next-page"]:not([disabled]) a, [aria-label="Next page"]:not([disabled])'
+        );
+        if (nextEl?.href) return nextEl.href;
+        const url = new URL(location.href);
+        const currentPage = parseInt(url.searchParams.get("page") ?? "1");
+        const nextBtn = document.querySelector('[aria-label="Next page"]:not([disabled]), [data-automation-id*="next-page"]:not([disabled])');
+        if (nextBtn) {
+          url.searchParams.set("page", String(currentPage + 1));
+          return url.toString();
+        }
+        return null;
+      }
+      async function fetchOrderDetail(orderUrl) {
+        try {
+          const res = await fetch(orderUrl, { credentials: "include" });
+          const html = await res.text();
+          const doc = new DOMParser().parseFromString(html, "text/html");
+          const addrEl = doc.querySelector('[data-automation-id*="shipping-address"], [class*="shipping-address"], [class*="shippingAddress"]');
+          const address = (addrEl?.textContent ?? "").replace(/\s+/g, " ").trim();
+          const numbers = /* @__PURE__ */ new Set();
           const trackPatterns = [
             /trackingNumber["\s:]+["']?([A-Z0-9]{10,25})/g,
             /\b(1Z[A-Z0-9]{16})\b/g,
@@ -327,50 +323,49 @@
           ];
           for (const pat of trackPatterns) {
             let m;
-            while ((m = pat.exec(html)) !== null) {
-              numbers.push(m[1]);
-            }
+            while ((m = pat.exec(html)) !== null) numbers.add(m[1]);
           }
-          o.trackingNumbers = [...new Set(numbers)];
-          await new Promise((r) => setTimeout(r, 400));
+          return { address, tracking: [...numbers] };
+        } catch {
+          return { address: "", tracking: [] };
         }
       }
+      var STATE_KEY = "__resell_wm_sync_state__";
+      function saveState(state) {
+        sessionStorage.setItem(STATE_KEY, JSON.stringify(state));
+      }
+      function loadState() {
+        try {
+          const raw = sessionStorage.getItem(STATE_KEY);
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      }
+      function clearState() {
+        sessionStorage.removeItem(STATE_KEY);
+      }
       var syncing = false;
-      async function sync() {
-        if (syncing) return;
-        syncing = true;
-        const settings = await getSettings();
-        if (!settings.trackerUrl || !settings.userId) {
-          sendMessage({ type: "SYNC_ERROR", platform: "Walmart", error: "Tracker URL or user not configured \u2014 open Settings." });
-          setBadge("!", "#ef4444");
-          syncing = false;
+      async function runSync(state) {
+        const sinceDate = new Date(state.sinceDate);
+        sendMessage({ type: "SYNC_PROGRESS", platform: "Walmart", scraped: state.orders.length, message: `Scraping page ${state.page}\u2026` });
+        const { orders, hasOlder } = scrapeCurrentPage(sinceDate);
+        const seen = new Set(state.orders.map((o) => o.orderNumber));
+        for (const o of orders) {
+          if (!seen.has(o.orderNumber)) {
+            seen.add(o.orderNumber);
+            state.orders.push(o);
+          }
+        }
+        const nextUrl = hasOlder ? null : orders.length > 0 ? getNextPageUrl() : null;
+        if (nextUrl && state.orders.length < 200) {
+          state.page++;
+          saveState(state);
+          window.location.href = nextUrl;
           return;
         }
-        const sinceDate = settings.walmartLastSync ? new Date(settings.walmartLastSync) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1e3);
-        setBadge("\u2026");
-        sendMessage({ type: "SYNC_STARTED", platform: "Walmart" });
-        const allOrders = [];
-        const seen = /* @__PURE__ */ new Set();
-        let page = 1;
-        while (true) {
-          sendMessage({ type: "SYNC_PROGRESS", platform: "Walmart", scraped: 0, message: `Fetching orders page ${page}\u2026` });
-          const doc = await fetchOrderPage(page);
-          if (!doc) break;
-          const { orders, hasOlder } = parseOrdersFromDoc(doc, sinceDate);
-          for (const o of orders) {
-            if (!seen.has(o.orderNumber)) {
-              seen.add(o.orderNumber);
-              allOrders.push(o);
-            }
-          }
-          if (hasOlder) break;
-          if (orders.length === 0) break;
-          if (page >= 15) break;
-          const nextLink = doc.querySelector('[aria-label="Next page"], [data-automation-id*="next-page"]:not([disabled])');
-          if (!nextLink) break;
-          page++;
-          await new Promise((r) => setTimeout(r, 500));
-        }
+        clearState();
+        const allOrders = state.orders;
         if (allOrders.length === 0) {
           setBadge("\u2014");
           sendMessage({ type: "SYNC_DONE", result: { platform: "Walmart", scraped: 0, imported: 0, updated: 0 } });
@@ -378,12 +373,15 @@
           return;
         }
         sendMessage({ type: "SYNC_PROGRESS", platform: "Walmart", scraped: allOrders.length, message: `Found ${allOrders.length} orders, fetching details\u2026` });
-        await enrichWithDetails(
-          allOrders,
-          (msg) => sendMessage({ type: "SYNC_PROGRESS", platform: "Walmart", scraped: allOrders.length, message: msg })
-        );
+        for (let i = 0; i < allOrders.length; i++) {
+          sendMessage({ type: "SYNC_PROGRESS", platform: "Walmart", scraped: allOrders.length, message: `Fetching details ${i + 1}/${allOrders.length}\u2026` });
+          const detail = await fetchOrderDetail(allOrders[i].sourceUrl);
+          allOrders[i].shippingAddress = detail.address;
+          allOrders[i].trackingNumbers = detail.tracking;
+          await new Promise((r) => setTimeout(r, 400));
+        }
         try {
-          const result = await pushOrders(settings.trackerUrl, settings.apiKey, settings.userId, allOrders);
+          const result = await pushOrders(state.trackerUrl, state.apiKey, state.userId, allOrders);
           await setLastSync("walmart", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
           setBadge(`+${result.imported}`, "#22c55e");
           sendMessage({ type: "SYNC_DONE", result: { platform: "Walmart", scraped: allOrders.length, ...result } });
@@ -393,8 +391,59 @@
         }
         syncing = false;
       }
-      chrome.runtime.onMessage.addListener((msg) => {
-        if (msg.type === "START_SYNC" && msg.platform === "Walmart") sync();
+      async function startSync() {
+        console.log("[WM] startSync called, syncing:", syncing, "url:", location.href);
+        if (syncing) return;
+        syncing = true;
+        const settings = await getSettings();
+        console.log("[WM] settings:", JSON.stringify({ trackerUrl: !!settings.trackerUrl, userId: settings.userId, walmartLastSync: settings.walmartLastSync }));
+        if (!settings.trackerUrl || !settings.userId) {
+          sendMessage({ type: "SYNC_ERROR", platform: "Walmart", error: "Tracker URL or user not configured \u2014 open Settings." });
+          setBadge("!", "#ef4444");
+          syncing = false;
+          return;
+        }
+        const sinceDate = settings.walmartLastSync ? new Date(settings.walmartLastSync) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1e3);
+        setBadge("\u2026");
+        sendMessage({ type: "SYNC_STARTED", platform: "Walmart" });
+        if (!location.pathname.includes("/orders") && !location.pathname.includes("/account/mypurchases")) {
+          const state2 = {
+            sinceDate: sinceDate.toISOString(),
+            orders: [],
+            trackerUrl: settings.trackerUrl,
+            apiKey: settings.apiKey ?? "",
+            userId: settings.userId,
+            page: 1
+          };
+          saveState(state2);
+          window.location.href = "https://www.walmart.com/orders";
+          return;
+        }
+        const state = {
+          sinceDate: sinceDate.toISOString(),
+          orders: [],
+          trackerUrl: settings.trackerUrl,
+          apiKey: settings.apiKey ?? "",
+          userId: settings.userId,
+          page: 1
+        };
+        saveState(state);
+        await runSync(state);
+      }
+      (async () => {
+        const state = loadState();
+        if (state) {
+          syncing = true;
+          sendMessage({ type: "SYNC_STARTED", platform: "Walmart" });
+          await runSync(state);
+        }
+      })();
+      chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+        if (msg.type === "PING") {
+          sendResponse("ok");
+          return;
+        }
+        if (msg.type === "START_SYNC" && msg.platform === "Walmart") startSync();
       });
     }
   });

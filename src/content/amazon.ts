@@ -58,7 +58,8 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
 
     const orderDate = new Date(dateMatch[1]);
     if (isNaN(orderDate.getTime())) continue;
-    if (orderDate < sinceDate) { hasOlder = true; continue; }
+    // Compare date-only strings to avoid timezone/time-of-day issues
+    if (orderDate.toISOString().split('T')[0] < sinceDate.toISOString().split('T')[0]) { hasOlder = true; continue; }
 
     if (/\b(cancelled|canceled|refunded|returned)\b/i.test(cardText)) continue;
 
@@ -287,6 +288,7 @@ async function startSync() {
   }
 })();
 
-chrome.runtime.onMessage.addListener((msg) => {
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === 'PING') { sendResponse('ok'); return; }
   if (msg.type === 'START_SYNC' && msg.platform === 'Amazon') startSync();
 });

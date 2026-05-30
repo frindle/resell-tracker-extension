@@ -6,8 +6,8 @@ const watch = process.argv.includes('--watch');
 const target = process.argv.includes('--firefox') ? 'firefox' : 'chrome';
 const outdir = target === 'firefox' ? 'dist-firefox' : 'dist';
 
-const entries = {
-  'background': 'src/background/index.ts',
+const backgroundEntry = { 'background': 'src/background/index.ts' };
+const contentEntries = {
   'content/amazon': 'src/content/amazon.ts',
   'content/walmart': 'src/content/walmart.ts',
   'options/options': 'src/options/options.ts',
@@ -16,19 +16,19 @@ const entries = {
 
 const polyfillPath = path.resolve('node_modules/webextension-polyfill/dist/browser-polyfill.min.js');
 
-const ctx = esbuild.context({
-  entryPoints: entries,
+const commonOptions = {
   bundle: true,
   outdir,
   format: 'iife',
   target: 'es2020',
   sourcemap: false,
-  // Inject the polyfill into every bundle so chrome.* APIs work in Firefox too
-  inject: [polyfillPath],
-  define: {
-    'process.env.TARGET': JSON.stringify(target),
-  },
-});
+  define: { 'process.env.TARGET': JSON.stringify(target) },
+};
+
+// Background service worker must NOT include the polyfill — it crashes Chrome MV3 service workers
+const ctxBackground = esbuild.context({ ...commonOptions, entryPoints: backgroundEntry });
+// Content/popup scripts get the polyfill for Firefox compatibility
+const ctxContent = esbuild.context({ ...commonOptions, entryPoints: contentEntries, inject: [polyfillPath] });
 
 function buildManifest(target) {
   const base = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
@@ -48,8 +48,8 @@ function buildManifest(target) {
 async function build() {
   fs.mkdirSync(outdir, { recursive: true });
 
-  const c = await ctx;
-  await c.rebuild();
+  const [bg, content] = await Promise.all([ctxBackground, ctxContent]);
+  await Promise.all([bg.rebuild(), content.rebuild()]);
 
   // Write manifest (browser-specific)
   fs.writeFileSync(path.join(outdir, 'manifest.json'), buildManifest(target));
@@ -70,10 +70,10 @@ async function build() {
   console.log(`Build complete → ${outdir}/`);
 
   if (watch) {
-    await c.watch();
+    await Promise.all([bg.watch(), content.watch()]);
     console.log('Watching for changes…');
   } else {
-    await c.dispose();
+    await Promise.all([bg.dispose(), content.dispose()]);
   }
 }
 

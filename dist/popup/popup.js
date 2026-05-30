@@ -209,9 +209,15 @@
         setSyncBtn(platform, true);
         setStatus(platform, "syncing\u2026", "syncing");
         const scriptFile = platform === "Amazon" ? "content/amazon.js" : "content/walmart.js";
-        try {
-          await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: [scriptFile] });
-        } catch {
+        const alive = await chrome.tabs.sendMessage(tab.id, { type: "PING" }).catch(() => null);
+        if (!alive) {
+          try {
+            await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: [scriptFile] });
+          } catch {
+            setStatus(platform, "Injection failed \u2014 refresh the tab", "fail");
+            setSyncBtn(platform, false);
+            return;
+          }
         }
         chrome.tabs.sendMessage(tab.id, { type: "START_SYNC", platform }).catch(() => {
           setStatus(platform, "Injection failed \u2014 refresh the tab", "fail");

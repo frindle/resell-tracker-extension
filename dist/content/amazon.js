@@ -232,7 +232,7 @@
           if (!dateMatch) continue;
           const orderDate = new Date(dateMatch[1]);
           if (isNaN(orderDate.getTime())) continue;
-          if (orderDate < sinceDate) {
+          if (orderDate.toISOString().split("T")[0] < sinceDate.toISOString().split("T")[0]) {
             hasOlder = true;
             continue;
           }
@@ -390,7 +390,11 @@
           await runSync(state);
         }
       })();
-      chrome.runtime.onMessage.addListener((msg) => {
+      chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+        if (msg.type === "PING") {
+          sendResponse("ok");
+          return;
+        }
         if (msg.type === "START_SYNC" && msg.platform === "Amazon") startSync();
       });
     }
