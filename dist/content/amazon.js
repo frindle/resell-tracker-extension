@@ -221,6 +221,9 @@
           const end = Math.min(pageText.length, m.index + 2e3);
           const ctx = pageText.slice(start, end);
           const ctxText = ctx.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+          if (seen.size === 1) {
+            console.log("[Amazon] first order context (text):", ctxText.slice(0, 800));
+          }
           const dateMatch = ctxText.match(/(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}/i) ?? ctxText.match(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+\d{4}/i) ?? ctx.match(/"orderDate"\s*:\s*"(\d{4}-\d{2}-\d{2})/) ?? ctx.match(/(\d{4}-\d{2}-\d{2})/);
           if (!dateMatch) continue;
           const orderDate = new Date(dateMatch[1] ?? dateMatch[0]);

@@ -40,6 +40,10 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
     const ctx = pageText.slice(start, end);
     const ctxText = ctx.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
+    if (seen.size === 1) {
+      console.log('[Amazon] first order context (text):', ctxText.slice(0, 800));
+    }
+
     // Date patterns
     const dateMatch =
       ctxText.match(/(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}/i) ??
