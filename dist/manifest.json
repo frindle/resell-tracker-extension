@@ -22,7 +22,9 @@
       "matches": [
         "https://www.amazon.com/gp/css/order-history*",
         "https://www.amazon.com/your-orders/orders*",
-        "https://www.amazon.com/gp/your-account/order-history*"
+        "https://www.amazon.com/gp/your-account/order-history*",
+        "https://www.amazon.com/gp/your-account/order-details*",
+        "https://www.amazon.com/orders*"
       ],
       "js": ["content/amazon.js"],
       "run_at": "document_idle"
