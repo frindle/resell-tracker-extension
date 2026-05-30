@@ -4,7 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "node build.js",
+    "build:firefox": "node build.js --firefox",
+    "build:all": "node build.js && node build.js --firefox",
+    "package:firefox": "node build.js --firefox && cd dist-firefox && zip -r ../resell-tracker-sync-firefox.zip .",
+    "watch": "node build.js --watch",
+    "watch:firefox": "node build.js --firefox --watch"
   },
   "keywords": [],
   "author": "",

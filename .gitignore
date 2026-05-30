@@ -1,3 +1,4 @@
 node_modules/
 *.zip
 .memsearch/
+dist-firefox/

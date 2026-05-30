@@ -23,14 +23,18 @@
       "matches": [
         "https://www.amazon.com/*"
       ],
-      "js": ["content/amazon.js"],
+      "js": [
+        "content/amazon.js"
+      ],
       "run_at": "document_idle"
     },
     {
       "matches": [
         "https://www.walmart.com/*"
       ],
-      "js": ["content/walmart.js"],
+      "js": [
+        "content/walmart.js"
+      ],
       "run_at": "document_idle"
     }
   ],
