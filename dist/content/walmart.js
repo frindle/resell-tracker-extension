@@ -242,6 +242,8 @@
             }
           }
           if (hasOlder) break;
+          if (orders.length === 0) break;
+          if (page >= 15) break;
           const nextLink = doc.querySelector('[aria-label="Next page"], [data-automation-id*="next-page"]:not([disabled])');
           if (!nextLink) break;
           page++;

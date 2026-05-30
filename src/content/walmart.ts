@@ -216,8 +216,9 @@ async function sync() {
     }
 
     if (hasOlder) break;
+    if (orders.length === 0) break; // empty page = end of results
+    if (page >= 15) break; // safety limit
 
-    // Check if there's a next page
     const nextLink = doc.querySelector('[aria-label="Next page"], [data-automation-id*="next-page"]:not([disabled])');
     if (!nextLink) break;
     page++;
