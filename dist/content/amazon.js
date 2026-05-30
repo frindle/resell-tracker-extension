@@ -219,9 +219,13 @@
           const orderId = idMatch[1];
           if (seen.has(orderId)) continue;
           seen.add(orderId);
-          const card = link.closest(
-            '[class*="order"],[data-component*="order"],[data-order-id],[id*="order"],[data-test*="order"],li,article'
-          ) ?? link.parentElement?.closest("div") ?? link.parentElement;
+          let card = link;
+          for (let i = 0; i < 12; i++) {
+            card = card?.parentElement ?? null;
+            if (!card) break;
+            const t = (card.textContent ?? "").trim();
+            if (t.length > 200 && /\$[\d,]+/.test(t) && /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d{4})\b/.test(t)) break;
+          }
           if (!card) continue;
           const cardText = (card.textContent ?? "").replace(/\s+/g, " ");
           if (orders.length === 0) {

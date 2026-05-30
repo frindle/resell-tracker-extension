@@ -36,10 +36,15 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
     if (seen.has(orderId)) continue;
     seen.add(orderId);
 
-    // Walk up to find the order card container
-    const card = link.closest(
-      '[class*="order"],[data-component*="order"],[data-order-id],[id*="order"],[data-test*="order"],li,article'
-    ) ?? link.parentElement?.closest('div') ?? link.parentElement;
+    // Walk up until we find a container with substantial content (the full order card)
+    let card: Element | null = link;
+    for (let i = 0; i < 12; i++) {
+      card = card?.parentElement ?? null;
+      if (!card) break;
+      const t = (card.textContent ?? '').trim();
+      // Stop when we find a block that has a dollar amount and a date — that's the order card
+      if (t.length > 200 && /\$[\d,]+/.test(t) && /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d{4})\b/.test(t)) break;
+    }
 
     if (!card) continue;
     const cardText = (card.textContent ?? '').replace(/\s+/g, ' ');
