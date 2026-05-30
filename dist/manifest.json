@@ -10,7 +10,9 @@
   ],
   "host_permissions": [
     "https://www.amazon.com/*",
-    "https://www.walmart.com/*"
+    "https://www.walmart.com/*",
+    "http://*/*",
+    "https://*/*"
   ],
   "background": {
     "service_worker": "background.js"
