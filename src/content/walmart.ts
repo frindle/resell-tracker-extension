@@ -184,10 +184,29 @@ function clearState() {
 
 let syncing = false;
 
+function waitForOrders(timeoutMs = 8000): Promise<void> {
+  return new Promise(resolve => {
+    const start = Date.now();
+    function check() {
+      const blocks = document.querySelectorAll('[data-testid*="orderGroup"]');
+      // Wait until blocks appear AND have meaningful text content (not just skeleton)
+      if (blocks.length > 0 && (blocks[0].textContent ?? '').length > 100) {
+        resolve();
+        return;
+      }
+      if (Date.now() - start > timeoutMs) { resolve(); return; }
+      setTimeout(check, 300);
+    }
+    check();
+  });
+}
+
 async function runSync(state: SyncState) {
   const sinceDate = new Date(state.sinceDate);
 
   sendMessage({ type: 'SYNC_PROGRESS', platform: 'Walmart', scraped: state.orders.length, message: `Scraping page ${state.page}…` });
+
+  await waitForOrders();
 
   const { orders, hasOlder } = scrapeCurrentPage(sinceDate);
   const seen = new Set(state.orders.map(o => o.orderNumber));

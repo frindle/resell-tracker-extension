@@ -320,9 +320,28 @@
         sessionStorage.removeItem(STATE_KEY);
       }
       var syncing = false;
+      function waitForOrders(timeoutMs = 8e3) {
+        return new Promise((resolve) => {
+          const start = Date.now();
+          function check() {
+            const blocks = document.querySelectorAll('[data-testid*="orderGroup"]');
+            if (blocks.length > 0 && (blocks[0].textContent ?? "").length > 100) {
+              resolve();
+              return;
+            }
+            if (Date.now() - start > timeoutMs) {
+              resolve();
+              return;
+            }
+            setTimeout(check, 300);
+          }
+          check();
+        });
+      }
       async function runSync(state) {
         const sinceDate = new Date(state.sinceDate);
         sendMessage({ type: "SYNC_PROGRESS", platform: "Walmart", scraped: state.orders.length, message: `Scraping page ${state.page}\u2026` });
+        await waitForOrders();
         const { orders, hasOlder } = scrapeCurrentPage(sinceDate);
         const seen = new Set(state.orders.map((o) => o.orderNumber));
         for (const o of orders) {
