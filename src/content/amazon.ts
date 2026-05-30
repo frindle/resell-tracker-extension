@@ -24,8 +24,10 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
   let hasOlder = false;
   const seen = new Set<string>();
 
-  // Find all order ID occurrences in the page text
-  const pageText = document.body.innerHTML;
+  // Strip script/style content so order IDs in analytics JS don't confuse us
+  const pageText = document.body.innerHTML
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
   const orderIdPattern = /\b(\d{3}-\d{7}-\d{7})\b/g;
   let m: RegExpExecArray | null;
 

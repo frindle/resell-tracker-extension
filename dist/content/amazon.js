@@ -210,7 +210,7 @@
         const orders = [];
         let hasOlder = false;
         const seen = /* @__PURE__ */ new Set();
-        const pageText = document.body.innerHTML;
+        const pageText = document.body.innerHTML.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "");
         const orderIdPattern = /\b(\d{3}-\d{7}-\d{7})\b/g;
         let m;
         while ((m = orderIdPattern.exec(pageText)) !== null) {
