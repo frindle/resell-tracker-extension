@@ -218,7 +218,10 @@
             const json = JSON.parse(nextDataEl.textContent);
             const pageProps = json?.props?.pageProps ?? json?.props ?? {};
             console.log("[WM] pageProps keys:", Object.keys(pageProps).join(","), JSON.stringify(pageProps).slice(0, 300));
-            const orderList = pageProps?.initialData?.data?.customer?.orderHistoryData?.orderHistory?.orders ?? pageProps?.orders ?? pageProps?.data?.orders ?? [];
+            const purchaseHistory = pageProps?.phRedesignInitialData?.data?.purchaseHistory;
+            console.log("[WM] purchaseHistory keys:", purchaseHistory ? Object.keys(purchaseHistory).join(",") : "NOT FOUND");
+            console.log("[WM] purchaseHistory sample:", JSON.stringify(purchaseHistory).slice(0, 500));
+            const orderList = purchaseHistory?.orders ?? purchaseHistory?.orderGroups ?? purchaseHistory?.items ?? pageProps?.initialData?.data?.customer?.orderHistoryData?.orderHistory?.orders ?? pageProps?.orders ?? pageProps?.data?.orders ?? [];
             for (const raw of orderList) {
               const item = raw;
               const orderNumber = String(item.orderNo ?? item.orderId ?? item.id ?? "").replace(/\D/g, "");
@@ -261,6 +264,7 @@
           '[data-automation-id*="order-card"], [data-testid*="order"], .order-card, article[class*="order"]'
         ));
         console.log("[WM] DOM blocks found:", blocks.length, "url:", location.href);
+        if (blocks[0]) console.log("[WM] first block HTML:", blocks[0].innerHTML.slice(0, 600));
         for (const block of blocks) {
           const orderNumEl = block.querySelector('[data-automation-id*="order-number"], [class*="order-number"], [class*="orderNumber"]');
           const orderNumber = (orderNumEl?.textContent ?? "").replace(/\D/g, "");

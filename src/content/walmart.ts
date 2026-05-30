@@ -38,7 +38,7 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
       console.log('[WM] purchaseHistory keys:', purchaseHistory ? Object.keys(purchaseHistory).join(',') : 'NOT FOUND');
       console.log('[WM] purchaseHistory sample:', JSON.stringify(purchaseHistory).slice(0, 500));
       const orderList: unknown[] =
-        (purchaseHistory?.orders ?? purchaseHistory?.orderGroups ?? purchaseHistory?.items ?? []) as unknown[] ||
+        (purchaseHistory?.orders ?? purchaseHistory?.orderGroups ?? purchaseHistory?.items) as unknown[] ??
         pageProps?.initialData?.data?.customer?.orderHistoryData?.orderHistory?.orders ??
         pageProps?.orders ??
         pageProps?.data?.orders ??
