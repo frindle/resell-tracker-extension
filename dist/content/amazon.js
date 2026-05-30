@@ -210,33 +210,39 @@
         const orders = [];
         let hasOlder = false;
         const seen = /* @__PURE__ */ new Set();
-        const pageText = document.body.innerHTML.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "");
-        const orderIdPattern = /\b(\d{3}-\d{7}-\d{7})\b/g;
-        let m;
-        while ((m = orderIdPattern.exec(pageText)) !== null) {
-          const orderId = m[1];
+        const orderLinks = Array.from(document.querySelectorAll(
+          'a[href*="orderID="], a[href*="orderId="], a[href*="order-details"]'
+        ));
+        for (const link of orderLinks) {
+          const idMatch = link.href.match(/[oO]rder[Ii][Dd]=([0-9A-Z-]{10,})/);
+          if (!idMatch) continue;
+          const orderId = idMatch[1];
           if (seen.has(orderId)) continue;
           seen.add(orderId);
-          const start = Math.max(0, m.index - 2e3);
-          const end = Math.min(pageText.length, m.index + 2e3);
-          const ctx = pageText.slice(start, end);
-          const ctxText = ctx.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
-          if (seen.size === 1) {
-            console.log("[Amazon] first order context (text):", ctxText.slice(0, 800));
+          const card = link.closest(
+            '[class*="order"],[data-component*="order"],[data-order-id],[id*="order"],[data-test*="order"],li,article'
+          ) ?? link.parentElement?.closest("div") ?? link.parentElement;
+          if (!card) continue;
+          const cardText = (card.textContent ?? "").replace(/\s+/g, " ");
+          if (orders.length === 0) {
+            console.log("[Amazon] first card text:", cardText.slice(0, 400));
           }
-          const dateMatch = ctxText.match(/(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}/i) ?? ctxText.match(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+\d{4}/i) ?? ctx.match(/"orderDate"\s*:\s*"(\d{4}-\d{2}-\d{2})/) ?? ctx.match(/(\d{4}-\d{2}-\d{2})/);
-          if (!dateMatch) continue;
+          const dateMatch = cardText.match(/(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}/i) ?? cardText.match(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+\d{4}/i) ?? cardText.match(/(\d{4}-\d{2}-\d{2})/);
+          if (!dateMatch) {
+            if (orders.length === 0) console.log("[Amazon] no date found in card, cardText sample:", cardText.slice(0, 200));
+            continue;
+          }
           const orderDate = new Date(dateMatch[1] ?? dateMatch[0]);
           if (isNaN(orderDate.getTime())) continue;
           if (orderDate < sinceDate) {
             hasOlder = true;
             continue;
           }
-          if (/\b(cancelled|canceled|refunded|returned)\b/i.test(ctxText)) continue;
-          const totalMatch = ctxText.match(/(?:order total|grand total)[^$\d]*\$?([\d,]+\.?\d*)/i) ?? ctxText.match(/\$([\d,]+\.\d{2})/);
+          if (/\b(cancelled|canceled|refunded|returned)\b/i.test(cardText)) continue;
+          const totalMatch = cardText.match(/(?:order total|grand total)[^$\d]*\$?([\d,]+\.?\d*)/i) ?? cardText.match(/\$([\d,]+\.\d{2})/);
           const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
-          const titleMatch = ctx.match(/class="[^"]*product-title[^"]*"[^>]*>([^<]{5,120})</) ?? ctx.match(/"title"\s*:\s*"([^"]{5,120})"/) ?? ctx.match(/alt="([^"]{5,120})"/);
-          const itemDescription = titleMatch ? titleMatch[1].trim() : "";
+          const titleEl = card.querySelector('[class*="product-title"],[class*="item-title"],a[href*="/dp/"]');
+          const itemDescription = (titleEl?.textContent ?? "").trim().slice(0, 120);
           orders.push({
             platform: "Amazon",
             orderNumber: orderId,
