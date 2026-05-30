@@ -331,7 +331,8 @@
             state.orders.push(o);
           }
         }
-        const nextUrl = hasOlder ? null : orders.length > 0 ? getNextPageUrl() : null;
+        const hadBlocks = document.querySelectorAll('[data-testid*="orderGroup"]').length > 0;
+        const nextUrl = hasOlder ? null : hadBlocks ? getNextPageUrl() : null;
         if (nextUrl && state.orders.length < 200 && state.page < 20) {
           state.page++;
           saveState(state);

@@ -195,7 +195,9 @@ async function runSync(state: SyncState) {
     if (!seen.has(o.orderNumber)) { seen.add(o.orderNumber); state.orders.push(o); }
   }
 
-  const nextUrl = hasOlder ? null : (orders.length > 0 ? getNextPageUrl() : null);
+  // Paginate if there were blocks on this page (even if all were cancelled/skipped)
+  const hadBlocks = document.querySelectorAll('[data-testid*="orderGroup"]').length > 0;
+  const nextUrl = hasOlder ? null : (hadBlocks ? getNextPageUrl() : null);
 
   if (nextUrl && state.orders.length < 200 && state.page < 20) {
     state.page++;
