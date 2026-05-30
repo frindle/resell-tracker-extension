@@ -26,92 +26,49 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
   let hasOlder = false;
   const seen = new Set<string>();
 
-  // Try __NEXT_DATA__ first (populated in the live DOM, not in fetch shell)
-  const nextDataEl = document.getElementById('__NEXT_DATA__');
-  console.log('[WM] __NEXT_DATA__ found:', !!nextDataEl?.textContent, 'len:', nextDataEl?.textContent?.length);
-  if (nextDataEl?.textContent) {
-    try {
-      const json = JSON.parse(nextDataEl.textContent);
-      const pageProps = json?.props?.pageProps ?? json?.props ?? {};
-      console.log('[WM] pageProps keys:', Object.keys(pageProps).join(','), JSON.stringify(pageProps).slice(0, 300));
-      const purchaseHistory = pageProps?.phRedesignInitialData?.data?.purchaseHistory as Record<string, unknown> | undefined;
-      console.log('[WM] purchaseHistory keys:', purchaseHistory ? Object.keys(purchaseHistory).join(',') : 'NOT FOUND');
-      console.log('[WM] purchaseHistory sample:', JSON.stringify(purchaseHistory).slice(0, 500));
-      const orderList: unknown[] =
-        (purchaseHistory?.orders ?? purchaseHistory?.orderGroups ?? purchaseHistory?.items) as unknown[] ??
-        pageProps?.initialData?.data?.customer?.orderHistoryData?.orderHistory?.orders ??
-        pageProps?.orders ??
-        pageProps?.data?.orders ??
-        [];
-
-      for (const raw of orderList) {
-        const item = raw as Record<string, unknown>;
-        const orderNumber = String(item.orderNo ?? item.orderId ?? item.id ?? '').replace(/\D/g, '');
-        if (!orderNumber || seen.has(orderNumber)) continue;
-        seen.add(orderNumber);
-
-        const rawDate = String(item.orderDate ?? item.placedDate ?? item.createdDate ?? '');
-        if (!rawDate) continue;
-        const orderDate = new Date(rawDate);
-        if (isNaN(orderDate.getTime())) continue;
-        if (orderDate.toISOString().split('T')[0] < sinceDate.toISOString().split('T')[0]) { hasOlder = true; continue; }
-
-        const statusRaw = String(item.status ?? item.orderStatus ?? '').toLowerCase();
-        if (/cancel|return|refund/.test(statusRaw)) continue;
-
-        const costRaw = item.orderTotal ?? item.total ?? item.grandTotal ?? 0;
-        const cost = typeof costRaw === 'number' ? costRaw : parseMoney(String(costRaw));
-
-        const lineItems = (item.lineItems ?? item.items ?? []) as Record<string, unknown>[];
-        const firstItem = lineItems[0];
-        const itemDescription = String(firstItem?.name ?? firstItem?.title ?? firstItem?.productName ?? '').slice(0, 120);
-
-        orders.push({
-          platform: 'Walmart',
-          orderNumber,
-          orderDate: orderDate.toISOString().split('T')[0],
-          itemDescription,
-          cost,
-          shippingCost: 0,
-          shippingAddress: '',
-          trackingNumbers: [],
-          sourceUrl: `https://www.walmart.com/orders/${orderNumber}`,
-        });
-      }
-
-      if (orders.length > 0 || orderList.length > 0) {
-        return { orders, hasOlder };
-      }
-      // If orderList was empty, fall through to DOM parsing
-    } catch { /* fall through */ }
-  }
-
-  // DOM fallback — read rendered order cards
+  // __NEXT_DATA__ on walmart.com is a static shell — orders are client-rendered.
+  // Read the live DOM directly.
   const blocks = Array.from(document.querySelectorAll(
     '[data-automation-id*="order-card"], [data-testid*="order"], .order-card, article[class*="order"]'
   ));
   console.log('[WM] DOM blocks found:', blocks.length, 'url:', location.href);
-  if (blocks[0]) console.log('[WM] first block HTML:', blocks[0].innerHTML.slice(0, 600));
+  if (blocks[0]) console.log('[WM] first block HTML:', blocks[0].innerHTML.slice(0, 800));
 
   for (const block of blocks) {
-    const orderNumEl = block.querySelector('[data-automation-id*="order-number"], [class*="order-number"], [class*="orderNumber"]');
-    const orderNumber = (orderNumEl?.textContent ?? '').replace(/\D/g, '');
+    // Order number — try data attrs first, then text containing order number pattern
+    const orderNumEl = block.querySelector(
+      '[data-automation-id*="order-number"], [class*="order-number"], [class*="orderNumber"], [data-order-id]'
+    );
+    let orderNumber = (orderNumEl?.textContent ?? orderNumEl?.getAttribute('data-order-id') ?? '').replace(/\D/g, '');
+    if (!orderNumber) {
+      // Scan all text for a Walmart order number pattern (13+ digits)
+      const text = block.textContent ?? '';
+      const m = text.match(/\b(\d{13,20})\b/);
+      if (m) orderNumber = m[1];
+    }
     if (!orderNumber || seen.has(orderNumber)) continue;
     seen.add(orderNumber);
 
-    const dateEl = block.querySelector('[data-automation-id*="order-date"], [class*="order-date"], time');
+    // Date
+    const dateEl = block.querySelector('[data-automation-id*="order-date"], [class*="order-date"], [class*="orderDate"], time');
     const rawDate = dateEl?.getAttribute('datetime') ?? dateEl?.textContent ?? '';
     const orderDate = new Date(rawDate);
-    if (isNaN(orderDate.getTime())) continue;
+    if (isNaN(orderDate.getTime())) {
+      console.log('[WM] skipping order', orderNumber, '- bad date:', rawDate);
+      continue;
+    }
     if (orderDate.toISOString().split('T')[0] < sinceDate.toISOString().split('T')[0]) { hasOlder = true; continue; }
 
-    const statusEl = block.querySelector('[data-automation-id*="delivery-status"], [class*="status"]');
+    // Status
+    const statusEl = block.querySelector('[data-automation-id*="delivery-status"], [data-automation-id*="order-status"], [class*="status"]');
     if (/cancel|return|refund/.test((statusEl?.textContent ?? '').toLowerCase())) continue;
 
-    const totalEl = block.querySelector('[data-automation-id*="order-total"], [class*="total"]');
+    // Total
+    const totalEl = block.querySelector('[data-automation-id*="order-total"], [class*="order-total"], [class*="orderTotal"]');
     const cost = parseMoney(totalEl?.textContent ?? '0');
 
-    const itemEl = block.querySelector('[data-automation-id*="product-name"], [class*="product-name"]');
+    // Item description
+    const itemEl = block.querySelector('[data-automation-id*="product-title"], [class*="product-title"], [class*="item-title"], [class*="itemTitle"]');
     const itemDescription = (itemEl?.textContent ?? '').trim().slice(0, 120);
 
     orders.push({
@@ -127,6 +84,7 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
     });
   }
 
+  console.log('[WM] scraped orders this page:', orders.length, 'hasOlder:', hasOlder);
   return { orders, hasOlder };
 }
 
@@ -227,7 +185,7 @@ async function runSync(state: SyncState) {
 
   const nextUrl = hasOlder ? null : (orders.length > 0 ? getNextPageUrl() : null);
 
-  if (nextUrl && state.orders.length < 200) {
+  if (nextUrl && state.orders.length < 200 && state.page < 20) {
     state.page++;
     saveState(state);
     window.location.href = nextUrl;
