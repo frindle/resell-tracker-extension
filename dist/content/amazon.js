@@ -118,6 +118,9 @@
           const orderDate = parseDate(rawDate);
           if (!orderDate) return;
           if (new Date(orderDate) < sinceDate) return;
+          const statusEl = block.querySelector('.a-color-error, [class*="order-status"], .shipment-status');
+          const statusText = (statusEl?.textContent ?? block.textContent ?? "").toLowerCase();
+          if (/cancelled|canceled|returned|refunded/.test(statusText)) return;
           const totalEl = block.querySelector(".a-color-price, .grand-total-price");
           const cost = parseMoney(totalEl?.textContent ?? "0");
           const itemEl = block.querySelector('.yohtmlc-product-title, .a-link-normal[href*="/dp/"]');

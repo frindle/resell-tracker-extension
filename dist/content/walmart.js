@@ -124,6 +124,9 @@
           const orderDate = parseDate(dateEl?.textContent ?? dateEl?.getAttribute("datetime") ?? "");
           if (!orderDate) return;
           if (new Date(orderDate) < sinceDate) return;
+          const statusEl = block.querySelector('[data-automation-id*="delivery-status"], [class*="delivery-status"], [class*="order-status"]');
+          const statusText = (statusEl?.textContent ?? "").toLowerCase();
+          if (/cancelled|canceled|returned|refunded/.test(statusText)) return;
           const totalEl = block.querySelector('[data-automation-id*="order-total"], [class*="total"]');
           const cost = parseMoney(totalEl?.textContent ?? "0");
           const itemEl = block.querySelector('[data-automation-id*="product-name"], [class*="product-name"], [class*="item-name"]');

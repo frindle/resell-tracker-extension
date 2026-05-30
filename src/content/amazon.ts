@@ -79,6 +79,11 @@ function scrapeOrdersFromPage(sinceDate: Date): ScrapedOrder[] {
     // Skip if before sinceDate
     if (new Date(orderDate) < sinceDate) return;
 
+    // Skip cancelled or returned orders
+    const statusEl = block.querySelector('.a-color-error, [class*="order-status"], .shipment-status');
+    const statusText = (statusEl?.textContent ?? block.textContent ?? '').toLowerCase();
+    if (/cancelled|canceled|returned|refunded/.test(statusText)) return;
+
     // Total
     const totalEl = block.querySelector('.a-color-price, .grand-total-price');
     const cost = parseMoney(totalEl?.textContent ?? '0');
