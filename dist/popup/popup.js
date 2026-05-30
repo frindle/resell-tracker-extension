@@ -47,14 +47,30 @@
       }
       async function triggerSync(platform) {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!tab?.id) {
+        if (!tab?.id || !tab.url) {
           setStatus(platform, "No active tab", "fail");
+          return;
+        }
+        const expectedHost = platform === "Amazon" ? "www.amazon.com" : "www.walmart.com";
+        try {
+          const host = new URL(tab.url).hostname;
+          if (host !== expectedHost) {
+            setStatus(platform, `Open ${expectedHost} first`, "fail");
+            return;
+          }
+        } catch {
+          setStatus(platform, "Invalid tab URL", "fail");
           return;
         }
         setSyncBtn(platform, true);
         setStatus(platform, "syncing\u2026", "syncing");
+        const scriptFile = platform === "Amazon" ? "content/amazon.js" : "content/walmart.js";
+        try {
+          await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: [scriptFile] });
+        } catch {
+        }
         chrome.tabs.sendMessage(tab.id, { type: "START_SYNC", platform }).catch(() => {
-          setStatus(platform, "Not on orders page", "fail");
+          setStatus(platform, "Injection failed \u2014 refresh the tab", "fail");
           setSyncBtn(platform, false);
         });
       }

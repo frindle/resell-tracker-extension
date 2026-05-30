@@ -19,14 +19,35 @@ function setSyncBtn(platform: 'Amazon' | 'Walmart', disabled: boolean) {
 
 async function triggerSync(platform: 'Amazon' | 'Walmart') {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) {
+  if (!tab?.id || !tab.url) {
     setStatus(platform, 'No active tab', 'fail');
     return;
   }
+
+  const expectedHost = platform === 'Amazon' ? 'www.amazon.com' : 'www.walmart.com';
+  try {
+    const host = new URL(tab.url).hostname;
+    if (host !== expectedHost) {
+      setStatus(platform, `Open ${expectedHost} first`, 'fail');
+      return;
+    }
+  } catch {
+    setStatus(platform, 'Invalid tab URL', 'fail');
+    return;
+  }
+
   setSyncBtn(platform, true);
   setStatus(platform, 'syncing…', 'syncing');
+
+  const scriptFile = platform === 'Amazon' ? 'content/amazon.js' : 'content/walmart.js';
+
+  // Inject content script if not already present (e.g. tab was open before extension load)
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: [scriptFile] });
+  } catch { /* already injected — ignore */ }
+
   chrome.tabs.sendMessage(tab.id, { type: 'START_SYNC', platform }).catch(() => {
-    setStatus(platform, 'Not on orders page', 'fail');
+    setStatus(platform, 'Injection failed — refresh the tab', 'fail');
     setSyncBtn(platform, false);
   });
 }
