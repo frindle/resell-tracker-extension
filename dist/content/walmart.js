@@ -178,9 +178,16 @@
           sendMessage({ type: "SYNC_ERROR", platform: "Walmart", error });
         }
       }
-      if (location.pathname === "/orders" || location.pathname.startsWith("/account/order-history")) {
-        setTimeout(sync, 1500);
+      var syncing = false;
+      async function syncOnce() {
+        if (syncing) return;
+        syncing = true;
+        await sync();
+        syncing = false;
       }
+      chrome.runtime.onMessage.addListener((msg) => {
+        if (msg.type === "START_SYNC" && msg.platform === "Walmart") syncOnce();
+      });
     }
   });
   require_walmart();

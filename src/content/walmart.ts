@@ -162,7 +162,15 @@ async function sync() {
   }
 }
 
-// Only run on orders list page, not individual order detail pages
-if (location.pathname === '/orders' || location.pathname.startsWith('/account/order-history')) {
-  setTimeout(sync, 1500);
+let syncing = false;
+
+async function syncOnce() {
+  if (syncing) return;
+  syncing = true;
+  await sync();
+  syncing = false;
 }
+
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === 'START_SYNC' && msg.platform === 'Walmart') syncOnce();
+});

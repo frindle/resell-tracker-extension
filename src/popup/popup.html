@@ -20,6 +20,9 @@
     a.settings { display: block; margin-top: 14px; font-size: 0.75rem; color: #3b82f6; text-decoration: none; text-align: center; }
     a.settings:hover { text-decoration: underline; }
     #notConfigured { font-size: 0.8125rem; color: #f87171; margin-bottom: 12px; }
+    button.sync-btn { font-size: 0.75rem; background: #1f2937; color: #9ca3af; border: 1px solid #374151; border-radius: 4px; padding: 3px 8px; cursor: pointer; }
+    button.sync-btn:hover:not(:disabled) { background: #374151; color: #e5e5e5; }
+    button.sync-btn:disabled { opacity: 0.4; cursor: default; }
   </style>
 </head>
 <body>
@@ -32,14 +35,20 @@
         <div class="platform">Amazon</div>
         <div class="meta" id="amazonMeta">—</div>
       </div>
-      <div class="status idle" id="amazonStatus">idle</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="status idle" id="amazonStatus">idle</div>
+        <button class="sync-btn" id="syncAmazon">Sync</button>
+      </div>
     </div>
     <div class="row">
       <div>
         <div class="platform">Walmart</div>
         <div class="meta" id="walmartMeta">—</div>
       </div>
-      <div class="status idle" id="walmartStatus">idle</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="status idle" id="walmartStatus">idle</div>
+        <button class="sync-btn" id="syncWalmart">Sync</button>
+      </div>
     </div>
   </div>
   <a class="settings" id="openSettings" href="#">⚙ Settings</a>

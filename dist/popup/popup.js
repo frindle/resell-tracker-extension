@@ -41,6 +41,23 @@
         const el = document.getElementById(platform === "Amazon" ? "amazonMeta" : "walmartMeta");
         el.textContent = text;
       }
+      function setSyncBtn(platform, disabled) {
+        const btn = document.getElementById(platform === "Amazon" ? "syncAmazon" : "syncWalmart");
+        btn.disabled = disabled;
+      }
+      async function triggerSync(platform) {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab?.id) {
+          setStatus(platform, "No active tab", "fail");
+          return;
+        }
+        setSyncBtn(platform, true);
+        setStatus(platform, "syncing\u2026", "syncing");
+        chrome.tabs.sendMessage(tab.id, { type: "START_SYNC", platform }).catch(() => {
+          setStatus(platform, "Not on orders page", "fail");
+          setSyncBtn(platform, false);
+        });
+      }
       async function init() {
         const settings = await getSettings();
         if (!settings.trackerUrl || !settings.userId) {
@@ -48,6 +65,8 @@
         }
         if (settings.amazonLastSync) setMeta("Amazon", `Last sync: ${settings.amazonLastSync}`);
         if (settings.walmartLastSync) setMeta("Walmart", `Last sync: ${settings.walmartLastSync}`);
+        document.getElementById("syncAmazon").addEventListener("click", () => triggerSync("Amazon"));
+        document.getElementById("syncWalmart").addEventListener("click", () => triggerSync("Walmart"));
         document.getElementById("openSettings").addEventListener("click", (e) => {
           e.preventDefault();
           chrome.runtime.openOptionsPage();
@@ -55,6 +74,7 @@
         chrome.runtime.onMessage.addListener((message) => {
           if (message.type === "SYNC_STARTED") {
             setStatus(message.platform, "syncing\u2026", "syncing");
+            setSyncBtn(message.platform, true);
           } else if (message.type === "SYNC_PROGRESS") {
             setStatus(message.platform, message.message, "syncing");
           } else if (message.type === "SYNC_DONE") {
@@ -62,8 +82,10 @@
             const text = result.scraped === 0 ? "no new orders" : `+${result.imported} new, ${result.updated} updated`;
             setStatus(result.platform, text, "ok");
             setMeta(result.platform, `Last sync: ${(/* @__PURE__ */ new Date()).toISOString().split("T")[0]}`);
+            setSyncBtn(result.platform, false);
           } else if (message.type === "SYNC_ERROR") {
             setStatus(message.platform, `Error: ${message.error}`, "fail");
+            setSyncBtn(message.platform, false);
           }
         });
       }
