@@ -149,113 +149,34 @@ async function fetchOrderDetail(orderUrl: string): Promise<{ address: string; tr
 }
 
 // ---------------------------------------------------------------------------
-// Sync state stored in sessionStorage so it survives page navigation
-// ---------------------------------------------------------------------------
-
-const STATE_KEY = '__resell_wm_sync_state__';
-
-interface SyncState {
-  sinceDate: string;
-  orders: ScrapedOrder[];
-  trackerUrl: string;
-  apiKey: string;
-  userId: string;
-  page: number;
-}
-
-function saveState(state: SyncState) {
-  sessionStorage.setItem(STATE_KEY, JSON.stringify(state));
-}
-
-function loadState(): SyncState | null {
-  try {
-    const raw = sessionStorage.getItem(STATE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
-}
-
-function clearState() {
-  sessionStorage.removeItem(STATE_KEY);
-}
-
-// ---------------------------------------------------------------------------
-// Main sync
+// Main sync — all in-page, no navigation (Walmart is a React SPA)
 // ---------------------------------------------------------------------------
 
 let syncing = false;
 
-function waitForOrders(timeoutMs = 8000): Promise<void> {
+function waitForOrdersToLoad(previousFirstId = '', timeoutMs = 10000): Promise<void> {
   return new Promise(resolve => {
     const start = Date.now();
     function check() {
       const blocks = document.querySelectorAll('[data-testid*="orderGroup"]');
-      // Wait until blocks appear AND have meaningful text content (not just skeleton)
       if (blocks.length > 0 && (blocks[0].textContent ?? '').length > 100) {
-        resolve();
-        return;
+        // If waiting for page change, ensure first block differs from previous page
+        const firstId = (blocks[0] as HTMLElement).dataset.testid ?? blocks[0].id ?? (blocks[0].textContent ?? '').slice(0, 50);
+        if (!previousFirstId || firstId !== previousFirstId) { resolve(); return; }
       }
       if (Date.now() - start > timeoutMs) { resolve(); return; }
-      setTimeout(check, 300);
+      setTimeout(check, 400);
     }
     check();
   });
 }
 
-async function runSync(state: SyncState) {
-  const sinceDate = new Date(state.sinceDate);
-
-  sendMessage({ type: 'SYNC_PROGRESS', platform: 'Walmart', scraped: state.orders.length, message: `Scraping page ${state.page}…` });
-
-  await waitForOrders();
-
-  const { orders, hasOlder } = scrapeCurrentPage(sinceDate);
-  const seen = new Set(state.orders.map(o => o.orderNumber));
-  for (const o of orders) {
-    if (!seen.has(o.orderNumber)) { seen.add(o.orderNumber); state.orders.push(o); }
-  }
-
-  // Paginate if there were blocks on this page (even if all were cancelled/skipped)
-  const hadBlocks = document.querySelectorAll('[data-testid*="orderGroup"]').length > 0;
-  const nextUrl = hasOlder ? null : (hadBlocks ? getNextPageUrl() : null);
-
-  if (nextUrl && state.orders.length < 200 && state.page < 20) {
-    state.page++;
-    saveState(state);
-    window.location.href = nextUrl;
-    return;
-  }
-
-  clearState();
-  const allOrders = state.orders;
-
-  if (allOrders.length === 0) {
-    setBadge('—');
-    sendMessage({ type: 'SYNC_DONE', result: { platform: 'Walmart', scraped: 0, imported: 0, updated: 0 } });
-    syncing = false;
-    return;
-  }
-
-  sendMessage({ type: 'SYNC_PROGRESS', platform: 'Walmart', scraped: allOrders.length, message: `Found ${allOrders.length} orders, fetching details…` });
-
-  for (let i = 0; i < allOrders.length; i++) {
-    sendMessage({ type: 'SYNC_PROGRESS', platform: 'Walmart', scraped: allOrders.length, message: `Fetching details ${i + 1}/${allOrders.length}…` });
-    const detail = await fetchOrderDetail(allOrders[i].sourceUrl);
-    allOrders[i].shippingAddress = detail.address;
-    allOrders[i].trackingNumbers = detail.tracking;
-    await new Promise(r => setTimeout(r, 400));
-  }
-
-  try {
-    const result = await pushOrders(state.trackerUrl, state.apiKey, state.userId, allOrders);
-    await setLastSync('walmart', new Date().toISOString().split('T')[0]);
-    setBadge(`+${result.imported}`, '#22c55e');
-    sendMessage({ type: 'SYNC_DONE', result: { platform: 'Walmart', scraped: allOrders.length, ...result } });
-  } catch (err) {
-    setBadge('!', '#ef4444');
-    sendMessage({ type: 'SYNC_ERROR', platform: 'Walmart', error: err instanceof Error ? err.message : String(err) });
-  }
-
-  syncing = false;
+function clickNextPage(): boolean {
+  const btn = document.querySelector(
+    '[aria-label="Next page"]:not([disabled]), [data-automation-id*="next-page"]:not([disabled]), button[aria-label*="next" i]:not([disabled])'
+  ) as HTMLElement | null;
+  if (btn) { btn.click(); return true; }
+  return false;
 }
 
 async function startSync() {
@@ -264,7 +185,6 @@ async function startSync() {
   syncing = true;
 
   const settings = await getSettings();
-  console.log('[WM] settings:', JSON.stringify({ trackerUrl: !!settings.trackerUrl, userId: settings.userId, walmartLastSync: settings.walmartLastSync }));
   if (!settings.trackerUrl || !settings.userId) {
     sendMessage({ type: 'SYNC_ERROR', platform: 'Walmart', error: 'Tracker URL or user not configured — open Settings.' });
     setBadge('!', '#ef4444');
@@ -280,40 +200,68 @@ async function startSync() {
   sendMessage({ type: 'SYNC_STARTED', platform: 'Walmart' });
 
   if (!location.pathname.includes('/orders') && !location.pathname.includes('/account/mypurchases')) {
-    const state: SyncState = {
-      sinceDate: sinceDate.toISOString(),
-      orders: [],
-      trackerUrl: settings.trackerUrl,
-      apiKey: settings.apiKey ?? '',
-      userId: settings.userId,
-      page: 1,
-    };
-    saveState(state);
     window.location.href = 'https://www.walmart.com/orders';
+    syncing = false;
     return;
   }
 
-  const state: SyncState = {
-    sinceDate: sinceDate.toISOString(),
-    orders: [],
-    trackerUrl: settings.trackerUrl,
-    apiKey: settings.apiKey ?? '',
-    userId: settings.userId,
-    page: 1,
-  };
-  saveState(state);
-  await runSync(state);
-}
+  try {
+    await waitForOrdersToLoad('', 15000);
 
-// On page load, resume pending sync
-(async () => {
-  const state = loadState();
-  if (state) {
-    syncing = true;
-    sendMessage({ type: 'SYNC_STARTED', platform: 'Walmart' });
-    await runSync(state);
+    const allOrders: ScrapedOrder[] = [];
+    const seen = new Set<string>();
+    let page = 1;
+
+    while (page <= 20 && allOrders.length < 200) {
+      sendMessage({ type: 'SYNC_PROGRESS', platform: 'Walmart', scraped: allOrders.length, message: `Scraping page ${page}…` } as never);
+
+      const { orders, hasOlder } = scrapeCurrentPage(sinceDate);
+      for (const o of orders) {
+        if (!seen.has(o.orderNumber)) { seen.add(o.orderNumber); allOrders.push(o); }
+      }
+      console.log('[WM] page', page, 'scraped:', orders.length, 'total:', allOrders.length, 'hasOlder:', hasOlder);
+
+      if (hasOlder) break;
+
+      const blocks = document.querySelectorAll('[data-testid*="orderGroup"]');
+      const firstId = blocks[0]
+        ? ((blocks[0] as HTMLElement).dataset.testid ?? (blocks[0].textContent ?? '').slice(0, 60))
+        : '';
+
+      if (!clickNextPage()) { console.log('[WM] no next page button, done'); break; }
+      await waitForOrdersToLoad(firstId, 12000);
+      page++;
+    }
+
+    console.log('[WM] done scraping, total orders:', allOrders.length);
+
+    if (allOrders.length === 0) {
+      sendMessage({ type: 'SYNC_COMPLETE', platform: 'Walmart', pushed: 0, skipped: 0 });
+      setBadge('0');
+      await setLastSync('walmart');
+      return;
+    }
+
+    sendMessage({ type: 'SYNC_PROGRESS', platform: 'Walmart', scraped: allOrders.length, message: 'Fetching order details…' } as never);
+
+    for (const order of allOrders) {
+      const detail = await fetchOrderDetail(order.sourceUrl);
+      if (detail.address) order.shippingAddress = detail.address;
+      if (detail.tracking.length) order.trackingNumbers = detail.tracking;
+    }
+
+    const result = await pushOrders(allOrders, settings.trackerUrl, settings.userId, settings.apiKey ?? '');
+    await setLastSync('walmart');
+    sendMessage({ type: 'SYNC_COMPLETE', platform: 'Walmart', pushed: result.pushed, skipped: result.skipped });
+    setBadge(String(result.pushed));
+  } catch (err) {
+    console.error('[WM] sync error:', err);
+    sendMessage({ type: 'SYNC_ERROR', platform: 'Walmart', error: String(err) });
+    setBadge('!', '#ef4444');
+  } finally {
+    syncing = false;
   }
-})();
+}
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'PING') { sendResponse('ok'); return; }
