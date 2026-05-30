@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Resell Tracker Sync</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #111; color: #e5e5e5; margin: 0; padding: 16px; width: 300px; }
+    h1 { font-size: 1rem; font-weight: 700; margin: 0 0 4px; }
+    p.sub { color: #6b7280; font-size: 0.75rem; margin: 0 0 16px; }
+    .row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #1f1f1f; }
+    .row:last-child { border-bottom: none; }
+    .platform { font-size: 0.875rem; font-weight: 500; }
+    .meta { font-size: 0.75rem; color: #6b7280; margin-top: 2px; }
+    .status { font-size: 0.75rem; text-align: right; }
+    .ok { color: #4ade80; }
+    .fail { color: #f87171; }
+    .syncing { color: #60a5fa; }
+    .idle { color: #6b7280; }
+    a.settings { display: block; margin-top: 14px; font-size: 0.75rem; color: #3b82f6; text-decoration: none; text-align: center; }
+    a.settings:hover { text-decoration: underline; }
+    #notConfigured { font-size: 0.8125rem; color: #f87171; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Resell Tracker Sync</h1>
+  <p class="sub">Auto-syncs when you visit Amazon or Walmart orders.</p>
+  <div id="notConfigured" style="display:none">⚠ Tracker URL not set — open Settings.</div>
+  <div id="rows">
+    <div class="row">
+      <div>
+        <div class="platform">Amazon</div>
+        <div class="meta" id="amazonMeta">—</div>
+      </div>
+      <div class="status idle" id="amazonStatus">idle</div>
+    </div>
+    <div class="row">
+      <div>
+        <div class="platform">Walmart</div>
+        <div class="meta" id="walmartMeta">—</div>
+      </div>
+      <div class="status idle" id="walmartStatus">idle</div>
+    </div>
+  </div>
+  <a class="settings" id="openSettings" href="#">⚙ Settings</a>
+  <script src="popup.js"></script>
+</body>
+</html>

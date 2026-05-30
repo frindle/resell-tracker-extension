@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Resell Tracker — Settings</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #111; color: #e5e5e5; margin: 0; padding: 32px; }
+    h1 { font-size: 1.25rem; font-weight: 700; margin: 0 0 8px; }
+    p.sub { color: #9ca3af; font-size: 0.875rem; margin: 0 0 32px; }
+    .card { background: #1c1c1c; border: 1px solid #2d2d2d; border-radius: 10px; padding: 24px; max-width: 520px; display: flex; flex-direction: column; gap: 18px; }
+    label { display: flex; flex-direction: column; gap: 6px; font-size: 0.875rem; color: #9ca3af; }
+    label span { color: #e5e5e5; font-weight: 500; font-size: 0.8125rem; }
+    input { background: #0f0f0f; border: 1px solid #3a3a3a; border-radius: 6px; padding: 8px 12px; color: #fff; font-size: 0.875rem; width: 100%; outline: none; }
+    input:focus { border-color: #3b82f6; }
+    .row { display: flex; gap: 10px; align-items: center; }
+    button { border: none; border-radius: 6px; padding: 8px 16px; font-size: 0.875rem; cursor: pointer; transition: background 0.15s; }
+    .btn-primary { background: #2563eb; color: #fff; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-secondary { background: #262626; color: #d1d5db; border: 1px solid #3a3a3a; }
+    .btn-secondary:hover { background: #333; }
+    .status { font-size: 0.8125rem; }
+    .ok { color: #4ade80; }
+    .fail { color: #f87171; }
+    .divider { border: none; border-top: 1px solid #2d2d2d; margin: 0; }
+    .sync-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .field-group { display: flex; flex-direction: column; gap: 4px; }
+    .field-group .label-text { font-size: 0.8rem; color: #9ca3af; }
+    .saved { color: #4ade80; font-size: 0.8125rem; }
+  </style>
+</head>
+<body>
+  <h1>Resell Tracker Sync</h1>
+  <p class="sub">Configure where your Resell Tracker is running.</p>
+  <div class="card">
+    <label>
+      <span>Tracker URL</span>
+      <input type="url" id="trackerUrl" placeholder="http://10.0.12.39:3000" />
+    </label>
+    <label>
+      <span>API Key <span style="color:#6b7280;font-weight:400">(optional — leave blank if not required)</span></span>
+      <input type="password" id="apiKey" placeholder="sk-…" />
+    </label>
+    <div class="row">
+      <button class="btn-primary" id="save">Save</button>
+      <button class="btn-secondary" id="test">Test Connection</button>
+      <span class="status" id="status"></span>
+    </div>
+    <hr class="divider" />
+    <div>
+      <p style="font-size:0.8125rem;color:#9ca3af;margin:0 0 12px">Sync since date — orders older than this are skipped. Auto-updated after each successful sync.</p>
+      <div class="sync-row">
+        <div class="field-group">
+          <div class="label-text">Amazon last sync</div>
+          <input type="date" id="amazonLastSync" />
+        </div>
+        <div class="field-group">
+          <div class="label-text">Walmart last sync</div>
+          <input type="date" id="walmartLastSync" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn-secondary" id="saveDates">Save dates</button>
+        <span id="datesSaved" class="saved" style="display:none">Saved</span>
+      </div>
+    </div>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>
