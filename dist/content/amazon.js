@@ -228,23 +228,19 @@
           }
           if (!card) continue;
           const cardText = (card.textContent ?? "").replace(/\s+/g, " ");
-          if (orders.length === 0) {
-            console.log("[Amazon] first card text:", cardText.slice(0, 400));
-          }
-          const dateMatch = cardText.match(/(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}/i) ?? cardText.match(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+\d{4}/i) ?? cardText.match(/(\d{4}-\d{2}-\d{2})/);
-          if (!dateMatch) {
-            if (orders.length === 0) console.log("[Amazon] no date found in card, cardText sample:", cardText.slice(0, 200));
-            continue;
-          }
-          const orderDate = new Date(dateMatch[1] ?? dateMatch[0]);
+          const dateMatch = cardText.match(/Order placed\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ?? cardText.match(/((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})/i) ?? cardText.match(/((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+\d{4})/i);
+          if (!dateMatch) continue;
+          const orderDate = new Date(dateMatch[1]);
           if (isNaN(orderDate.getTime())) continue;
           if (orderDate < sinceDate) {
             hasOlder = true;
             continue;
           }
           if (/\b(cancelled|canceled|refunded|returned)\b/i.test(cardText)) continue;
-          const totalMatch = cardText.match(/(?:order total|grand total)[^$\d]*\$?([\d,]+\.?\d*)/i) ?? cardText.match(/\$([\d,]+\.\d{2})/);
+          const totalMatch = cardText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
           const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
+          const addrMatch = cardText.match(/Ship to\s+.+?\s+(.+?)\s+Order #/s);
+          const shippingAddress = addrMatch ? addrMatch[1].replace(/\s+/g, " ").trim() : "";
           const titleEl = card.querySelector('[class*="product-title"],[class*="item-title"],a[href*="/dp/"]');
           const itemDescription = (titleEl?.textContent ?? "").trim().slice(0, 120);
           orders.push({
@@ -254,7 +250,7 @@
             itemDescription,
             cost,
             shippingCost: 0,
-            shippingAddress: "",
+            shippingAddress,
             trackingNumbers: [],
             sourceUrl: `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`
           });
