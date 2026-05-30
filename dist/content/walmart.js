@@ -211,7 +211,7 @@
         const orders = [];
         let hasOlder = false;
         const seen = /* @__PURE__ */ new Set();
-        const blocks = Array.from(document.querySelectorAll('[data-testid^="orderGroup"]'));
+        const blocks = Array.from(document.querySelectorAll('[data-testid*="orderGroup"]'));
         console.log("[WM] DOM blocks found:", blocks.length, "url:", location.href);
         if (blocks[0]) console.log("[WM] first block text:", (blocks[0].textContent ?? "").replace(/\s+/g, " ").slice(0, 600));
         for (const block of blocks) {
@@ -232,12 +232,15 @@
           }
           if (!orderNumber || seen.has(orderNumber)) continue;
           seen.add(orderNumber);
-          const dateMatch = blockText.match(/(?:Placed|Ordered|Delivered)\s+(\w+ \d{1,2},?\s+\d{4})/i) ?? blockText.match(/(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i);
+          if (/\b(cancel\w*|return\w*|refund\w*)\b/i.test(blockText)) continue;
+          const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
+          const dateMatch = blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ?? blockText.match(/(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ?? blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})\b/i);
           if (!dateMatch) {
             console.log("[WM] skipping order", orderNumber, "- no date found in:", blockText.slice(0, 200));
             continue;
           }
-          const orderDate = new Date(dateMatch[1]);
+          const rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear}`;
+          const orderDate = new Date(rawDateStr);
           if (isNaN(orderDate.getTime())) {
             console.log("[WM] skipping order", orderNumber, "- bad date:", dateMatch[1]);
             continue;
@@ -246,7 +249,6 @@
             hasOlder = true;
             continue;
           }
-          if (/\b(cancelled|canceled|returned|refunded)\b/i.test(blockText)) continue;
           const totalMatch = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
           const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
           const itemEl = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');

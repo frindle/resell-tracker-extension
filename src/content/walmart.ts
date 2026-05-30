@@ -28,7 +28,7 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
 
   // __NEXT_DATA__ on walmart.com is a static shell — orders are client-rendered.
   // Read the live DOM directly.
-  const blocks = Array.from(document.querySelectorAll('[data-testid^="orderGroup"]'));
+  const blocks = Array.from(document.querySelectorAll('[data-testid*="orderGroup"]'));
   console.log('[WM] DOM blocks found:', blocks.length, 'url:', location.href);
   if (blocks[0]) console.log('[WM] first block text:', (blocks[0].textContent ?? '').replace(/\s+/g, ' ').slice(0, 600));
 
@@ -53,22 +53,27 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
     if (!orderNumber || seen.has(orderNumber)) continue;
     seen.add(orderNumber);
 
-    // Date — look for "Delivered", "Placed", month/day/year patterns
-    const dateMatch = blockText.match(/(?:Placed|Ordered|Delivered)\s+(\w+ \d{1,2},?\s+\d{4})/i)
-      ?? blockText.match(/(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i);
+    // Skip cancelled/returned orders early
+    if (/\b(cancel\w*|return\w*|refund\w*)\b/i.test(blockText)) continue;
+
+    // Date — "on May 22" (no year), "May 22, 2026", "Placed Jan 3, 2026"
+    const currentYear = new Date().getFullYear();
+    const dateMatch =
+      blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ??
+      blockText.match(/(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ??
+      blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})\b/i);
     if (!dateMatch) {
       console.log('[WM] skipping order', orderNumber, '- no date found in:', blockText.slice(0, 200));
       continue;
     }
-    const orderDate = new Date(dateMatch[1]);
+    // Append current year if missing
+    const rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear}`;
+    const orderDate = new Date(rawDateStr);
     if (isNaN(orderDate.getTime())) {
       console.log('[WM] skipping order', orderNumber, '- bad date:', dateMatch[1]);
       continue;
     }
     if (orderDate.toISOString().split('T')[0] < sinceDate.toISOString().split('T')[0]) { hasOlder = true; continue; }
-
-    // Status
-    if (/\b(cancelled|canceled|returned|refunded)\b/i.test(blockText)) continue;
 
     // Total — "Total $XX.XX"
     const totalMatch = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
