@@ -206,83 +206,38 @@
         chrome.runtime.sendMessage({ type: "SET_BADGE", text, color }).catch(() => {
         });
       }
-      async function fetchPage(url) {
-        try {
-          const res = await fetch(url, { credentials: "include" });
-          if (!res.ok) return null;
-          const html = await res.text();
-          return { html, doc: new DOMParser().parseFromString(html, "text/html") };
-        } catch {
-          return null;
-        }
-      }
-      function parseOrdersFromPage(doc, html, sinceDate) {
+      function scrapeCurrentPage(sinceDate) {
         const orders = [];
         let hasOlder = false;
-        const nextDataEl = doc.getElementById("__NEXT_DATA__");
-        if (nextDataEl?.textContent) {
-          try {
-            const json = JSON.parse(nextDataEl.textContent);
-            const orderList = findOrdersInObject(json);
-            if (orderList.length > 0) {
-              for (const raw of orderList) {
-                const item = raw;
-                const result = extractOrderFromJson(item, sinceDate);
-                if (result === "older") {
-                  hasOlder = true;
-                  continue;
-                }
-                if (result === "skip") continue;
-                orders.push(result);
-              }
-              const nextUrl2 = findNextPageUrl(doc, html);
-              return { orders, hasOlder, nextUrl: nextUrl2 };
-            }
-          } catch {
-          }
-        }
+        const seen = /* @__PURE__ */ new Set();
+        const pageText = document.body.innerHTML;
         const orderIdPattern = /\b(\d{3}-\d{7}-\d{7})\b/g;
-        const found = /* @__PURE__ */ new Set();
         let m;
-        while ((m = orderIdPattern.exec(html)) !== null) {
+        while ((m = orderIdPattern.exec(pageText)) !== null) {
           const orderId = m[1];
-          if (found.has(orderId)) continue;
-          found.add(orderId);
-          const start = Math.max(0, m.index - 1e3);
-          const end = Math.min(html.length, m.index + 1e3);
-          const ctx = html.slice(start, end);
-          if (found.size === 1) {
-            console.log("[Amazon scraper] context around first order ID:", ctx.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 600));
+          if (seen.has(orderId)) continue;
+          seen.add(orderId);
+          const start = Math.max(0, m.index - 2e3);
+          const end = Math.min(pageText.length, m.index + 2e3);
+          const ctx = pageText.slice(start, end);
+          const ctxText = ctx.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+          const dateMatch = ctxText.match(/(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}/i) ?? ctxText.match(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+\d{4}/i) ?? ctx.match(/"orderDate"\s*:\s*"(\d{4}-\d{2}-\d{2})/) ?? ctx.match(/(\d{4}-\d{2}-\d{2})/);
+          if (!dateMatch) continue;
+          const orderDate = new Date(dateMatch[1] ?? dateMatch[0]);
+          if (isNaN(orderDate.getTime())) continue;
+          if (orderDate < sinceDate) {
+            hasOlder = true;
+            continue;
           }
-          const dateMatch = ctx.match(
-            /(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}/i
-          ) ?? ctx.match(
-            /(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+\d{4}/i
-          ) ?? ctx.match(
-            /"orderDate"\s*:\s*"(\d{4}-\d{2}-\d{2})/
-          ) ?? ctx.match(
-            /(\d{4}-\d{2}-\d{2})/
-          ) ?? ctx.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-          let orderDate = "";
-          if (dateMatch) {
-            const d = new Date(dateMatch[0]);
-            if (!isNaN(d.getTime())) {
-              if (d < sinceDate) {
-                hasOlder = true;
-                continue;
-              }
-              orderDate = d.toISOString().split("T")[0];
-            }
-          }
-          if (/\b(cancelled|canceled|refunded|returned)\b/i.test(ctx)) continue;
-          const totalMatch = ctx.match(/(?:order total|grand total)[^$]*\$([\d,]+\.?\d*)/i) ?? ctx.match(/\$([\d,]+\.\d{2})/);
+          if (/\b(cancelled|canceled|refunded|returned)\b/i.test(ctxText)) continue;
+          const totalMatch = ctxText.match(/(?:order total|grand total)[^$\d]*\$?([\d,]+\.?\d*)/i) ?? ctxText.match(/\$([\d,]+\.\d{2})/);
           const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
-          const titleMatch = ctx.match(/"title":"([^"]{5,120})"/i) ?? ctx.match(/class="[^"]*product-title[^"]*"[^>]*>([^<]{5,120})</i);
+          const titleMatch = ctx.match(/class="[^"]*product-title[^"]*"[^>]*>([^<]{5,120})</) ?? ctx.match(/"title"\s*:\s*"([^"]{5,120})"/) ?? ctx.match(/alt="([^"]{5,120})"/);
           const itemDescription = titleMatch ? titleMatch[1].trim() : "";
           orders.push({
             platform: "Amazon",
             orderNumber: orderId,
-            orderDate,
+            orderDate: orderDate.toISOString().split("T")[0],
             itemDescription,
             cost,
             shippingCost: 0,
@@ -291,94 +246,95 @@
             sourceUrl: `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`
           });
         }
-        const nextUrl = findNextPageUrl(doc, html);
-        return { orders, hasOlder, nextUrl };
+        return { orders, hasOlder };
       }
-      function findOrdersInObject(obj, depth = 0) {
-        if (depth > 8 || obj == null || typeof obj !== "object") return [];
-        if (Array.isArray(obj)) {
-          if (obj.length > 0 && typeof obj[0] === "object" && obj[0] !== null) {
-            const first = obj[0];
-            if ("orderId" in first || "orderNo" in first || "id" in first) {
-              return obj;
-            }
-          }
-          for (const item of obj) {
-            const result = findOrdersInObject(item, depth + 1);
-            if (result.length > 0) return result;
-          }
-        } else {
-          const rec = obj;
-          for (const key of ["orders", "orderHistory", "orderList", "orderItems"]) {
-            if (Array.isArray(rec[key]) && rec[key].length > 0) return rec[key];
-          }
-          for (const val of Object.values(rec)) {
-            const result = findOrdersInObject(val, depth + 1);
-            if (result.length > 0) return result;
-          }
-        }
-        return [];
-      }
-      function extractOrderFromJson(item, sinceDate) {
-        const orderId = String(item.orderId ?? item.orderNo ?? item.id ?? "");
-        if (!orderId || !/\d{3}-\d{7}-\d{7}/.test(orderId)) return "skip";
-        const rawDate = String(item.orderPlacedDate ?? item.orderDate ?? item.placedDate ?? "");
-        const d = rawDate ? new Date(rawDate) : null;
-        if (!d || isNaN(d.getTime())) return "skip";
-        if (d < sinceDate) return "older";
-        const statusRaw = String(item.status ?? item.orderStatus ?? "").toLowerCase();
-        if (/cancel|return|refund/.test(statusRaw)) return "skip";
-        const totalObj = item.grandTotal ?? item.orderTotal ?? {};
-        const cost = typeof totalObj === "number" ? totalObj : parseMoney(String(totalObj.amount ?? totalObj.value ?? 0));
-        const lineItems = item.items ?? item.lineItems ?? [];
-        const firstItem = lineItems[0] ?? {};
-        const itemDescription = String(firstItem.title ?? firstItem.name ?? "").slice(0, 120);
-        return {
-          platform: "Amazon",
-          orderNumber: orderId,
-          orderDate: d.toISOString().split("T")[0],
-          itemDescription,
-          cost,
-          shippingCost: 0,
-          shippingAddress: "",
-          trackingNumbers: [],
-          sourceUrl: `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`
-        };
-      }
-      function findNextPageUrl(doc, html) {
-        const nextEl = doc.querySelector(
-          '.a-pagination .a-last:not(.a-disabled) a, [aria-label="Go to next page"], a[href*="startIndex"]'
+      function getNextPageUrl() {
+        const nextEl = document.querySelector(
+          '.a-pagination .a-last:not(.a-disabled) a, [aria-label="Next page"] a'
         );
-        if (nextEl?.href && nextEl.href.includes("startIndex")) return nextEl.href;
-        const m = html.match(/startIndex=(\d+)[^"]*"[^>]*>(?:Next|›)/i);
-        if (m) return `https://www.amazon.com/your-orders/orders?startIndex=${m[1]}`;
-        return null;
+        return nextEl?.href ?? null;
       }
-      async function enrichWithDetails(orders, onProgress) {
-        for (let i = 0; i < orders.length; i++) {
-          const o = orders[i];
-          onProgress(`Fetching details ${i + 1}/${orders.length}\u2026`);
-          const result = await fetchPage(o.sourceUrl);
-          if (!result) continue;
-          const { doc, html } = result;
-          const addrEl = doc.querySelector('.displayAddressDiv, [class*="ship-to"], #shipToData');
-          if (addrEl) o.shippingAddress = (addrEl.textContent ?? "").replace(/\s+/g, " ").trim();
+      async function fetchOrderDetail(orderUrl) {
+        try {
+          const res = await fetch(orderUrl, { credentials: "include" });
+          const html = await res.text();
+          const doc = new DOMParser().parseFromString(html, "text/html");
+          const addrEl = doc.querySelector('.displayAddressDiv, [class*="ship-to"], #shippingAddress');
+          const address = (addrEl?.textContent ?? "").replace(/\s+/g, " ").trim();
           const trackNums = /* @__PURE__ */ new Set();
-          const patterns = [
-            /trackingId[=\s"':]+([A-Z0-9]{10,30})/g,
-            /\b(1Z[A-Z0-9]{16})\b/g,
-            /\b([0-9]{20,22})\b/g
-          ];
+          const patterns = [/trackingId[=\s"':]+([A-Z0-9]{10,30})/g, /\b(1Z[A-Z0-9]{16})\b/g];
           for (const pat of patterns) {
-            let m;
-            while ((m = pat.exec(html)) !== null) trackNums.add(m[1]);
+            let tm;
+            while ((tm = pat.exec(html)) !== null) trackNums.add(tm[1]);
           }
-          if (trackNums.size > 0) o.trackingNumbers = [...trackNums];
-          await new Promise((r) => setTimeout(r, 300));
+          return { address, tracking: [...trackNums] };
+        } catch {
+          return { address: "", tracking: [] };
         }
+      }
+      var STATE_KEY = "__resell_sync_state__";
+      function saveState(state) {
+        sessionStorage.setItem(STATE_KEY, JSON.stringify(state));
+      }
+      function loadState() {
+        try {
+          const raw = sessionStorage.getItem(STATE_KEY);
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      }
+      function clearState() {
+        sessionStorage.removeItem(STATE_KEY);
       }
       var syncing = false;
-      async function sync() {
+      async function runSync(state) {
+        const sinceDate = new Date(state.sinceDate);
+        sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: state.orders.length, message: `Scraping page ${state.page}\u2026` });
+        const { orders, hasOlder } = scrapeCurrentPage(sinceDate);
+        const seen = new Set(state.orders.map((o) => o.orderNumber));
+        for (const o of orders) {
+          if (!seen.has(o.orderNumber)) {
+            seen.add(o.orderNumber);
+            state.orders.push(o);
+          }
+        }
+        const nextUrl = hasOlder ? null : getNextPageUrl();
+        if (nextUrl && state.orders.length < 200) {
+          state.nextUrl = nextUrl;
+          state.page++;
+          saveState(state);
+          window.location.href = nextUrl;
+          return;
+        }
+        clearState();
+        const allOrders = state.orders;
+        if (allOrders.length === 0) {
+          setBadge("\u2014");
+          sendMessage({ type: "SYNC_DONE", result: { platform: "Amazon", scraped: 0, imported: 0, updated: 0 } });
+          syncing = false;
+          return;
+        }
+        sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Found ${allOrders.length} orders, fetching details\u2026` });
+        for (let i = 0; i < allOrders.length; i++) {
+          sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Fetching details ${i + 1}/${allOrders.length}\u2026` });
+          const detail = await fetchOrderDetail(allOrders[i].sourceUrl);
+          allOrders[i].shippingAddress = detail.address;
+          allOrders[i].trackingNumbers = detail.tracking;
+          await new Promise((r) => setTimeout(r, 300));
+        }
+        try {
+          const result = await pushOrders(state.trackerUrl, state.apiKey, state.userId, allOrders);
+          await setLastSync("amazon", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
+          setBadge(`+${result.imported}`, "#22c55e");
+          sendMessage({ type: "SYNC_DONE", result: { platform: "Amazon", scraped: allOrders.length, ...result } });
+        } catch (err) {
+          setBadge("!", "#ef4444");
+          sendMessage({ type: "SYNC_ERROR", platform: "Amazon", error: err instanceof Error ? err.message : String(err) });
+        }
+        syncing = false;
+      }
+      async function startSync() {
         if (syncing) return;
         syncing = true;
         const settings = await getSettings();
@@ -391,57 +347,42 @@
         const sinceDate = settings.amazonLastSync ? new Date(settings.amazonLastSync) : new Date(Date.now() - 90 * 24 * 60 * 60 * 1e3);
         setBadge("\u2026");
         sendMessage({ type: "SYNC_STARTED", platform: "Amazon" });
-        const allOrders = [];
-        const seen = /* @__PURE__ */ new Set();
-        let url = "https://www.amazon.com/your-orders/orders";
-        let page = 1;
-        while (url) {
-          sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Fetching page ${page}\u2026` });
-          const result = await fetchPage(url);
-          if (!result) break;
-          const pageTitle = result.doc.title;
-          const firstId = result.html.match(/\b(\d{3}-\d{7}-\d{7})\b/)?.[1] ?? "none";
-          console.log(`[Amazon sync] page ${page} title="${pageTitle}" firstOrderId=${firstId} htmlLen=${result.html.length}`);
-          const { orders, hasOlder, nextUrl } = parseOrdersFromPage(result.doc, result.html, sinceDate);
-          console.log(`[Amazon sync] page ${page}: found ${orders.length} orders, hasOlder=${hasOlder}, nextUrl=${nextUrl}`);
-          for (const o of orders) {
-            if (!seen.has(o.orderNumber)) {
-              seen.add(o.orderNumber);
-              allOrders.push(o);
-            }
-          }
-          if (hasOlder) break;
-          if (orders.length === 0) break;
-          if (page >= 20) break;
-          url = nextUrl;
-          page++;
-          await new Promise((r) => setTimeout(r, 500));
-        }
-        sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Found ${allOrders.length} orders` });
-        if (allOrders.length === 0) {
-          setBadge("\u2014");
-          sendMessage({ type: "SYNC_DONE", result: { platform: "Amazon", scraped: 0, imported: 0, updated: 0 } });
-          syncing = false;
+        if (!location.pathname.includes("your-orders") && !location.pathname.includes("order-history") && !location.href.includes("order-history")) {
+          const state2 = {
+            sinceDate: sinceDate.toISOString(),
+            orders: [],
+            nextUrl: null,
+            trackerUrl: settings.trackerUrl,
+            apiKey: settings.apiKey ?? "",
+            userId: settings.userId,
+            page: 1
+          };
+          saveState(state2);
+          window.location.href = "https://www.amazon.com/your-orders/orders";
           return;
         }
-        sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Fetching tracking & addresses for ${allOrders.length} orders\u2026` });
-        await enrichWithDetails(
-          allOrders,
-          (msg) => sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: msg })
-        );
-        try {
-          const result = await pushOrders(settings.trackerUrl, settings.apiKey, settings.userId, allOrders);
-          await setLastSync("amazon", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
-          setBadge(`+${result.imported}`, "#22c55e");
-          sendMessage({ type: "SYNC_DONE", result: { platform: "Amazon", scraped: allOrders.length, ...result } });
-        } catch (err) {
-          setBadge("!", "#ef4444");
-          sendMessage({ type: "SYNC_ERROR", platform: "Amazon", error: err instanceof Error ? err.message : String(err) });
-        }
-        syncing = false;
+        const state = {
+          sinceDate: sinceDate.toISOString(),
+          orders: [],
+          nextUrl: null,
+          trackerUrl: settings.trackerUrl,
+          apiKey: settings.apiKey ?? "",
+          userId: settings.userId,
+          page: 1
+        };
+        saveState(state);
+        await runSync(state);
       }
+      (async () => {
+        const state = loadState();
+        if (state) {
+          syncing = true;
+          sendMessage({ type: "SYNC_STARTED", platform: "Amazon" });
+          await runSync(state);
+        }
+      })();
       chrome.runtime.onMessage.addListener((msg) => {
-        if (msg.type === "START_SYNC" && msg.platform === "Amazon") sync();
+        if (msg.type === "START_SYNC" && msg.platform === "Amazon") startSync();
       });
     }
   });

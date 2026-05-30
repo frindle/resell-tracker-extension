@@ -15,111 +15,62 @@ function setBadge(text: string, color = '#3b82f6') {
 }
 
 // ---------------------------------------------------------------------------
-// Fetch helpers
+// Scrape the live DOM — Amazon is a React SPA so fetch() only gets a shell.
+// The content script reads document directly when on the orders page.
 // ---------------------------------------------------------------------------
 
-async function fetchPage(url: string): Promise<{ doc: Document; html: string } | null> {
-  try {
-    const res = await fetch(url, { credentials: 'include' });
-    if (!res.ok) return null;
-    const html = await res.text();
-    return { html, doc: new DOMParser().parseFromString(html, 'text/html') };
-  } catch {
-    return null;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Parse orders out of a fetched Amazon orders page.
-// Tries __NEXT_DATA__ JSON first, then falls back to HTML patterns.
-// ---------------------------------------------------------------------------
-
-function parseOrdersFromPage(
-  doc: Document,
-  html: string,
-  sinceDate: Date,
-): { orders: ScrapedOrder[]; hasOlder: boolean; nextUrl: string | null } {
+function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder: boolean } {
   const orders: ScrapedOrder[] = [];
   let hasOlder = false;
+  const seen = new Set<string>();
 
-  // Strategy 1: __NEXT_DATA__ (Amazon uses Next.js on newer order pages)
-  const nextDataEl = doc.getElementById('__NEXT_DATA__');
-  if (nextDataEl?.textContent) {
-    try {
-      const json = JSON.parse(nextDataEl.textContent);
-      const orderList: unknown[] = findOrdersInObject(json);
-      if (orderList.length > 0) {
-        for (const raw of orderList) {
-          const item = raw as Record<string, unknown>;
-          const result = extractOrderFromJson(item, sinceDate);
-          if (result === 'older') { hasOlder = true; continue; }
-          if (result === 'skip') continue;
-          orders.push(result);
-        }
-        const nextUrl = findNextPageUrl(doc, html);
-        return { orders, hasOlder, nextUrl };
-      }
-    } catch { /* fall through */ }
-  }
-
-  // Strategy 2: Regex scan for order IDs and nearby dates in raw HTML
-  // Amazon order IDs: 3-digit-7-digit-7-digit
+  // Find all order ID occurrences in the page text
+  const pageText = document.body.innerHTML;
   const orderIdPattern = /\b(\d{3}-\d{7}-\d{7})\b/g;
-  const found = new Set<string>();
   let m: RegExpExecArray | null;
 
-  while ((m = orderIdPattern.exec(html)) !== null) {
+  while ((m = orderIdPattern.exec(pageText)) !== null) {
     const orderId = m[1];
-    if (found.has(orderId)) continue;
-    found.add(orderId);
+    if (seen.has(orderId)) continue;
+    seen.add(orderId);
 
-    // Grab surrounding context (2000 chars) to find date and total
-    const start = Math.max(0, m.index - 1000);
-    const end = Math.min(html.length, m.index + 1000);
-    const ctx = html.slice(start, end);
+    // Grab surrounding context from the live DOM
+    const start = Math.max(0, m.index - 2000);
+    const end = Math.min(pageText.length, m.index + 2000);
+    const ctx = pageText.slice(start, end);
+    const ctxText = ctx.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
-    // Log context around first order ID to diagnose date format
-    if (found.size === 1) {
-      console.log('[Amazon scraper] context around first order ID:', ctx.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 600));
-    }
+    // Date patterns
+    const dateMatch =
+      ctxText.match(/(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}/i) ??
+      ctxText.match(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+\d{4}/i) ??
+      ctx.match(/"orderDate"\s*:\s*"(\d{4}-\d{2}-\d{2})/) ??
+      ctx.match(/(\d{4}-\d{2}-\d{2})/);
 
-    // Find a date in context — try multiple formats
-    const dateMatch = ctx.match(
-      /(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}/i
-    ) ?? ctx.match(
-      /(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+\d{4}/i
-    ) ?? ctx.match(
-      /"orderDate"\s*:\s*"(\d{4}-\d{2}-\d{2})/
-    ) ?? ctx.match(
-      /(\d{4}-\d{2}-\d{2})/
-    ) ?? ctx.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+    if (!dateMatch) continue;
 
-    let orderDate = '';
-    if (dateMatch) {
-      const d = new Date(dateMatch[0]);
-      if (!isNaN(d.getTime())) {
-        if (d < sinceDate) { hasOlder = true; continue; }
-        orderDate = d.toISOString().split('T')[0];
-      }
-    }
+    const orderDate = new Date(dateMatch[1] ?? dateMatch[0]);
+    if (isNaN(orderDate.getTime())) continue;
+    if (orderDate < sinceDate) { hasOlder = true; continue; }
 
-    // Skip cancelled
-    if (/\b(cancelled|canceled|refunded|returned)\b/i.test(ctx)) continue;
+    // Skip cancelled/returned
+    if (/\b(cancelled|canceled|refunded|returned)\b/i.test(ctxText)) continue;
 
-    // Find total
-    const totalMatch = ctx.match(/(?:order total|grand total)[^$]*\$([\d,]+\.?\d*)/i)
-      ?? ctx.match(/\$([\d,]+\.\d{2})/);
+    // Total
+    const totalMatch = ctxText.match(/(?:order total|grand total)[^$\d]*\$?([\d,]+\.?\d*)/i) ??
+      ctxText.match(/\$([\d,]+\.\d{2})/);
     const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
 
-    // Item title — look for title-like text near the order ID
-    const titleMatch = ctx.match(/"title":"([^"]{5,120})"/i)
-      ?? ctx.match(/class="[^"]*product-title[^"]*"[^>]*>([^<]{5,120})</i);
+    // Item title
+    const titleMatch = ctx.match(/class="[^"]*product-title[^"]*"[^>]*>([^<]{5,120})</) ??
+      ctx.match(/"title"\s*:\s*"([^"]{5,120})"/) ??
+      ctx.match(/alt="([^"]{5,120})"/);
     const itemDescription = titleMatch ? titleMatch[1].trim() : '';
 
     orders.push({
       platform: 'Amazon',
       orderNumber: orderId,
-      orderDate,
+      orderDate: orderDate.toISOString().split('T')[0],
       itemDescription,
       cost,
       shippingCost: 0,
@@ -129,129 +80,150 @@ function parseOrdersFromPage(
     });
   }
 
-  const nextUrl = findNextPageUrl(doc, html);
-  return { orders, hasOlder, nextUrl };
+  return { orders, hasOlder };
 }
 
-function findOrdersInObject(obj: unknown, depth = 0): unknown[] {
-  if (depth > 8 || obj == null || typeof obj !== 'object') return [];
-  if (Array.isArray(obj)) {
-    // Check if this looks like an orders array
-    if (obj.length > 0 && typeof obj[0] === 'object' && obj[0] !== null) {
-      const first = obj[0] as Record<string, unknown>;
-      if ('orderId' in first || 'orderNo' in first || 'id' in first) {
-        return obj;
-      }
-    }
-    for (const item of obj) {
-      const result = findOrdersInObject(item, depth + 1);
-      if (result.length > 0) return result;
-    }
-  } else {
-    const rec = obj as Record<string, unknown>;
-    for (const key of ['orders', 'orderHistory', 'orderList', 'orderItems']) {
-      if (Array.isArray(rec[key]) && (rec[key] as unknown[]).length > 0) return rec[key] as unknown[];
-    }
-    for (const val of Object.values(rec)) {
-      const result = findOrdersInObject(val, depth + 1);
-      if (result.length > 0) return result;
-    }
-  }
-  return [];
-}
-
-function extractOrderFromJson(
-  item: Record<string, unknown>,
-  sinceDate: Date,
-): ScrapedOrder | 'skip' | 'older' {
-  const orderId = String(item.orderId ?? item.orderNo ?? item.id ?? '');
-  if (!orderId || !/\d{3}-\d{7}-\d{7}/.test(orderId)) return 'skip';
-
-  const rawDate = String(item.orderPlacedDate ?? item.orderDate ?? item.placedDate ?? '');
-  const d = rawDate ? new Date(rawDate) : null;
-  if (!d || isNaN(d.getTime())) return 'skip';
-  if (d < sinceDate) return 'older';
-
-  const statusRaw = String(item.status ?? item.orderStatus ?? '').toLowerCase();
-  if (/cancel|return|refund/.test(statusRaw)) return 'skip';
-
-  const totalObj = (item.grandTotal ?? item.orderTotal ?? {}) as Record<string, unknown>;
-  const cost = typeof totalObj === 'number'
-    ? totalObj
-    : parseMoney(String(totalObj.amount ?? totalObj.value ?? 0));
-
-  const lineItems = ((item.items ?? item.lineItems ?? []) as Record<string, unknown>[]);
-  const firstItem = lineItems[0] ?? {};
-  const itemDescription = String(firstItem.title ?? firstItem.name ?? '').slice(0, 120);
-
-  return {
-    platform: 'Amazon',
-    orderNumber: orderId,
-    orderDate: d.toISOString().split('T')[0],
-    itemDescription,
-    cost,
-    shippingCost: 0,
-    shippingAddress: '',
-    trackingNumbers: [],
-    sourceUrl: `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`,
-  };
-}
-
-function findNextPageUrl(doc: Document, html: string): string | null {
-  // Look for pagination next link
-  const nextEl = doc.querySelector(
-    '.a-pagination .a-last:not(.a-disabled) a, [aria-label="Go to next page"], a[href*="startIndex"]'
+function getNextPageUrl(): string | null {
+  const nextEl = document.querySelector(
+    '.a-pagination .a-last:not(.a-disabled) a, [aria-label="Next page"] a'
   ) as HTMLAnchorElement | null;
-  if (nextEl?.href && nextEl.href.includes('startIndex')) return nextEl.href;
-
-  // Scan HTML for next page startIndex
-  const m = html.match(/startIndex=(\d+)[^"]*"[^>]*>(?:Next|›)/i);
-  if (m) return `https://www.amazon.com/your-orders/orders?startIndex=${m[1]}`;
-
-  return null;
+  return nextEl?.href ?? null;
 }
 
 // ---------------------------------------------------------------------------
-// Enrich with order detail pages (tracking + shipping address)
+// Navigate to a URL and wait for the page to settle
 // ---------------------------------------------------------------------------
 
-async function enrichWithDetails(orders: ScrapedOrder[], onProgress: (msg: string) => void): Promise<void> {
-  for (let i = 0; i < orders.length; i++) {
-    const o = orders[i];
-    onProgress(`Fetching details ${i + 1}/${orders.length}…`);
+function navigateTo(url: string): Promise<void> {
+  return new Promise(resolve => {
+    window.location.href = url;
+    // Page will reload — the new content script instance will pick up via the
+    // stored sync state. We resolve after a short delay as a fallback.
+    setTimeout(resolve, 3000);
+  });
+}
 
-    const result = await fetchPage(o.sourceUrl);
-    if (!result) continue;
-    const { doc, html } = result;
+// ---------------------------------------------------------------------------
+// Fetch order detail for tracking + address (fetch is fine for detail pages
+// since they're server-rendered)
+// ---------------------------------------------------------------------------
 
-    // Shipping address
-    const addrEl = doc.querySelector('.displayAddressDiv, [class*="ship-to"], #shipToData');
-    if (addrEl) o.shippingAddress = (addrEl.textContent ?? '').replace(/\s+/g, ' ').trim();
+async function fetchOrderDetail(orderUrl: string): Promise<{ address: string; tracking: string[] }> {
+  try {
+    const res = await fetch(orderUrl, { credentials: 'include' });
+    const html = await res.text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
 
-    // Tracking numbers
+    const addrEl = doc.querySelector('.displayAddressDiv, [class*="ship-to"], #shippingAddress');
+    const address = (addrEl?.textContent ?? '').replace(/\s+/g, ' ').trim();
+
     const trackNums = new Set<string>();
-    const patterns = [
-      /trackingId[=\s"':]+([A-Z0-9]{10,30})/g,
-      /\b(1Z[A-Z0-9]{16})\b/g,
-      /\b([0-9]{20,22})\b/g,
-    ];
+    const patterns = [/trackingId[=\s"':]+([A-Z0-9]{10,30})/g, /\b(1Z[A-Z0-9]{16})\b/g];
     for (const pat of patterns) {
-      let m: RegExpExecArray | null;
-      while ((m = pat.exec(html)) !== null) trackNums.add(m[1]);
+      let tm: RegExpExecArray | null;
+      while ((tm = pat.exec(html)) !== null) trackNums.add(tm[1]);
     }
-    if (trackNums.size > 0) o.trackingNumbers = [...trackNums];
 
-    await new Promise(r => setTimeout(r, 300));
+    return { address, tracking: [...trackNums] };
+  } catch {
+    return { address: '', tracking: [] };
   }
 }
 
 // ---------------------------------------------------------------------------
-// Sync
+// Sync state stored in sessionStorage so it survives page navigation
+// ---------------------------------------------------------------------------
+
+const STATE_KEY = '__resell_sync_state__';
+
+interface SyncState {
+  sinceDate: string;
+  orders: ScrapedOrder[];
+  nextUrl: string | null;
+  trackerUrl: string;
+  apiKey: string;
+  userId: string;
+  page: number;
+}
+
+function saveState(state: SyncState) {
+  sessionStorage.setItem(STATE_KEY, JSON.stringify(state));
+}
+
+function loadState(): SyncState | null {
+  try {
+    const raw = sessionStorage.getItem(STATE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function clearState() {
+  sessionStorage.removeItem(STATE_KEY);
+}
+
+// ---------------------------------------------------------------------------
+// Main sync — single-page scrape + pagination via navigation
 // ---------------------------------------------------------------------------
 
 let syncing = false;
 
-async function sync() {
+async function runSync(state: SyncState) {
+  const sinceDate = new Date(state.sinceDate);
+
+  sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: state.orders.length, message: `Scraping page ${state.page}…` });
+
+  const { orders, hasOlder } = scrapeCurrentPage(sinceDate);
+  const seen = new Set(state.orders.map(o => o.orderNumber));
+  for (const o of orders) {
+    if (!seen.has(o.orderNumber)) { seen.add(o.orderNumber); state.orders.push(o); }
+  }
+
+  const nextUrl = hasOlder ? null : getNextPageUrl();
+
+  if (nextUrl && state.orders.length < 200) {
+    // Navigate to next page — save state first, new page load will resume
+    state.nextUrl = nextUrl;
+    state.page++;
+    saveState(state);
+    window.location.href = nextUrl;
+    return; // new page load takes over
+  }
+
+  // Done paginating — enrich with details then push
+  clearState();
+  const allOrders = state.orders;
+
+  if (allOrders.length === 0) {
+    setBadge('—');
+    sendMessage({ type: 'SYNC_DONE', result: { platform: 'Amazon', scraped: 0, imported: 0, updated: 0 } });
+    syncing = false;
+    return;
+  }
+
+  sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Found ${allOrders.length} orders, fetching details…` });
+
+  for (let i = 0; i < allOrders.length; i++) {
+    sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Fetching details ${i + 1}/${allOrders.length}…` });
+    const detail = await fetchOrderDetail(allOrders[i].sourceUrl);
+    allOrders[i].shippingAddress = detail.address;
+    allOrders[i].trackingNumbers = detail.tracking;
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  try {
+    const result = await pushOrders(state.trackerUrl, state.apiKey, state.userId, allOrders);
+    await setLastSync('amazon', new Date().toISOString().split('T')[0]);
+    setBadge(`+${result.imported}`, '#22c55e');
+    sendMessage({ type: 'SYNC_DONE', result: { platform: 'Amazon', scraped: allOrders.length, ...result } });
+  } catch (err) {
+    setBadge('!', '#ef4444');
+    sendMessage({ type: 'SYNC_ERROR', platform: 'Amazon', error: err instanceof Error ? err.message : String(err) });
+  }
+
+  syncing = false;
+}
+
+async function startSync() {
   if (syncing) return;
   syncing = true;
 
@@ -265,67 +237,50 @@ async function sync() {
 
   const sinceDate = settings.amazonLastSync
     ? new Date(settings.amazonLastSync)
-    : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000); // default 90 days
+    : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
   setBadge('…');
   sendMessage({ type: 'SYNC_STARTED', platform: 'Amazon' });
 
-  const allOrders: ScrapedOrder[] = [];
-  const seen = new Set<string>();
-  let url: string | null = 'https://www.amazon.com/your-orders/orders';
-  let page = 1;
-
-  while (url) {
-    sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Fetching page ${page}…` });
-    const result = await fetchPage(url);
-    if (!result) break;
-
-    // Debug: log page title and first order ID found so we can verify parsing
-    const pageTitle = result.doc.title;
-    const firstId = result.html.match(/\b(\d{3}-\d{7}-\d{7})\b/)?.[1] ?? 'none';
-    console.log(`[Amazon sync] page ${page} title="${pageTitle}" firstOrderId=${firstId} htmlLen=${result.html.length}`);
-
-    const { orders, hasOlder, nextUrl } = parseOrdersFromPage(result.doc, result.html, sinceDate);
-    console.log(`[Amazon sync] page ${page}: found ${orders.length} orders, hasOlder=${hasOlder}, nextUrl=${nextUrl}`);
-    for (const o of orders) {
-      if (!seen.has(o.orderNumber)) { seen.add(o.orderNumber); allOrders.push(o); }
-    }
-
-    if (hasOlder) break;
-    if (orders.length === 0) break; // empty page = end of results
-    if (page >= 20) break; // safety limit
-    url = nextUrl;
-    page++;
-    await new Promise(r => setTimeout(r, 500));
-  }
-
-  sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Found ${allOrders.length} orders` });
-
-  if (allOrders.length === 0) {
-    setBadge('—');
-    sendMessage({ type: 'SYNC_DONE', result: { platform: 'Amazon', scraped: 0, imported: 0, updated: 0 } });
-    syncing = false;
+  // Navigate to orders page if not already there
+  if (!location.pathname.includes('your-orders') && !location.pathname.includes('order-history') && !location.href.includes('order-history')) {
+    const state: SyncState = {
+      sinceDate: sinceDate.toISOString(),
+      orders: [],
+      nextUrl: null,
+      trackerUrl: settings.trackerUrl,
+      apiKey: settings.apiKey ?? '',
+      userId: settings.userId,
+      page: 1,
+    };
+    saveState(state);
+    window.location.href = 'https://www.amazon.com/your-orders/orders';
     return;
   }
 
-  sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Fetching tracking & addresses for ${allOrders.length} orders…` });
-  await enrichWithDetails(allOrders, msg =>
-    sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: msg })
-  );
-
-  try {
-    const result = await pushOrders(settings.trackerUrl, settings.apiKey, settings.userId, allOrders);
-    await setLastSync('amazon', new Date().toISOString().split('T')[0]);
-    setBadge(`+${result.imported}`, '#22c55e');
-    sendMessage({ type: 'SYNC_DONE', result: { platform: 'Amazon', scraped: allOrders.length, ...result } });
-  } catch (err) {
-    setBadge('!', '#ef4444');
-    sendMessage({ type: 'SYNC_ERROR', platform: 'Amazon', error: err instanceof Error ? err.message : String(err) });
-  }
-
-  syncing = false;
+  const state: SyncState = {
+    sinceDate: sinceDate.toISOString(),
+    orders: [],
+    nextUrl: null,
+    trackerUrl: settings.trackerUrl,
+    apiKey: settings.apiKey ?? '',
+    userId: settings.userId,
+    page: 1,
+  };
+  saveState(state);
+  await runSync(state);
 }
 
+// On page load, check if there's a pending sync to resume
+(async () => {
+  const state = loadState();
+  if (state) {
+    syncing = true;
+    sendMessage({ type: 'SYNC_STARTED', platform: 'Amazon' });
+    await runSync(state);
+  }
+})();
+
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.type === 'START_SYNC' && msg.platform === 'Amazon') sync();
+  if (msg.type === 'START_SYNC' && msg.platform === 'Amazon') startSync();
 });
