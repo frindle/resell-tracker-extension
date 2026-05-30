@@ -142,9 +142,7 @@ function parseOrdersFromDoc(doc: Document, sinceDate: Date): { orders: ScrapedOr
 async function enrichWithDetails(orders: ScrapedOrder[], onProgress: (msg: string) => void): Promise<void> {
   for (let i = 0; i < orders.length; i++) {
     const o = orders[i];
-    if ((i + 1) % 3 === 0 || i === 0) {
-      onProgress(`Fetching details ${i + 1}/${orders.length}…`);
-    }
+    onProgress(`Fetching details ${i + 1}/${orders.length}…`);
 
     const doc = await fetchOrderDetail(o.orderNumber);
     if (!doc) continue;

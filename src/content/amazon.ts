@@ -207,7 +207,7 @@ function findNextPageUrl(doc: Document, html: string): string | null {
 async function enrichWithDetails(orders: ScrapedOrder[], onProgress: (msg: string) => void): Promise<void> {
   for (let i = 0; i < orders.length; i++) {
     const o = orders[i];
-    if (i % 3 === 0) onProgress(`Fetching details ${i + 1}/${orders.length}…`);
+    onProgress(`Fetching details ${i + 1}/${orders.length}…`);
 
     const result = await fetchPage(o.sourceUrl);
     if (!result) continue;

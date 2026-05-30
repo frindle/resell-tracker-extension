@@ -311,9 +311,7 @@
       async function enrichWithDetails(orders, onProgress) {
         for (let i = 0; i < orders.length; i++) {
           const o = orders[i];
-          if ((i + 1) % 3 === 0 || i === 0) {
-            onProgress(`Fetching details ${i + 1}/${orders.length}\u2026`);
-          }
+          onProgress(`Fetching details ${i + 1}/${orders.length}\u2026`);
           const doc = await fetchOrderDetail(o.orderNumber);
           if (!doc) continue;
           const html = doc.documentElement.innerHTML;

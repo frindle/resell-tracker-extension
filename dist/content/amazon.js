@@ -348,7 +348,7 @@
       async function enrichWithDetails(orders, onProgress) {
         for (let i = 0; i < orders.length; i++) {
           const o = orders[i];
-          if (i % 3 === 0) onProgress(`Fetching details ${i + 1}/${orders.length}\u2026`);
+          onProgress(`Fetching details ${i + 1}/${orders.length}\u2026`);
           const result = await fetchPage(o.sourceUrl);
           if (!result) continue;
           const { doc, html } = result;
