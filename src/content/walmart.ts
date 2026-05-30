@@ -28,47 +28,54 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
 
   // __NEXT_DATA__ on walmart.com is a static shell — orders are client-rendered.
   // Read the live DOM directly.
-  const blocks = Array.from(document.querySelectorAll(
-    '[data-automation-id*="order-card"], [data-testid*="order"], .order-card, article[class*="order"]'
-  ));
+  const blocks = Array.from(document.querySelectorAll('[data-testid^="orderGroup"]'));
   console.log('[WM] DOM blocks found:', blocks.length, 'url:', location.href);
-  if (blocks[0]) console.log('[WM] first block HTML:', blocks[0].innerHTML.slice(0, 800));
+  if (blocks[0]) console.log('[WM] first block text:', (blocks[0].textContent ?? '').replace(/\s+/g, ' ').slice(0, 600));
 
   for (const block of blocks) {
-    // Order number — try data attrs first, then text containing order number pattern
-    const orderNumEl = block.querySelector(
-      '[data-automation-id*="order-number"], [class*="order-number"], [class*="orderNumber"], [data-order-id]'
-    );
-    let orderNumber = (orderNumEl?.textContent ?? orderNumEl?.getAttribute('data-order-id') ?? '').replace(/\D/g, '');
+    const blockText = (block.textContent ?? '').replace(/\s+/g, ' ');
+
+    // Order number — from id="caption-XXXXXXXXX..." or text "Order # XXXXXXXXX"
+    let orderNumber = '';
+    const captionEl = block.querySelector('[id^="caption-"]');
+    if (captionEl) {
+      const idMatch = captionEl.id.match(/caption-(\d+)/);
+      if (idMatch) orderNumber = idMatch[1];
+    }
     if (!orderNumber) {
-      // Scan all text for a Walmart order number pattern (13+ digits)
-      const text = block.textContent ?? '';
-      const m = text.match(/\b(\d{13,20})\b/);
+      const m = blockText.match(/Order\s*#?\s*(\d{10,})/i);
+      if (m) orderNumber = m[1];
+    }
+    if (!orderNumber) {
+      const m = blockText.match(/\b(\d{13,20})\b/);
       if (m) orderNumber = m[1];
     }
     if (!orderNumber || seen.has(orderNumber)) continue;
     seen.add(orderNumber);
 
-    // Date
-    const dateEl = block.querySelector('[data-automation-id*="order-date"], [class*="order-date"], [class*="orderDate"], time');
-    const rawDate = dateEl?.getAttribute('datetime') ?? dateEl?.textContent ?? '';
-    const orderDate = new Date(rawDate);
+    // Date — look for "Delivered", "Placed", month/day/year patterns
+    const dateMatch = blockText.match(/(?:Placed|Ordered|Delivered)\s+(\w+ \d{1,2},?\s+\d{4})/i)
+      ?? blockText.match(/(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i);
+    if (!dateMatch) {
+      console.log('[WM] skipping order', orderNumber, '- no date found in:', blockText.slice(0, 200));
+      continue;
+    }
+    const orderDate = new Date(dateMatch[1]);
     if (isNaN(orderDate.getTime())) {
-      console.log('[WM] skipping order', orderNumber, '- bad date:', rawDate);
+      console.log('[WM] skipping order', orderNumber, '- bad date:', dateMatch[1]);
       continue;
     }
     if (orderDate.toISOString().split('T')[0] < sinceDate.toISOString().split('T')[0]) { hasOlder = true; continue; }
 
     // Status
-    const statusEl = block.querySelector('[data-automation-id*="delivery-status"], [data-automation-id*="order-status"], [class*="status"]');
-    if (/cancel|return|refund/.test((statusEl?.textContent ?? '').toLowerCase())) continue;
+    if (/\b(cancelled|canceled|returned|refunded)\b/i.test(blockText)) continue;
 
-    // Total
-    const totalEl = block.querySelector('[data-automation-id*="order-total"], [class*="order-total"], [class*="orderTotal"]');
-    const cost = parseMoney(totalEl?.textContent ?? '0');
+    // Total — "Total $XX.XX"
+    const totalMatch = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
+    const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
 
-    // Item description
-    const itemEl = block.querySelector('[data-automation-id*="product-title"], [class*="product-title"], [class*="item-title"], [class*="itemTitle"]');
+    // Item description — first product link or heading text
+    const itemEl = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
     const itemDescription = (itemEl?.textContent ?? '').trim().slice(0, 120);
 
     orders.push({
