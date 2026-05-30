@@ -176,11 +176,9 @@
 
   // src/lib/api.ts
   async function fetchUsers(trackerUrl) {
-    const url = `${trackerUrl.replace(/\/$/, "")}/api/users`;
-    const res = await fetch(url, { headers: { "Content-Type": "application/json" } });
-    if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => res.statusText)}`);
-    const data = await res.json();
-    return data.map((u) => ({ id: u.id, name: u.name }));
+    const res = await chrome.runtime.sendMessage({ type: "FETCH_USERS", trackerUrl });
+    if (res?.error) throw new Error(res.error);
+    return res.map((u) => ({ id: u.id, name: u.name }));
   }
   var import_browser_polyfill_min2;
   var init_api = __esm({

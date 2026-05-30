@@ -177,31 +177,9 @@
 
   // src/lib/api.ts
   async function pushOrders(trackerUrl, apiKey, userId, orders) {
-    const url = `${trackerUrl.replace(/\/$/, "")}/api/import`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...userId ? { "X-Extension-User-Id": userId } : {},
-        ...apiKey ? { "X-API-Key": apiKey } : {}
-      },
-      body: JSON.stringify(orders.map((o) => ({
-        platform: o.platform,
-        orderNumber: o.orderNumber,
-        orderDate: o.orderDate,
-        itemDescription: o.itemDescription,
-        cost: o.cost,
-        shippingCost: o.shippingCost,
-        shippingAddress: o.shippingAddress,
-        trackingNumbers: o.trackingNumbers,
-        sourceUrl: o.sourceUrl || null
-      })))
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => res.statusText);
-      throw new Error(`Tracker API error ${res.status}: ${text}`);
-    }
-    return res.json();
+    const res = await chrome.runtime.sendMessage({ type: "PUSH_ORDERS", trackerUrl, apiKey, userId, orders });
+    if (res?.error) throw new Error(res.error);
+    return res;
   }
   var import_browser_polyfill_min2;
   var init_api = __esm({
