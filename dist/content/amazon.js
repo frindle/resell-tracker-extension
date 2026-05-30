@@ -24,6 +24,8 @@
       DEFAULTS = {
         trackerUrl: "",
         apiKey: "",
+        userId: "",
+        userName: "",
         amazonLastSync: "",
         walmartLastSync: ""
       };
@@ -31,12 +33,13 @@
   });
 
   // src/lib/api.ts
-  async function pushOrders(trackerUrl, apiKey, orders) {
+  async function pushOrders(trackerUrl, apiKey, userId, orders) {
     const url = `${trackerUrl.replace(/\/$/, "")}/api/import`;
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...userId ? { "X-Extension-User-Id": userId } : {},
         ...apiKey ? { "X-API-Key": apiKey } : {}
       },
       body: JSON.stringify(orders.map((o) => ({
@@ -160,7 +163,7 @@
           }
         }
         try {
-          const result = await pushOrders(settings.trackerUrl, settings.apiKey, orders);
+          const result = await pushOrders(settings.trackerUrl, settings.apiKey, settings.userId, orders);
           await setLastSync("amazon", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
           sendMessage({ type: "SYNC_DONE", result: { platform: "Amazon", scraped: orders.length, ...result } });
         } catch (err) {

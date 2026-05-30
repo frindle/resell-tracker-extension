@@ -147,7 +147,7 @@ async function sync() {
   }
 
   try {
-    const result = await pushOrders(settings.trackerUrl, settings.apiKey, orders);
+    const result = await pushOrders(settings.trackerUrl, settings.apiKey, settings.userId, orders);
     await setLastSync('amazon', new Date().toISOString().split('T')[0]);
     sendMessage({ type: 'SYNC_DONE', result: { platform: 'Amazon', scraped: orders.length, ...result } });
   } catch (err) {

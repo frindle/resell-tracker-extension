@@ -20,6 +20,8 @@
       DEFAULTS = {
         trackerUrl: "",
         apiKey: "",
+        userId: "",
+        userName: "",
         amazonLastSync: "",
         walmartLastSync: ""
       };
@@ -41,7 +43,7 @@
       }
       async function init() {
         const settings = await getSettings();
-        if (!settings.trackerUrl) {
+        if (!settings.trackerUrl || !settings.userId) {
           document.getElementById("notConfigured").style.display = "block";
         }
         if (settings.amazonLastSync) setMeta("Amazon", `Last sync: ${settings.amazonLastSync}`);

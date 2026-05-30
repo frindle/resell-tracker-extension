@@ -3,6 +3,8 @@ import type { SyncSettings } from './types';
 const DEFAULTS: SyncSettings = {
   trackerUrl: '',
   apiKey: '',
+  userId: '',
+  userName: '',
   amazonLastSync: '',
   walmartLastSync: '',
 };

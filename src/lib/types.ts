@@ -15,8 +15,15 @@ export interface ScrapedOrder {
 export interface SyncSettings {
   trackerUrl: string;       // e.g. http://10.0.12.39:3000
   apiKey: string;
+  userId: string;           // selected tracker user id
+  userName: string;         // display name
   amazonLastSync: string;   // ISO date
   walmartLastSync: string;  // ISO date
+}
+
+export interface TrackerUser {
+  id: number;
+  name: string;
 }
 
 export interface SyncResult {

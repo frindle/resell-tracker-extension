@@ -1,4 +1,4 @@
-import type { ScrapedOrder } from './types';
+import type { ScrapedOrder, TrackerUser } from './types';
 
 export interface ImportResult {
   imported: number;
@@ -6,9 +6,18 @@ export interface ImportResult {
   skipped: number;
 }
 
+export async function fetchUsers(trackerUrl: string): Promise<TrackerUser[]> {
+  const url = `${trackerUrl.replace(/\/$/, '')}/api/users`;
+  const res = await fetch(url, { headers: { 'Content-Type': 'application/json' } });
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => res.statusText)}`);
+  const data = await res.json();
+  return data.map((u: { id: number; name: string }) => ({ id: u.id, name: u.name }));
+}
+
 export async function pushOrders(
   trackerUrl: string,
   apiKey: string,
+  userId: string,
   orders: ScrapedOrder[],
 ): Promise<ImportResult> {
   const url = `${trackerUrl.replace(/\/$/, '')}/api/import`;
@@ -16,6 +25,7 @@ export async function pushOrders(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...(userId ? { 'X-Extension-User-Id': userId } : {}),
       ...(apiKey ? { 'X-API-Key': apiKey } : {}),
     },
     body: JSON.stringify(orders.map(o => ({
@@ -39,11 +49,3 @@ export async function pushOrders(
   return res.json();
 }
 
-export async function testConnection(trackerUrl: string, apiKey: string): Promise<void> {
-  const url = `${trackerUrl.replace(/\/$/, '')}/api/auth/me`;
-  const res = await fetch(url, {
-    headers: apiKey ? { 'X-API-Key': apiKey } : {},
-    credentials: 'include',
-  });
-  if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => res.statusText)}`);
-}

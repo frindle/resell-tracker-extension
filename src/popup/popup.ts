@@ -15,7 +15,7 @@ function setMeta(platform: 'Amazon' | 'Walmart', text: string) {
 async function init() {
   const settings = await getSettings();
 
-  if (!settings.trackerUrl) {
+  if (!settings.trackerUrl || !settings.userId) {
     document.getElementById('notConfigured')!.style.display = 'block';
   }
 
