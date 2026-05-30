@@ -20,19 +20,14 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.amazon.com/gp/css/order-history*",
-        "https://www.amazon.com/your-orders/orders*",
-        "https://www.amazon.com/gp/your-account/order-history*",
-        "https://www.amazon.com/gp/your-account/order-details*",
-        "https://www.amazon.com/orders*"
+        "https://www.amazon.com/*"
       ],
       "js": ["content/amazon.js"],
       "run_at": "document_idle"
     },
     {
       "matches": [
-        "https://www.walmart.com/orders*",
-        "https://www.walmart.com/account/order-history*"
+        "https://www.walmart.com/*"
       ],
       "js": ["content/walmart.js"],
       "run_at": "document_idle"
