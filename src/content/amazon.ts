@@ -78,9 +78,20 @@ function parseOrdersFromPage(
     const end = Math.min(html.length, m.index + 1000);
     const ctx = html.slice(start, end);
 
-    // Find a date in context
+    // Log context around first order ID to diagnose date format
+    if (found.size === 1) {
+      console.log('[Amazon scraper] context around first order ID:', ctx.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 600));
+    }
+
+    // Find a date in context — try multiple formats
     const dateMatch = ctx.match(
       /(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}/i
+    ) ?? ctx.match(
+      /(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+\d{4}/i
+    ) ?? ctx.match(
+      /"orderDate"\s*:\s*"(\d{4}-\d{2}-\d{2})/
+    ) ?? ctx.match(
+      /(\d{4}-\d{2}-\d{2})/
     ) ?? ctx.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
 
     let orderDate = '';
