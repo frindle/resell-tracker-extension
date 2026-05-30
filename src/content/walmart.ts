@@ -17,10 +17,8 @@ function parseDate(text: string): string {
 }
 
 function formatOrderNumber(raw: string): string {
-  // Walmart order numbers are XXXXXXX-XXXXXXXX; sometimes exported without hyphen
-  const digits = raw.replace(/\D/g, '');
-  if (digits.length === 15) return `${digits.slice(0, 7)}-${digits.slice(7)}`;
-  return raw.trim();
+  // Walmart URLs use the number with no hyphen; strip any that got in
+  return raw.replace(/\D/g, '');
 }
 
 function sendMessage(msg: SyncMessage) {
