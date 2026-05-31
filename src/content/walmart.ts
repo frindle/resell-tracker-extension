@@ -69,7 +69,8 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
     // Append current year if missing; if result is in the future, use prior year
     let rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear}`;
     let orderDate = new Date(rawDateStr);
-    if (!isNaN(orderDate.getTime()) && orderDate > new Date()) {
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+    if (!isNaN(orderDate.getTime()) && orderDate > tomorrow) {
       rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear - 1}`;
       orderDate = new Date(rawDateStr);
     }
