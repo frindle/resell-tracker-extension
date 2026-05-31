@@ -92,12 +92,26 @@ async function getAuth(): Promise<{ token: string; clientId: string; warehouseNu
     }
     console.log('[CST] no intercepted token — trying live MSAL instance…');
 
-    // Try acquiring a token from Costco's own MSAL instance in the MAIN world
-    const msalToken = await chrome.runtime.sendMessage({ type: 'GET_MSAL_TOKEN' }).catch(() => null) as string | null;
-    if (msalToken) {
-      console.log('[CST] got token from MSAL instance');
-      const clientId = location.href.match(/\/app\/([0-9a-f-]{36})\//i)?.[1] ?? '';
-      return { token: msalToken, clientId, warehouseNumber: getWarehouseNumber() || '0' };
+    // Try /gettoken — Costco's own same-origin endpoint that may return the right API token
+    try {
+      const gtRes = await fetch('/gettoken', { credentials: 'include' });
+      console.log('[CST] /gettoken status:', gtRes.status);
+      if (gtRes.ok) {
+        const gtData = await gtRes.json();
+        console.log('[CST] /gettoken keys:', Object.keys(gtData));
+        const gtToken = gtData.id_token ?? gtData.access_token ?? gtData.token ?? '';
+        if (gtToken) {
+          try {
+            const p = JSON.parse(atob(gtToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+            console.log('[CST] /gettoken token aud:', p.aud, 'iss:', p.iss, 'exp:', new Date(p.exp * 1000).toISOString());
+          } catch { /* skip */ }
+          const clientId = location.href.match(/\/app\/([0-9a-f-]{36})\//i)?.[1] ?? '';
+          console.log('[CST] using /gettoken token, clientId:', clientId);
+          return { token: gtToken, clientId, warehouseNumber: getWarehouseNumber() || '0' };
+        }
+      }
+    } catch (e) {
+      console.error('[CST] /gettoken failed', e);
     }
 
     // Fall back to MSAL refresh token grant

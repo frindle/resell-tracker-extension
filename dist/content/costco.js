@@ -271,11 +271,26 @@
             return { token: intercepted.token, clientId: intercepted.clientId, warehouseNumber: getWarehouseNumber() || "0" };
           }
           console.log("[CST] no intercepted token \u2014 trying live MSAL instance\u2026");
-          const msalToken = await chrome.runtime.sendMessage({ type: "GET_MSAL_TOKEN" }).catch(() => null);
-          if (msalToken) {
-            console.log("[CST] got token from MSAL instance");
-            const clientId2 = location.href.match(/\/app\/([0-9a-f-]{36})\//i)?.[1] ?? "";
-            return { token: msalToken, clientId: clientId2, warehouseNumber: getWarehouseNumber() || "0" };
+          try {
+            const gtRes = await fetch("/gettoken", { credentials: "include" });
+            console.log("[CST] /gettoken status:", gtRes.status);
+            if (gtRes.ok) {
+              const gtData = await gtRes.json();
+              console.log("[CST] /gettoken keys:", Object.keys(gtData));
+              const gtToken = gtData.id_token ?? gtData.access_token ?? gtData.token ?? "";
+              if (gtToken) {
+                try {
+                  const p = JSON.parse(atob(gtToken.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+                  console.log("[CST] /gettoken token aud:", p.aud, "iss:", p.iss, "exp:", new Date(p.exp * 1e3).toISOString());
+                } catch {
+                }
+                const clientId2 = location.href.match(/\/app\/([0-9a-f-]{36})\//i)?.[1] ?? "";
+                console.log("[CST] using /gettoken token, clientId:", clientId2);
+                return { token: gtToken, clientId: clientId2, warehouseNumber: getWarehouseNumber() || "0" };
+              }
+            }
+          } catch (e) {
+            console.error("[CST] /gettoken failed", e);
           }
           let token = await getMsalToken();
           console.log("[CST] msal token found:", !!token);
