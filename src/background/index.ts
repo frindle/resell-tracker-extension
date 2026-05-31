@@ -80,30 +80,56 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function inPageGetMsalToken(): Promise<string | null> {
   const w = window as Record<string, unknown>;
 
-  // Costco stores their MSAL instance under various names — find it by duck-typing
-  let msalInstance: { getAllAccounts(): unknown[]; acquireTokenSilent(req: unknown): Promise<{ idToken?: string; accessToken?: string }> } | null = null;
+  // Log all window keys that look auth/token related so we can identify the instance
+  const interesting: string[] = [];
   for (const key of Object.keys(w)) {
-    const v = w[key] as Record<string, unknown> | null;
-    if (v && typeof v === 'object' && typeof (v as Record<string, unknown>).getAllAccounts === 'function' && typeof (v as Record<string, unknown>).acquireTokenSilent === 'function') {
-      msalInstance = v as typeof msalInstance;
-      console.log('[CST-MAIN] found MSAL instance at window.' + key);
-      break;
+    if (/msal|azure|token|auth|costco.*auth|azuretoken/i.test(key)) interesting.push(key);
+  }
+  console.log('[CST-MAIN] interesting window keys:', interesting);
+
+  // Scan ALL window properties for an MSAL-like instance (getAllAccounts + acquireTokenSilent)
+  type MsalLike = { getAllAccounts(): unknown[]; acquireTokenSilent(r: unknown): Promise<{ idToken?: string; accessToken?: string }> };
+  let msalInstance: MsalLike | null = null;
+
+  function isMsal(v: unknown): v is MsalLike {
+    return !!v && typeof v === 'object' &&
+      typeof (v as Record<string, unknown>).getAllAccounts === 'function' &&
+      typeof (v as Record<string, unknown>).acquireTokenSilent === 'function';
+  }
+
+  for (const key of Object.keys(w)) {
+    const v = w[key];
+    if (isMsal(v)) { msalInstance = v; console.log('[CST-MAIN] found MSAL at window.' + key); break; }
+    // Check one level deep (e.g. window.AzureAuth.msalInstance)
+    if (v && typeof v === 'object') {
+      for (const k2 of Object.keys(v as object)) {
+        const v2 = (v as Record<string, unknown>)[k2];
+        if (isMsal(v2)) { msalInstance = v2; console.log('[CST-MAIN] found MSAL at window.' + key + '.' + k2); break; }
+      }
+      if (msalInstance) break;
     }
   }
-  if (!msalInstance) { console.log('[CST-MAIN] no MSAL instance found on window'); return null; }
+
+  // Also try common explicit names
+  if (!msalInstance) {
+    for (const name of ['msalInstance', 'msal', '__msal', 'msalApp', 'azureMsal', 'authInstance', 'pca']) {
+      if (isMsal(w[name])) { msalInstance = w[name] as MsalLike; console.log('[CST-MAIN] found MSAL at window.' + name); break; }
+    }
+  }
+
+  if (!msalInstance) { console.log('[CST-MAIN] no MSAL instance found'); return null; }
 
   const accounts = msalInstance.getAllAccounts();
   if (!accounts.length) { console.log('[CST-MAIN] MSAL: no accounts'); return null; }
   const account = accounts[0] as Record<string, unknown>;
-  console.log('[CST-MAIN] acquiring token silently for account', account.username ?? account.localAccountId);
+  console.log('[CST-MAIN] found account:', account.username ?? account.localAccountId);
 
   try {
     const result = await msalInstance.acquireTokenSilent({ account, scopes: ['openid', 'profile'] });
-    const token = result.idToken ?? result.accessToken ?? null;
-    console.log('[CST-MAIN] acquireTokenSilent ok, got idToken:', !!result.idToken, 'accessToken:', !!result.accessToken);
-    return token ?? null;
+    console.log('[CST-MAIN] acquireTokenSilent ok, idToken:', !!result.idToken, 'accessToken:', !!result.accessToken);
+    return result.idToken ?? result.accessToken ?? null;
   } catch (e) {
-    console.error('[CST-MAIN] acquireTokenSilent failed', e);
+    console.error('[CST-MAIN] acquireTokenSilent failed', String(e));
     return null;
   }
 }

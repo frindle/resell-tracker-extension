@@ -79,17 +79,45 @@
       });
       async function inPageGetMsalToken() {
         const w = window;
+        const interesting = [];
+        for (const key of Object.keys(w)) {
+          if (/msal|azure|token|auth|costco.*auth|azuretoken/i.test(key)) interesting.push(key);
+        }
+        console.log("[CST-MAIN] interesting window keys:", interesting);
         let msalInstance = null;
+        function isMsal(v) {
+          return !!v && typeof v === "object" && typeof v.getAllAccounts === "function" && typeof v.acquireTokenSilent === "function";
+        }
         for (const key of Object.keys(w)) {
           const v = w[key];
-          if (v && typeof v === "object" && typeof v.getAllAccounts === "function" && typeof v.acquireTokenSilent === "function") {
+          if (isMsal(v)) {
             msalInstance = v;
-            console.log("[CST-MAIN] found MSAL instance at window." + key);
+            console.log("[CST-MAIN] found MSAL at window." + key);
             break;
+          }
+          if (v && typeof v === "object") {
+            for (const k2 of Object.keys(v)) {
+              const v2 = v[k2];
+              if (isMsal(v2)) {
+                msalInstance = v2;
+                console.log("[CST-MAIN] found MSAL at window." + key + "." + k2);
+                break;
+              }
+            }
+            if (msalInstance) break;
           }
         }
         if (!msalInstance) {
-          console.log("[CST-MAIN] no MSAL instance found on window");
+          for (const name of ["msalInstance", "msal", "__msal", "msalApp", "azureMsal", "authInstance", "pca"]) {
+            if (isMsal(w[name])) {
+              msalInstance = w[name];
+              console.log("[CST-MAIN] found MSAL at window." + name);
+              break;
+            }
+          }
+        }
+        if (!msalInstance) {
+          console.log("[CST-MAIN] no MSAL instance found");
           return null;
         }
         const accounts = msalInstance.getAllAccounts();
@@ -98,14 +126,13 @@
           return null;
         }
         const account = accounts[0];
-        console.log("[CST-MAIN] acquiring token silently for account", account.username ?? account.localAccountId);
+        console.log("[CST-MAIN] found account:", account.username ?? account.localAccountId);
         try {
           const result = await msalInstance.acquireTokenSilent({ account, scopes: ["openid", "profile"] });
-          const token = result.idToken ?? result.accessToken ?? null;
-          console.log("[CST-MAIN] acquireTokenSilent ok, got idToken:", !!result.idToken, "accessToken:", !!result.accessToken);
-          return token ?? null;
+          console.log("[CST-MAIN] acquireTokenSilent ok, idToken:", !!result.idToken, "accessToken:", !!result.accessToken);
+          return result.idToken ?? result.accessToken ?? null;
         } catch (e) {
-          console.error("[CST-MAIN] acquireTokenSilent failed", e);
+          console.error("[CST-MAIN] acquireTokenSilent failed", String(e));
           return null;
         }
       }
