@@ -101,20 +101,67 @@ function getNextStartIndex(doc: Document): number | null {
 }
 
 // ---------------------------------------------------------------------------
-// Fetch an orders page as HTML without navigating (avoids trust token quota)
+// Fetch HTML via background worker (avoids trust token quota)
 // ---------------------------------------------------------------------------
 
-async function fetchOrdersPage(startIndex: number): Promise<Document | null> {
-  const url = `https://www.amazon.com/your-orders/orders?startIndex=${startIndex}`;
+async function fetchHtml(url: string): Promise<Document | null> {
   try {
-    // Route through background service worker to avoid trust token quota errors
     const resp = await chrome.runtime.sendMessage({ type: 'FETCH_HTML', url });
-    if (resp?.error) { console.warn('[AMZ] fetch page error', resp.error); return null; }
+    if (resp?.error) { console.warn('[AMZ] fetch error', url, resp.error); return null; }
     return new DOMParser().parseFromString(resp.html, 'text/html');
   } catch (e) {
-    console.warn('[AMZ] fetch page error', e);
+    console.warn('[AMZ] fetch error', url, e);
     return null;
   }
+}
+
+async function fetchTrackingNumbers(orderId: string): Promise<string[]> {
+  const url = `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`;
+  const doc = await fetchHtml(url);
+  if (!doc) return [];
+
+  const tracking: string[] = [];
+  const text = doc.body?.innerText ?? doc.body?.textContent ?? '';
+
+  // Amazon shows tracking numbers in various formats on the detail page
+  // Look for carrier tracking number patterns
+  const patterns = [
+    /\b(1Z[A-Z0-9]{16})\b/g,                    // UPS
+    /\b([0-9]{20,22})\b/g,                        // USPS/FedEx 20-22 digit
+    /\b(9[2345][0-9]{18,20})\b/g,                 // USPS
+    /\b([0-9]{12,15})\b/g,                        // FedEx
+  ];
+
+  // Also look for tracking links (most reliable)
+  const trackLinks = Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href*="tracking"], a[href*="track"]'));
+  for (const a of trackLinks) {
+    const href = a.href;
+    // Extract tracking number from URL params
+    const m = href.match(/[?&](?:trackingId|tracking_number|number|p_shipment_tracking_id|shipmentId)=([A-Z0-9]+)/i);
+    if (m && m[1].length >= 10) tracking.push(m[1]);
+    // Also check link text
+    const linkText = (a.textContent ?? '').trim().replace(/\s+/g, '');
+    if (/^[A-Z0-9]{10,}$/.test(linkText)) tracking.push(linkText);
+  }
+
+  // Fallback: scan page text for tracking numbers
+  if (tracking.length === 0) {
+    for (const pattern of patterns) {
+      let m;
+      while ((m = pattern.exec(text)) !== null) {
+        if (!tracking.includes(m[1])) tracking.push(m[1]);
+        if (tracking.length >= 3) break;
+      }
+    }
+  }
+
+  const unique = [...new Set(tracking)].slice(0, 5);
+  if (unique.length) console.log('[AMZ] tracking for', orderId, ':', unique);
+  return unique;
+}
+
+async function fetchOrdersPage(startIndex: number): Promise<Document | null> {
+  return fetchHtml(`https://www.amazon.com/your-orders/orders?startIndex=${startIndex}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +263,17 @@ async function runSync(state: SyncState) {
   }
 
   clearState();
+
+  // Fetch tracking numbers for recent orders (last 60 days)
+  const trackingCutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const recentOrders = allOrders.filter(o => o.orderDate >= trackingCutoff);
+  if (recentOrders.length > 0) {
+    sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Fetching tracking for ${recentOrders.length} recent orders…` });
+    for (const order of recentOrders) {
+      await new Promise(r => setTimeout(r, 800));
+      order.trackingNumbers = await fetchTrackingNumbers(order.orderNumber);
+    }
+  }
 
   if (allOrders.length === 0) {
     setBadge('—');

@@ -282,19 +282,58 @@
         const m = nextEl.href.match(/startIndex=(\d+)/);
         return m ? parseInt(m[1]) : null;
       }
-      async function fetchOrdersPage(startIndex) {
-        const url = `https://www.amazon.com/your-orders/orders?startIndex=${startIndex}`;
+      async function fetchHtml(url) {
         try {
           const resp = await chrome.runtime.sendMessage({ type: "FETCH_HTML", url });
           if (resp?.error) {
-            console.warn("[AMZ] fetch page error", resp.error);
+            console.warn("[AMZ] fetch error", url, resp.error);
             return null;
           }
           return new DOMParser().parseFromString(resp.html, "text/html");
         } catch (e) {
-          console.warn("[AMZ] fetch page error", e);
+          console.warn("[AMZ] fetch error", url, e);
           return null;
         }
+      }
+      async function fetchTrackingNumbers(orderId) {
+        const url = `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`;
+        const doc = await fetchHtml(url);
+        if (!doc) return [];
+        const tracking = [];
+        const text = doc.body?.innerText ?? doc.body?.textContent ?? "";
+        const patterns = [
+          /\b(1Z[A-Z0-9]{16})\b/g,
+          // UPS
+          /\b([0-9]{20,22})\b/g,
+          // USPS/FedEx 20-22 digit
+          /\b(9[2345][0-9]{18,20})\b/g,
+          // USPS
+          /\b([0-9]{12,15})\b/g
+          // FedEx
+        ];
+        const trackLinks = Array.from(doc.querySelectorAll('a[href*="tracking"], a[href*="track"]'));
+        for (const a of trackLinks) {
+          const href = a.href;
+          const m = href.match(/[?&](?:trackingId|tracking_number|number|p_shipment_tracking_id|shipmentId)=([A-Z0-9]+)/i);
+          if (m && m[1].length >= 10) tracking.push(m[1]);
+          const linkText = (a.textContent ?? "").trim().replace(/\s+/g, "");
+          if (/^[A-Z0-9]{10,}$/.test(linkText)) tracking.push(linkText);
+        }
+        if (tracking.length === 0) {
+          for (const pattern of patterns) {
+            let m;
+            while ((m = pattern.exec(text)) !== null) {
+              if (!tracking.includes(m[1])) tracking.push(m[1]);
+              if (tracking.length >= 3) break;
+            }
+          }
+        }
+        const unique = [...new Set(tracking)].slice(0, 5);
+        if (unique.length) console.log("[AMZ] tracking for", orderId, ":", unique);
+        return unique;
+      }
+      async function fetchOrdersPage(startIndex) {
+        return fetchHtml(`https://www.amazon.com/your-orders/orders?startIndex=${startIndex}`);
       }
       function waitForOrders(timeoutMs = 15e3) {
         return new Promise((resolve) => {
@@ -370,6 +409,15 @@
           }
         }
         clearState();
+        const trackingCutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1e3).toISOString().split("T")[0];
+        const recentOrders = allOrders.filter((o) => o.orderDate >= trackingCutoff);
+        if (recentOrders.length > 0) {
+          sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Fetching tracking for ${recentOrders.length} recent orders\u2026` });
+          for (const order of recentOrders) {
+            await new Promise((r) => setTimeout(r, 800));
+            order.trackingNumbers = await fetchTrackingNumbers(order.orderNumber);
+          }
+        }
         if (allOrders.length === 0) {
           setBadge("\u2014");
           sendMessage({ type: "SYNC_DONE", result: { platform: "Amazon", scraped: 0, imported: 0, updated: 0 } });
