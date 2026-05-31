@@ -389,7 +389,7 @@
         console.log("[AMZ] scraping page 1, sinceDate:", sinceDate.toISOString().split("T")[0]);
         const page1 = scrapeDoc(document, sinceDate);
         console.log("[AMZ] page 1 result:", page1.orders.length, "orders, hasOlder:", page1.hasOlder);
-        if (page1.orders.length) console.log("[AMZ] orders found:", page1.orders.map((o) => `${o.orderDate} #${o.orderNumber} $${o.cost}`).join(" | "));
+        if (page1.orders.length) console.log("[AMZ] orders found:", page1.orders.map((o) => `${o.orderDate} #${o.orderNumber} $${o.cost} addr=${o.shippingAddress || "none"}`).join(" | "));
         for (const o of page1.orders) {
           if (!seen.has(o.orderNumber)) {
             seen.add(o.orderNumber);
