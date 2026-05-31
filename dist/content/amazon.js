@@ -265,7 +265,10 @@
       }
       async function fetchOrderDetail(orderUrl) {
         try {
-          const res = await fetch(orderUrl, { credentials: "include" });
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 8e3);
+          const res = await fetch(orderUrl, { credentials: "include", signal: ctrl.signal });
+          clearTimeout(timer);
           const html = await res.text();
           const doc = new DOMParser().parseFromString(html, "text/html");
           const addrEl = doc.querySelector('.displayAddressDiv, [class*="ship-to"], #shippingAddress');
@@ -343,13 +346,13 @@
           return;
         }
         sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Found ${allOrders.length} orders, fetching details\u2026` });
-        for (let i = 0; i < allOrders.length; i++) {
-          sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Fetching details ${i + 1}/${allOrders.length}\u2026` });
-          const detail = await fetchOrderDetail(allOrders[i].sourceUrl);
-          allOrders[i].shippingAddress = detail.address;
-          allOrders[i].trackingNumbers = detail.tracking;
-          await new Promise((r) => setTimeout(r, 300));
-        }
+        await Promise.all(allOrders.map(async (order) => {
+          console.log("[AMZ] fetching detail:", order.orderNumber);
+          const detail = await fetchOrderDetail(order.sourceUrl);
+          console.log("[AMZ] detail done:", order.orderNumber, "tracking:", detail.tracking, "address:", detail.address.slice(0, 40) || "(none)");
+          order.shippingAddress = detail.address;
+          order.trackingNumbers = detail.tracking;
+        }));
         try {
           const result = await pushOrders(state.trackerUrl, state.apiKey, state.userId, allOrders);
           await setLastSync("amazon", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
