@@ -115,55 +115,60 @@ async function fetchHtml(url: string): Promise<Document | null> {
   }
 }
 
+function extractCarrierTracking(text: string): string[] {
+  const found: string[] = [];
+  // UPS: 1Z + 16 alphanumeric
+  const ups = text.match(/\b(1Z[A-Z0-9]{16})\b/g);
+  // USPS: 20-22 digits starting with 9
+  const usps = text.match(/\b(9[0-9]{19,21})\b/g);
+  // FedEx: 12 or 15 digits (not starting with 9 to avoid USPS overlap)
+  const fedex = text.match(/\b([0-9]{15})\b/g);
+  if (ups) found.push(...ups);
+  if (usps) found.push(...usps);
+  if (fedex) found.push(...fedex);
+  return [...new Set(found)];
+}
+
 async function fetchTrackingNumbers(orderId: string): Promise<string[]> {
-  const url = `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`;
-  const doc = await fetchHtml(url);
-  if (!doc) return [];
+  // Step 1: get order detail page to find shipmentId values
+  const detailDoc = await fetchHtml(`https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`);
+  if (!detailDoc) return [];
 
+  // Extract ship-track URLs — each has a unique shipmentId
+  const shipTrackUrls = Array.from(detailDoc.querySelectorAll<HTMLAnchorElement>('a[href*="ship-track"]'))
+    .map(a => a.href)
+    .filter((href, i, arr) => arr.indexOf(href) === i); // dedupe
+
+  if (shipTrackUrls.length === 0) {
+    console.log('[AMZ] no ship-track links for', orderId);
+    return [];
+  }
+
+  // Step 2: fetch each ship-track page and extract real carrier tracking numbers
   const tracking: string[] = [];
+  for (const url of shipTrackUrls.slice(0, 3)) {
+    await new Promise(r => setTimeout(r, 600));
+    const doc = await fetchHtml(url);
+    if (!doc) continue;
+    const text = (doc.body?.textContent ?? '').replace(/\s+/g, ' ');
 
-  // 1. Look for direct carrier tracking URLs — most reliable
-  const allLinks = Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href]'));
-  const carrierPatterns: [RegExp, RegExp][] = [
-    [/usps\.com/i,  /(?:qtc_tLabels1|tLabels)=([A-Z0-9]{10,30})/i],
-    [/ups\.com/i,   /(?:tracknum|InquiryNumber1?)=([A-Z0-9]{10,30})/i],
-    [/fedex\.com/i, /(?:tracknumbers|trknbr)=([A-Z0-9]{10,30})/i],
-    [/dhl\.com/i,   /(?:AWB)=([A-Z0-9]{8,20})/i],
-  ];
-  for (const a of allLinks) {
-    for (const [carrierRe, paramRe] of carrierPatterns) {
-      if (carrierRe.test(a.href)) {
-        const m = a.href.match(paramRe);
-        if (m) tracking.push(m[1]);
-      }
+    // Check for carrier links in the ship-track page
+    const carrierLinks = Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href]'))
+      .map(a => a.href)
+      .filter(h => /usps\.com|ups\.com|fedex\.com|dhl\.com/i.test(h));
+
+    for (const href of carrierLinks) {
+      const m = href.match(/[?&](?:qtc_tLabels1|tLabels|tracknum|InquiryNumber\d*|tracknumbers|trknbr|AWB)=([A-Z0-9]{8,30})/i);
+      if (m) tracking.push(m[1]);
     }
-  }
 
-  // 2. Look for text labelled "Tracking ID" near the order details
-  const bodyText = (doc.body?.textContent ?? '').replace(/\s+/g, ' ');
-  const trackingIdMatch = bodyText.match(/Tracking\s+(?:ID|number)[:\s]+([A-Z0-9]{10,30})/gi);
-  if (trackingIdMatch) {
-    for (const m of trackingIdMatch) {
-      const val = m.replace(/Tracking\s+(?:ID|number)[:\s]+/i, '').trim();
-      // Must look like a real carrier number: UPS starts with 1Z, USPS 20+ digits starting with 9, FedEx 12-15 digits
-      if (/^1Z[A-Z0-9]{16}$/.test(val) || /^9[0-9]{19,21}$/.test(val) || /^[0-9]{12,15}$/.test(val)) {
-        tracking.push(val);
-      }
-    }
-  }
-
-  // 3. Scan for UPS/USPS/FedEx patterns in full text
-  if (tracking.length === 0) {
-    const ups = bodyText.match(/\b(1Z[A-Z0-9]{16})\b/g);
-    const usps = bodyText.match(/\b(9[2345][0-9]{18,20})\b/g);
-    if (ups) tracking.push(...ups);
-    if (usps) tracking.push(...usps);
+    // Also scan page text for carrier tracking patterns
+    const fromText = extractCarrierTracking(text);
+    tracking.push(...fromText);
   }
 
   const unique = [...new Set(tracking)].slice(0, 5);
-  // Debug: log all tracking-related links to help diagnose
-  const trackRelated = allLinks.filter(a => /track|shipment|deliver/i.test(a.href) || /track/i.test(a.textContent ?? '')).map(a => a.href).slice(0, 6);
-  console.log('[AMZ] tracking for', orderId, ':', unique, '| track links:', trackRelated);
+  console.log('[AMZ] tracking for', orderId, ':', unique);
   return unique;
 }
 
