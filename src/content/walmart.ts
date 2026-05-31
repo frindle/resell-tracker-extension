@@ -53,10 +53,8 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
     if (!orderNumber || seen.has(orderNumber)) continue;
     seen.add(orderNumber);
 
-    // Skip cancelled/returned orders early
-    if (/\b(cancel\w*|return\w*|refund\w*)\b/i.test(blockText)) continue;
-
     // Date — "on May 22" (no year), "May 22, 2026", "Placed Jan 3, 2026"
+    // Parse date BEFORE the cancelled check so older cancelled orders still set hasOlder.
     const currentYear = new Date().getFullYear();
     const dateMatch =
       blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ??
@@ -66,7 +64,7 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
       console.log('[WM] skipping order', orderNumber, '- no date found in:', blockText.slice(0, 200));
       continue;
     }
-    // Append current year if missing; if result is in the future, use prior year
+    // Append current year if missing; if result is more than a day in the future, use prior year
     let rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear}`;
     let orderDate = new Date(rawDateStr);
     const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
@@ -79,6 +77,9 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
       continue;
     }
     if (orderDate.toISOString().split('T')[0] < sinceDate.toISOString().split('T')[0]) { hasOlder = true; continue; }
+
+    // Skip cancelled/returned orders (after date check so older ones still stop pagination)
+    if (/\b(cancel\w*|return\w*|refund\w*)\b/i.test(blockText)) continue;
 
     // Total — "Total $XX.XX"
     const totalMatch = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);

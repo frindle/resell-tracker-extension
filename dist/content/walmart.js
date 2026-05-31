@@ -232,7 +232,6 @@
           }
           if (!orderNumber || seen.has(orderNumber)) continue;
           seen.add(orderNumber);
-          if (/\b(cancel\w*|return\w*|refund\w*)\b/i.test(blockText)) continue;
           const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
           const dateMatch = blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ?? blockText.match(/(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ?? blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})\b/i);
           if (!dateMatch) {
@@ -255,6 +254,7 @@
             hasOlder = true;
             continue;
           }
+          if (/\b(cancel\w*|return\w*|refund\w*)\b/i.test(blockText)) continue;
           const totalMatch = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
           const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
           const itemEl = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
