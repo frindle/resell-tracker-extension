@@ -85,12 +85,21 @@ async function getAuth(): Promise<{ token: string; clientId: string; warehouseNu
       if (!token) { console.error('[CST] no token in gettoken response', Object.keys(data)); return null; }
     }
 
-    // Extract clientId from JWT payload
-    let clientId = '';
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-      clientId = payload.clientId ?? payload.aud ?? '';
-    } catch { /* use empty */ }
+    // costco-x-wcs-clientid is the Costco account ID, not the OAuth app client ID.
+    // It's in the URL: /myaccount/#/app/<accountId>/...
+    let clientId = location.href.match(/\/app\/([0-9a-f-]{36})\//i)?.[1] ?? '';
+    if (!clientId) {
+      // Fall back: extract from /gettoken JWT where clientId = account ID
+      try {
+        const res2 = await fetch('/gettoken', { credentials: 'include' });
+        if (res2.ok) {
+          const data2 = await res2.json();
+          const tok2 = data2.id_token ?? data2.access_token ?? '';
+          const payload2 = JSON.parse(atob(tok2.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+          clientId = payload2.clientId ?? '';
+        }
+      } catch { /* use empty */ }
+    }
 
     // Find warehouse number — check cookies and localStorage
     const warehouseNumber = getWarehouseNumber();

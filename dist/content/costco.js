@@ -281,11 +281,18 @@
               return null;
             }
           }
-          let clientId = "";
-          try {
-            const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-            clientId = payload.clientId ?? payload.aud ?? "";
-          } catch {
+          let clientId = location.href.match(/\/app\/([0-9a-f-]{36})\//i)?.[1] ?? "";
+          if (!clientId) {
+            try {
+              const res2 = await fetch("/gettoken", { credentials: "include" });
+              if (res2.ok) {
+                const data2 = await res2.json();
+                const tok2 = data2.id_token ?? data2.access_token ?? "";
+                const payload2 = JSON.parse(atob(tok2.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+                clientId = payload2.clientId ?? "";
+              }
+            } catch {
+            }
           }
           const warehouseNumber = getWarehouseNumber();
           console.log("[CST] auth ok, clientId:", clientId, "warehouse:", warehouseNumber || "(not found, using 0)");
