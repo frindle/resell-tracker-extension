@@ -152,18 +152,36 @@
     "src/content/costco-interceptor.ts"() {
       var import_browser_polyfill_min = __toESM(require_browser_polyfill_min());
       (function() {
-        const orig = window.fetch.bind(window);
+        function tryCapture(url, headers) {
+          if (!url.includes("ecom-api.costco.com")) return;
+          const auth = headers["costco-x-authorization"] ?? headers["Authorization"] ?? "";
+          const clientId = headers["costco-x-wcs-clientid"] ?? "";
+          if (auth.startsWith("Bearer ") && clientId) {
+            console.log("[CST-INT] captured ecom-api auth token");
+            window.__costcoAuth = { token: auth.slice(7), clientId };
+          }
+        }
+        const origFetch = window.fetch.bind(window);
         window.fetch = async function(input, init) {
           const url = typeof input === "string" ? input : input.url;
-          if (url.includes("ecom-api.costco.com") && init?.headers) {
-            const h = init.headers;
-            const auth = h["costco-x-authorization"] ?? h["Authorization"] ?? "";
-            const clientId = h["costco-x-wcs-clientid"] ?? "";
-            if (auth.startsWith("Bearer ") && clientId) {
-              window.__costcoAuth = { token: auth.slice(7), clientId };
-            }
-          }
-          return orig(input, init);
+          if (init?.headers) tryCapture(url, init.headers);
+          return origFetch(input, init);
+        };
+        const origOpen = XMLHttpRequest.prototype.open;
+        const origSetHeader = XMLHttpRequest.prototype.setRequestHeader;
+        XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+          this.__xhrUrl = url;
+          this.__xhrHeaders = {};
+          return origOpen.call(this, method, url, ...rest);
+        };
+        XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
+          const self2 = this;
+          self2.__xhrHeaders[name.toLowerCase()] = value;
+          tryCapture(
+            self2.__xhrUrl ?? "",
+            { ...self2.__xhrHeaders, [name.toLowerCase()]: value }
+          );
+          return origSetHeader.call(this, name, value);
         };
       })();
     }

@@ -31,25 +31,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'COSTCO_GRAPHQL') {
+  if (message.type === 'GET_COSTCO_AUTH') {
     const tabId = sender.tab?.id;
-    if (!tabId) { sendResponse({ error: 'no tab id' }); return; }
-    // Read __costcoAuth first (set by interceptor), fall back to passed token
+    if (!tabId) { sendResponse(null); return; }
     chrome.scripting.executeScript({
       target: { tabId },
       world: 'MAIN',
       func: () => (window as Record<string, unknown>).__costcoAuth as { token: string; clientId: string } | undefined,
-    }).then(authResults => {
-      const intercepted = authResults[0]?.result;
-      const token = intercepted?.token || message.token;
-      const clientId = intercepted?.clientId || message.clientId;
-      if (intercepted?.token) console.log('[BG] using intercepted Costco auth token');
-      return chrome.scripting.executeScript({
-        target: { tabId },
-        world: 'MAIN',
-        func: inPageCostcoGraphql,
-        args: [token, clientId, message.body],
-      });
+    }).then(results => sendResponse(results[0]?.result ?? null))
+      .catch(() => sendResponse(null));
+    return true;
+  }
+
+  if (message.type === 'COSTCO_GRAPHQL') {
+    const tabId = sender.tab?.id;
+    if (!tabId) { sendResponse({ error: 'no tab id' }); return; }
+    chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: inPageCostcoGraphql,
+      args: [message.token, message.clientId, message.body],
     }).then(results => sendResponse(results[0]?.result ?? { error: 'no result' }))
       .catch(e => sendResponse({ error: String(e) }));
     return true;

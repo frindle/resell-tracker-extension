@@ -265,6 +265,12 @@
       }
       async function getAuth() {
         try {
+          const intercepted = await chrome.runtime.sendMessage({ type: "GET_COSTCO_AUTH" }).catch(() => null);
+          if (intercepted?.token && intercepted?.clientId) {
+            console.log("[CST] using intercepted auth token");
+            return { token: intercepted.token, clientId: intercepted.clientId, warehouseNumber: getWarehouseNumber() || "0" };
+          }
+          console.log("[CST] no intercepted token \u2014 falling back to MSAL refresh grant");
           let token = await getMsalToken();
           console.log("[CST] msal token found:", !!token);
           if (token) {
