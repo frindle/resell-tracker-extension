@@ -17,17 +17,15 @@ function setBadge(text: string, color = '#3b82f6') {
 }
 
 // ---------------------------------------------------------------------------
-// Scrape the live DOM — Amazon is a React SPA so fetch() only gets a shell.
-// The content script reads document directly when on the orders page.
+// Scrape an order list page (live DOM or parsed HTML document)
 // ---------------------------------------------------------------------------
 
-function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder: boolean } {
+function scrapeDoc(doc: Document, sinceDate: Date): { orders: ScrapedOrder[]; hasOlder: boolean } {
   const orders: ScrapedOrder[] = [];
   let hasOlder = false;
   const seen = new Set<string>();
 
-  // Find order detail links — each unique orderID link anchors one order card
-  const orderLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>(
+  const orderLinks = Array.from(doc.querySelectorAll<HTMLAnchorElement>(
     'a[href*="orderID="], a[href*="orderId="], a[href*="order-details"]'
   ));
 
@@ -38,8 +36,6 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
     if (seen.has(orderId)) continue;
     seen.add(orderId);
 
-    // Walk up to the order-header box, then go one level higher to the full order container
-    // (items are in a sibling of the header, not inside it)
     let header: Element | null = link;
     for (let i = 0; i < 15; i++) {
       header = header?.parentElement ?? null;
@@ -50,7 +46,6 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
     if (!card) continue;
     const cardText = (card.textContent ?? '').replace(/\s+/g, ' ');
 
-    // Date — "Order placed May 22, 2026"
     const dateMatch = cardText.match(/Order placed\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i)
       ?? cardText.match(/((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})/i)
       ?? cardText.match(/((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+\d{4})/i);
@@ -59,34 +54,25 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
 
     const orderDate = new Date(dateMatch[1]);
     if (isNaN(orderDate.getTime())) continue;
-    // Compare date-only strings to avoid timezone/time-of-day issues
     if (orderDate.toISOString().split('T')[0] < sinceDate.toISOString().split('T')[0]) { hasOlder = true; continue; }
 
     if (/\b(cancelled|canceled|refunded|returned)\b/i.test(cardText)) continue;
 
-    // Total — "Total $21.63"
     const totalMatch = cardText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
     const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
 
-    // Shipping address — "Ship to [Name] [Address] United States"
     let shippingAddress = '';
     const addrMatch = cardText.match(/Ship to\s+(.+?)\s+United States/is);
     if (addrMatch) {
       const full = addrMatch[1].replace(/\s+/g, ' ').trim();
-      // Strip leading name (everything before first digit = street number)
       const digitIdx = full.search(/\d/);
       shippingAddress = digitIdx > 0 ? full.slice(digitIdx) : full;
     }
 
-    // Item description — try multiple selectors; Amazon uses many class names
     const titleEl = card.querySelector(
       '[class*="product-title"],[class*="item-title"],[class*="yohtmlc-item"],[class*="a-link-normal"][href*="/dp/"],[data-component*="item"] a,a[href*="/dp/"]'
     );
     const itemDescription = (titleEl?.textContent ?? '').trim().slice(0, 120);
-    if (!itemDescription) {
-      const links = Array.from(card.querySelectorAll('a[href]')).map((e: Element) => (e as HTMLAnchorElement).href).slice(0, 8);
-      console.log('[AMZ] no title for', orderId, '— links:', links, '— cardText:', cardText.slice(0, 300));
-    }
 
     orders.push({
       platform: 'Amazon',
@@ -104,30 +90,48 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
   return { orders, hasOlder };
 }
 
-function getNextPageUrl(): string | null {
-  const nextEl = document.querySelector(
+function getNextStartIndex(doc: Document): number | null {
+  const nextEl = doc.querySelector(
     '.a-pagination .a-last:not(.a-disabled) a, [aria-label="Next page"] a'
   ) as HTMLAnchorElement | null;
-  return nextEl?.href ?? null;
+  if (!nextEl?.href) return null;
+  const m = nextEl.href.match(/startIndex=(\d+)/);
+  return m ? parseInt(m[1]) : null;
 }
 
 // ---------------------------------------------------------------------------
-// Navigate to a URL and wait for the page to settle
+// Fetch an orders page as HTML without navigating (avoids trust token quota)
 // ---------------------------------------------------------------------------
 
-function navigateTo(url: string): Promise<void> {
+async function fetchOrdersPage(startIndex: number): Promise<Document | null> {
+  const url = `https://www.amazon.com/your-orders/orders?startIndex=${startIndex}`;
+  try {
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) { console.warn('[AMZ] fetch page failed', res.status); return null; }
+    const html = await res.text();
+    return new DOMParser().parseFromString(html, 'text/html');
+  } catch (e) {
+    console.warn('[AMZ] fetch page error', e);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Wait for React to render order links on the current live page
+// ---------------------------------------------------------------------------
+
+function waitForOrders(timeoutMs = 15000): Promise<void> {
   return new Promise(resolve => {
-    window.location.href = url;
-    // Page will reload — the new content script instance will pick up via the
-    // stored sync state. We resolve after a short delay as a fallback.
-    setTimeout(resolve, 3000);
+    const start = Date.now();
+    function check() {
+      const links = document.querySelectorAll('a[href*="orderID="], a[href*="orderId="], a[href*="order-details"]');
+      if (links.length > 0) { resolve(); return; }
+      if (Date.now() - start > timeoutMs) { resolve(); return; }
+      setTimeout(check, 500);
+    }
+    check();
   });
 }
-
-// ---------------------------------------------------------------------------
-// Fetch order detail for tracking + address (fetch is fine for detail pages
-// since they're server-rendered)
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Sync state stored in sessionStorage so it survives page navigation
@@ -137,12 +141,9 @@ const STATE_KEY = '__resell_sync_state__';
 
 interface SyncState {
   sinceDate: string;
-  orders: ScrapedOrder[];
-  nextUrl: string | null;
   trackerUrl: string;
   apiKey: string;
   userId: string;
-  page: number;
 }
 
 function saveState(state: SyncState) {
@@ -161,51 +162,51 @@ function clearState() {
 }
 
 // ---------------------------------------------------------------------------
-// Main sync — single-page scrape + pagination via navigation
+// Main sync — scrape page 1 from live DOM, fetch remaining pages via fetch()
 // ---------------------------------------------------------------------------
 
 let syncing = false;
 
-function waitForOrders(timeoutMs = 15000): Promise<void> {
-  return new Promise(resolve => {
-    const start = Date.now();
-    function check() {
-      const links = document.querySelectorAll('a[href*="orderID="], a[href*="orderId="], a[href*="order-details"]');
-      if (links.length > 0) { resolve(); return; }
-      if (Date.now() - start > timeoutMs) { resolve(); return; }
-      setTimeout(check, 500);
-    }
-    check();
-  });
-}
-
 async function runSync(state: SyncState) {
   const sinceDate = new Date(state.sinceDate);
+  const allOrders: ScrapedOrder[] = [];
+  const seen = new Set<string>();
 
-  sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: state.orders.length, message: `Scraping page ${state.page}…` });
+  sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: 0, message: 'Scraping page 1…' });
 
+  // Page 1: read live DOM (React-rendered)
   await waitForOrders();
-  const { orders, hasOlder } = scrapeCurrentPage(sinceDate);
-  const seen = new Set(state.orders.map(o => o.orderNumber));
-  for (const o of orders) {
-    if (!seen.has(o.orderNumber)) { seen.add(o.orderNumber); state.orders.push(o); }
+  const page1 = scrapeDoc(document, sinceDate);
+  for (const o of page1.orders) {
+    if (!seen.has(o.orderNumber)) { seen.add(o.orderNumber); allOrders.push(o); }
   }
 
-  const nextUrl = hasOlder ? null : getNextPageUrl();
+  // Subsequent pages: fetch HTML directly — no navigation, no trust token burn
+  if (!page1.hasOlder && allOrders.length < 200) {
+    let nextIndex = getNextStartIndex(document);
+    let pageNum = 2;
 
-  if (nextUrl && state.orders.length < 200) {
-    // Navigate to next page — delay to avoid hitting Amazon's trust token quota
-    state.nextUrl = nextUrl;
-    state.page++;
-    saveState(state);
-    await new Promise(r => setTimeout(r, 3000));
-    window.location.href = nextUrl;
-    return; // new page load takes over
+    while (nextIndex !== null && allOrders.length < 200) {
+      sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Scraping page ${pageNum}…` });
+
+      // Small delay to be polite to Amazon's servers
+      await new Promise(r => setTimeout(r, 1500));
+
+      const doc = await fetchOrdersPage(nextIndex);
+      if (!doc) break;
+
+      const { orders, hasOlder } = scrapeDoc(doc, sinceDate);
+      for (const o of orders) {
+        if (!seen.has(o.orderNumber)) { seen.add(o.orderNumber); allOrders.push(o); }
+      }
+
+      if (hasOlder) break;
+      nextIndex = getNextStartIndex(doc);
+      pageNum++;
+    }
   }
 
-  // Done paginating — enrich with details then push
   clearState();
-  const allOrders = state.orders;
 
   if (allOrders.length === 0) {
     setBadge('—');
@@ -246,33 +247,23 @@ async function startSync() {
   setBadge('…');
   sendMessage({ type: 'SYNC_STARTED', platform: 'Amazon' });
 
-  // Navigate to orders page 1 if not already there (also resets if on a paginated URL)
-  const onOrdersPage = location.pathname.includes('your-orders') || location.pathname.includes('order-history') || location.href.includes('order-history');
+  const onOrdersPage = location.pathname.includes('your-orders') || location.pathname.includes('order-history');
   const hasStartIndex = new URL(location.href).searchParams.has('startIndex');
+
+  const state: SyncState = {
+    sinceDate: sinceDate.toISOString(),
+    trackerUrl: settings.trackerUrl,
+    apiKey: settings.apiKey ?? '',
+    userId: settings.userId,
+  };
+
   if (!onOrdersPage || hasStartIndex) {
-    const state: SyncState = {
-      sinceDate: sinceDate.toISOString(),
-      orders: [],
-      nextUrl: null,
-      trackerUrl: settings.trackerUrl,
-      apiKey: settings.apiKey ?? '',
-      userId: settings.userId,
-      page: 1,
-    };
+    // Navigate to page 1 — content script will auto-resume via sessionStorage
     saveState(state);
     window.location.href = 'https://www.amazon.com/your-orders/orders';
     return;
   }
 
-  const state: SyncState = {
-    sinceDate: sinceDate.toISOString(),
-    orders: [],
-    nextUrl: null,
-    trackerUrl: settings.trackerUrl,
-    apiKey: settings.apiKey ?? '',
-    userId: settings.userId,
-    page: 1,
-  };
   saveState(state);
   await runSync(state);
 }
