@@ -207,11 +207,11 @@
         chrome.runtime.sendMessage({ type: "SET_BADGE", text, color }).catch(() => {
         });
       }
-      function scrapeCurrentPage(sinceDate) {
+      function scrapeDoc(doc, sinceDate) {
         const orders = [];
         let hasOlder = false;
         const seen = /* @__PURE__ */ new Set();
-        const orderLinks = Array.from(document.querySelectorAll(
+        const orderLinks = Array.from(doc.querySelectorAll(
           'a[href*="orderID="], a[href*="orderId="], a[href*="order-details"]'
         ));
         for (const link of orderLinks) {
@@ -251,10 +251,6 @@
             '[class*="product-title"],[class*="item-title"],[class*="yohtmlc-item"],[class*="a-link-normal"][href*="/dp/"],[data-component*="item"] a,a[href*="/dp/"]'
           );
           const itemDescription = (titleEl?.textContent ?? "").trim().slice(0, 120);
-          if (!itemDescription) {
-            const links = Array.from(card.querySelectorAll("a[href]")).map((e) => e.href).slice(0, 8);
-            console.log("[AMZ] no title for", orderId, "\u2014 links:", links, "\u2014 cardText:", cardText.slice(0, 300));
-          }
           orders.push({
             platform: "Amazon",
             orderNumber: orderId,
@@ -269,28 +265,28 @@
         }
         return { orders, hasOlder };
       }
-      function getNextPageUrl() {
-        const nextEl = document.querySelector(
+      function getNextStartIndex(doc) {
+        const nextEl = doc.querySelector(
           '.a-pagination .a-last:not(.a-disabled) a, [aria-label="Next page"] a'
         );
-        return nextEl?.href ?? null;
+        if (!nextEl?.href) return null;
+        const m = nextEl.href.match(/startIndex=(\d+)/);
+        return m ? parseInt(m[1]) : null;
       }
-      var STATE_KEY = "__resell_sync_state__";
-      function saveState(state) {
-        sessionStorage.setItem(STATE_KEY, JSON.stringify(state));
-      }
-      function loadState() {
+      async function fetchOrdersPage(startIndex) {
+        const url = `https://www.amazon.com/your-orders/orders?startIndex=${startIndex}`;
         try {
-          const raw = sessionStorage.getItem(STATE_KEY);
-          return raw ? JSON.parse(raw) : null;
-        } catch {
+          const resp = await chrome.runtime.sendMessage({ type: "FETCH_HTML", url });
+          if (resp?.error) {
+            console.warn("[AMZ] fetch page error", resp.error);
+            return null;
+          }
+          return new DOMParser().parseFromString(resp.html, "text/html");
+        } catch (e) {
+          console.warn("[AMZ] fetch page error", e);
           return null;
         }
       }
-      function clearState() {
-        sessionStorage.removeItem(STATE_KEY);
-      }
-      var syncing = false;
       function waitForOrders(timeoutMs = 15e3) {
         return new Promise((resolve) => {
           const start = Date.now();
@@ -309,29 +305,56 @@
           check();
         });
       }
+      var STATE_KEY = "__resell_sync_state__";
+      function saveState(state) {
+        sessionStorage.setItem(STATE_KEY, JSON.stringify(state));
+      }
+      function loadState() {
+        try {
+          const raw = sessionStorage.getItem(STATE_KEY);
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      }
+      function clearState() {
+        sessionStorage.removeItem(STATE_KEY);
+      }
+      var syncing = false;
       async function runSync(state) {
         const sinceDate = new Date(state.sinceDate);
-        sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: state.orders.length, message: `Scraping page ${state.page}\u2026` });
+        const allOrders = [];
+        const seen = /* @__PURE__ */ new Set();
+        sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: 0, message: "Scraping page 1\u2026" });
         await waitForOrders();
-        const { orders, hasOlder } = scrapeCurrentPage(sinceDate);
-        const seen = new Set(state.orders.map((o) => o.orderNumber));
-        for (const o of orders) {
+        const page1 = scrapeDoc(document, sinceDate);
+        for (const o of page1.orders) {
           if (!seen.has(o.orderNumber)) {
             seen.add(o.orderNumber);
-            state.orders.push(o);
+            allOrders.push(o);
           }
         }
-        const nextUrl = hasOlder ? null : getNextPageUrl();
-        if (nextUrl && state.orders.length < 200) {
-          state.nextUrl = nextUrl;
-          state.page++;
-          saveState(state);
-          await new Promise((r) => setTimeout(r, 3e3));
-          window.location.href = nextUrl;
-          return;
+        if (!page1.hasOlder && allOrders.length < 200) {
+          let nextIndex = getNextStartIndex(document);
+          let pageNum = 2;
+          while (nextIndex !== null && allOrders.length < 200) {
+            sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Scraping page ${pageNum}\u2026` });
+            await new Promise((r) => setTimeout(r, 1500));
+            const doc = await fetchOrdersPage(nextIndex);
+            if (!doc) break;
+            const { orders, hasOlder } = scrapeDoc(doc, sinceDate);
+            for (const o of orders) {
+              if (!seen.has(o.orderNumber)) {
+                seen.add(o.orderNumber);
+                allOrders.push(o);
+              }
+            }
+            if (hasOlder) break;
+            nextIndex = getNextStartIndex(doc);
+            pageNum++;
+          }
         }
         clearState();
-        const allOrders = state.orders;
         if (allOrders.length === 0) {
           setBadge("\u2014");
           sendMessage({ type: "SYNC_DONE", result: { platform: "Amazon", scraped: 0, imported: 0, updated: 0 } });
@@ -362,31 +385,19 @@
         const sinceDate = settings.amazonLastSync ? new Date(new Date(settings.amazonLastSync).getTime() - 24 * 60 * 60 * 1e3) : new Date(Date.now() - 90 * 24 * 60 * 60 * 1e3);
         setBadge("\u2026");
         sendMessage({ type: "SYNC_STARTED", platform: "Amazon" });
-        const onOrdersPage = location.pathname.includes("your-orders") || location.pathname.includes("order-history") || location.href.includes("order-history");
+        const onOrdersPage = location.pathname.includes("your-orders") || location.pathname.includes("order-history");
         const hasStartIndex = new URL(location.href).searchParams.has("startIndex");
+        const state = {
+          sinceDate: sinceDate.toISOString(),
+          trackerUrl: settings.trackerUrl,
+          apiKey: settings.apiKey ?? "",
+          userId: settings.userId
+        };
         if (!onOrdersPage || hasStartIndex) {
-          const state2 = {
-            sinceDate: sinceDate.toISOString(),
-            orders: [],
-            nextUrl: null,
-            trackerUrl: settings.trackerUrl,
-            apiKey: settings.apiKey ?? "",
-            userId: settings.userId,
-            page: 1
-          };
-          saveState(state2);
+          saveState(state);
           window.location.href = "https://www.amazon.com/your-orders/orders";
           return;
         }
-        const state = {
-          sinceDate: sinceDate.toISOString(),
-          orders: [],
-          nextUrl: null,
-          trackerUrl: settings.trackerUrl,
-          apiKey: settings.apiKey ?? "",
-          userId: settings.userId,
-          page: 1
-        };
         saveState(state);
         await runSync(state);
       }
