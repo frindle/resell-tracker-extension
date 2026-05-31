@@ -239,16 +239,19 @@
           if (/\b(cancelled|canceled|refunded|returned)\b/i.test(cardText)) continue;
           const totalMatch = cardText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
           const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
-          const addrEl = card.querySelector('[class*="ship-to"], [class*="shipTo"], [class*="shipping-address"]');
-          let shippingAddress = (addrEl?.textContent ?? "").replace(/\s+/g, " ").trim();
-          if (!shippingAddress) {
-            const m = cardText.match(/(?:Ship(?:ped)? to|Delivered to)[:\s]+([A-Z][^$\n]{5,80?)(?=\s+(?:Order|Buy|Return|\$))/i);
-            if (m) shippingAddress = m[1].replace(/\s+/g, " ").trim();
+          let shippingAddress = "";
+          const addrMatch = cardText.match(/Ship to\s+(.+?)\s+United States/is);
+          if (addrMatch) {
+            const full = addrMatch[1].replace(/\s+/g, " ").trim();
+            const digitIdx = full.search(/\d/);
+            shippingAddress = digitIdx > 0 ? full.slice(digitIdx) : full;
           }
-          const titleEl = card.querySelector('[class*="product-title"],[class*="item-title"],a[href*="/dp/"]');
+          const titleEl = card.querySelector(
+            '[class*="product-title"],[class*="item-title"],[class*="yohtmlc-item"],[class*="a-link-normal"][href*="/dp/"],[data-component*="item"] a,a[href*="/dp/"]'
+          );
           const itemDescription = (titleEl?.textContent ?? "").trim().slice(0, 120);
-          if (!itemDescription || !shippingAddress) {
-            console.log("[AMZ] order", orderId, "missing fields \u2014 cardText slice:", cardText.slice(0, 400));
+          if (!itemDescription) {
+            console.log("[AMZ] no title found for", orderId, "\u2014 card classes:", Array.from(card.querySelectorAll("[class]")).map((e) => e.className).slice(0, 10).join(" | "));
           }
           orders.push({
             platform: "Amazon",
