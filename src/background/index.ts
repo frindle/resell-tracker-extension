@@ -134,36 +134,21 @@ async function inPageGetMsalToken(): Promise<string | null> {
   }
 }
 
-// Runs in the page's MAIN world — fetch has correct Origin/sec-fetch headers
-async function inPageCostcoGraphql(token: string, clientId: string, body: string) {
-  const fetchFn = ((window as Record<string, unknown>).__origFetch as typeof fetch | undefined) ?? fetch;
-  console.log('[CST-MAIN] using __origFetch:', !!((window as Record<string, unknown>).__origFetch));
-
-  // Use the full header set captured from Costco's own ecom-api request if available
-  const captured = (window as Record<string, unknown>).__costcoAuth as { token: string; clientId: string; allHeaders?: Record<string, string> } | undefined;
-  const baseHeaders: Record<string, string> = captured?.allHeaders
-    ? { ...captured.allHeaders }
-    : {
-        'content-type': 'application/json-patch+json',
-        'costco-x-authorization': `Bearer ${token}`,
-        'costco-x-wcs-clientid': clientId,
-        'costco.env': 'ecom',
-        'costco.service': 'restOrders',
-      };
-  // Override/add the fields we control
-  baseHeaders['content-type'] = 'application/json-patch+json';
-  baseHeaders['costco-x-authorization'] = `Bearer ${token}`;
-  baseHeaders['costco-x-wcs-clientid'] = clientId;
-  baseHeaders['client-identifier'] = crypto.randomUUID();
-  console.log('[CST-MAIN] sending headers:', JSON.stringify(baseHeaders));
-
-  const res = await fetchFn('https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql', {
-    method: 'POST',
-    headers: baseHeaders,
-    body,
+// Runs in the page's MAIN world — uses XHR like Costco's own app (fetch gets 401, XHR gets 200)
+function inPageCostcoGraphql(token: string, clientId: string, body: string): Promise<{ ok: boolean; status: number; text: string }> {
+  return new Promise(resolve => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', 'https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql');
+    xhr.setRequestHeader('content-type', 'application/json-patch+json');
+    xhr.setRequestHeader('costco-x-authorization', `Bearer ${token}`);
+    xhr.setRequestHeader('costco-x-wcs-clientid', clientId);
+    xhr.setRequestHeader('costco.env', 'ecom');
+    xhr.setRequestHeader('costco.service', 'restOrders');
+    xhr.setRequestHeader('client-identifier', crypto.randomUUID());
+    xhr.onload = () => resolve({ ok: xhr.status < 400, status: xhr.status, text: xhr.responseText });
+    xhr.onerror = () => resolve({ ok: false, status: 0, text: 'network error' });
+    xhr.send(body);
   });
-  const text = await res.text();
-  return { ok: res.ok, status: res.status, text };
 }
 
 async function handleFetchUsers(trackerUrl: string) {

@@ -136,29 +136,20 @@
           return null;
         }
       }
-      async function inPageCostcoGraphql(token, clientId, body) {
-        const fetchFn = window.__origFetch ?? fetch;
-        console.log("[CST-MAIN] using __origFetch:", !!window.__origFetch);
-        const captured = window.__costcoAuth;
-        const baseHeaders = captured?.allHeaders ? { ...captured.allHeaders } : {
-          "content-type": "application/json-patch+json",
-          "costco-x-authorization": `Bearer ${token}`,
-          "costco-x-wcs-clientid": clientId,
-          "costco.env": "ecom",
-          "costco.service": "restOrders"
-        };
-        baseHeaders["content-type"] = "application/json-patch+json";
-        baseHeaders["costco-x-authorization"] = `Bearer ${token}`;
-        baseHeaders["costco-x-wcs-clientid"] = clientId;
-        baseHeaders["client-identifier"] = crypto.randomUUID();
-        console.log("[CST-MAIN] sending headers:", JSON.stringify(baseHeaders));
-        const res = await fetchFn("https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql", {
-          method: "POST",
-          headers: baseHeaders,
-          body
+      function inPageCostcoGraphql(token, clientId, body) {
+        return new Promise((resolve) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", "https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql");
+          xhr.setRequestHeader("content-type", "application/json-patch+json");
+          xhr.setRequestHeader("costco-x-authorization", `Bearer ${token}`);
+          xhr.setRequestHeader("costco-x-wcs-clientid", clientId);
+          xhr.setRequestHeader("costco.env", "ecom");
+          xhr.setRequestHeader("costco.service", "restOrders");
+          xhr.setRequestHeader("client-identifier", crypto.randomUUID());
+          xhr.onload = () => resolve({ ok: xhr.status < 400, status: xhr.status, text: xhr.responseText });
+          xhr.onerror = () => resolve({ ok: false, status: 0, text: "network error" });
+          xhr.send(body);
         });
-        const text = await res.text();
-        return { ok: res.ok, status: res.status, text };
       }
       async function handleFetchUsers(trackerUrl) {
         const url = `${trackerUrl.replace(/\/$/, "")}/api/users`;
