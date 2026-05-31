@@ -251,6 +251,7 @@
             continue;
           }
           if (orderDate.toISOString().split("T")[0] < sinceDate.toISOString().split("T")[0]) {
+            console.log("[WM] order too old:", orderNumber, orderDate.toISOString().split("T")[0], "< sinceDate", sinceDate.toISOString().split("T")[0]);
             hasOlder = true;
             continue;
           }
@@ -283,8 +284,29 @@
           console.log("[WM] detail fetch status:", orderNumber, res.status, res.url);
           const html = await res.text();
           const doc = new DOMParser().parseFromString(html, "text/html");
-          const addrEl = doc.querySelector('[data-automation-id*="shipping-address"], [class*="shipping-address"], [class*="shippingAddress"]');
-          const address = (addrEl?.textContent ?? "").replace(/\s+/g, " ").trim();
+          let address = "";
+          const nextDataEl = doc.querySelector("#__NEXT_DATA__");
+          if (nextDataEl?.textContent) {
+            try {
+              const nd = JSON.parse(nextDataEl.textContent);
+              const str = JSON.stringify(nd);
+              const addrMatch = str.match(/"shippingAddress"\s*:\s*\{([^}]{0,500})\}/);
+              if (addrMatch) {
+                const addrObj = JSON.parse(`{${addrMatch[1]}}`);
+                const parts = [addrObj.addressLineOne, addrObj.addressLineTwo, addrObj.city, addrObj.state, addrObj.postalCode].filter(Boolean);
+                address = parts.join(" ").trim();
+              }
+              if (!address) {
+                const m = str.match(/"address1":"([^"]+)".*?"city":"([^"]+)".*?"state":"([^"]+)".*?"zip(?:Code)?":"([^"]+)"/);
+                if (m) address = `${m[1]} ${m[2]} ${m[3]} ${m[4]}`.trim();
+              }
+            } catch {
+            }
+          }
+          if (!address) {
+            const addrEl = doc.querySelector('[data-automation-id*="shipping-address"], [class*="shipping-address"], [class*="shippingAddress"]');
+            address = (addrEl?.textContent ?? "").replace(/\s+/g, " ").trim();
+          }
           const numbers = /* @__PURE__ */ new Set();
           const trackPatterns = [
             /trackingNumber["\s:]+["']?([A-Z0-9]{10,25})/g,
@@ -354,7 +376,10 @@
         const sinceDate = settings.walmartLastSync ? new Date(settings.walmartLastSync) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1e3);
         setBadge("\u2026");
         sendMessage({ type: "SYNC_STARTED", platform: "Walmart" });
-        if (!location.pathname.includes("/orders") && !location.pathname.includes("/account/mypurchases")) {
+        const isOrdersPage = location.pathname.includes("/orders") || location.pathname.includes("/account/mypurchases");
+        const currentPage = new URL(location.href).searchParams.get("page");
+        if (!isOrdersPage || currentPage && parseInt(currentPage) > 1) {
+          sessionStorage.setItem("__resell_wm_sync__", "1");
           window.location.href = "https://www.walmart.com/orders";
           syncing = false;
           return;
@@ -387,7 +412,7 @@
           if (allOrders.length === 0) {
             sendMessage({ type: "SYNC_COMPLETE", platform: "Walmart", pushed: 0, skipped: 0 });
             setBadge("0");
-            await setLastSync("walmart");
+            await setLastSync("walmart", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
             return;
           }
           sendMessage({ type: "SYNC_PROGRESS", platform: "Walmart", scraped: allOrders.length, message: "Fetching order details\u2026" });
@@ -400,7 +425,7 @@
           }));
           const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? "", settings.userId, allOrders);
           console.log("[WM] push result:", JSON.stringify(result));
-          await setLastSync("walmart");
+          await setLastSync("walmart", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
           const pushed = result.imported ?? 0;
           sendMessage({ type: "SYNC_COMPLETE", platform: "Walmart", pushed, skipped: result.skipped ?? 0 });
           setBadge(String(pushed));
@@ -411,6 +436,10 @@
         } finally {
           syncing = false;
         }
+      }
+      if (sessionStorage.getItem("__resell_wm_sync__")) {
+        sessionStorage.removeItem("__resell_wm_sync__");
+        setTimeout(() => startSync(), 2e3);
       }
       chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         if (msg.type === "PING") {
