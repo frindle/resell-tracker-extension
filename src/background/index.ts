@@ -199,7 +199,7 @@ async function handlePushOrders(
 
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new Error(`Tracker API error ${res.status}: ${text}`);
+    throw new Error(`Tracker API error ${res.status} (${url}): ${text}`);
   }
 
   return res.json();
