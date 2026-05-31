@@ -153,9 +153,12 @@
       var import_browser_polyfill_min = __toESM(require_browser_polyfill_min());
       (function() {
         function tryCapture(url, headers) {
-          if (!url.includes("ecom-api.costco.com")) return;
           const auth = headers["costco-x-authorization"] ?? headers["Authorization"] ?? "";
           const clientId = headers["costco-x-wcs-clientid"] ?? "";
+          if (auth || clientId) {
+            console.log("[CST-INT] fetch with auth \u2192", url, "| auth prefix:", auth.slice(0, 30), "| clientId:", clientId);
+          }
+          if (!url.includes("ecom-api.costco.com")) return;
           if (auth.startsWith("Bearer ") && clientId) {
             console.log("[CST-INT] captured ecom-api auth token");
             window.__costcoAuth = { token: auth.slice(7), clientId };

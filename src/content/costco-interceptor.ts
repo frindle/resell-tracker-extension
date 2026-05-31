@@ -2,9 +2,13 @@
 // token Costco's own app uses for ecom-api calls, then stores it for our sync.
 (function () {
   function tryCapture(url: string, headers: Record<string, string>) {
-    if (!url.includes('ecom-api.costco.com')) return;
     const auth = headers['costco-x-authorization'] ?? headers['Authorization'] ?? '';
     const clientId = headers['costco-x-wcs-clientid'] ?? '';
+    // Log all outbound fetch calls with auth headers so we can see what API and token Costco uses
+    if (auth || clientId) {
+      console.log('[CST-INT] fetch with auth →', url, '| auth prefix:', auth.slice(0, 30), '| clientId:', clientId);
+    }
+    if (!url.includes('ecom-api.costco.com')) return;
     if (auth.startsWith('Bearer ') && clientId) {
       console.log('[CST-INT] captured ecom-api auth token');
       (window as Record<string, unknown>).__costcoAuth = { token: auth.slice(7), clientId };
