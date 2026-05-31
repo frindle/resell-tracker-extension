@@ -119,8 +119,8 @@ function extractCarrierTracking(doc: Document): string[] {
   const found: string[] = [];
   const text = (doc.body?.textContent ?? '').replace(/\s+/g, ' ');
 
-  // Amazon Logistics: TBA + 12 digits
-  const amzl = text.match(/\b(TBA\d{12,15})\b/g);
+  // Amazon Logistics: TBA + 12-15 digits only (no letters after)
+  const amzl = text.match(/\bTBA(\d{12,15})(?!\d)/g)?.map(m => m.replace(/\D+$/, ''));
   // UPS: 1Z + 16 alphanumeric
   const ups = text.match(/\b(1Z[A-Z0-9]{16})\b/g);
   // USPS: 20-22 digits starting with 9
