@@ -62,7 +62,7 @@ async function getMsalToken(): Promise<string> {
     if (!res.ok) { console.error('[CST] token refresh failed', res.status, await res.text()); return ''; }
     const data = await res.json();
     console.log('[CST] token refresh ok, keys:', Object.keys(data));
-    return data.access_token ?? data.id_token ?? '';
+    return data.id_token ?? data.access_token ?? '';
   } catch (e) {
     console.error('[CST] token refresh error', e);
     return '';
