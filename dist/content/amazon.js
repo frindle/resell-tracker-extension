@@ -195,6 +195,7 @@
       var import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min());
       init_storage();
       init_api();
+      console.log("[AMZ] content script loaded", location.href);
       function parseMoney(text) {
         return parseFloat(text.replace(/[^0-9.-]/g, "")) || 0;
       }
@@ -325,6 +326,7 @@
           state.nextUrl = nextUrl;
           state.page++;
           saveState(state);
+          await new Promise((r) => setTimeout(r, 3e3));
           window.location.href = nextUrl;
           return;
         }

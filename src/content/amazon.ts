@@ -2,6 +2,8 @@ import { getSettings, setLastSync } from '../lib/storage';
 import { pushOrders } from '../lib/api';
 import type { ScrapedOrder, SyncMessage } from '../lib/types';
 
+console.log('[AMZ] content script loaded', location.href);
+
 function parseMoney(text: string): number {
   return parseFloat(text.replace(/[^0-9.-]/g, '')) || 0;
 }
@@ -192,10 +194,11 @@ async function runSync(state: SyncState) {
   const nextUrl = hasOlder ? null : getNextPageUrl();
 
   if (nextUrl && state.orders.length < 200) {
-    // Navigate to next page — save state first, new page load will resume
+    // Navigate to next page — delay to avoid hitting Amazon's trust token quota
     state.nextUrl = nextUrl;
     state.page++;
     saveState(state);
+    await new Promise(r => setTimeout(r, 3000));
     window.location.href = nextUrl;
     return; // new page load takes over
   }
