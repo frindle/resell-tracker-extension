@@ -151,9 +151,30 @@
   var require_costco_interceptor = __commonJS({
     "src/content/costco-interceptor.ts"() {
       var import_browser_polyfill_min = __toESM(require_browser_polyfill_min());
+      console.log("[CST-INT] interceptor script executing");
       (function() {
+        window.__origFetch = window.fetch.bind(window);
+        console.log("[CST-INT] __origFetch saved, interceptor installed");
+        function headersToPlain(h) {
+          if (!h) return {};
+          if (h instanceof Headers) {
+            const out2 = {};
+            h.forEach((v, k) => {
+              out2[k.toLowerCase()] = v;
+            });
+            return out2;
+          }
+          if (Array.isArray(h)) {
+            const out2 = {};
+            for (const [k, v] of h) out2[k.toLowerCase()] = v;
+            return out2;
+          }
+          const out = {};
+          for (const [k, v] of Object.entries(h)) out[k.toLowerCase()] = v;
+          return out;
+        }
         function tryCapture(url, headers) {
-          const auth = headers["costco-x-authorization"] ?? headers["Authorization"] ?? "";
+          const auth = headers["costco-x-authorization"] ?? headers["authorization"] ?? "";
           const clientId = headers["costco-x-wcs-clientid"] ?? "";
           if (auth || clientId) {
             console.log("[CST-INT] fetch with auth \u2192", url, "| auth prefix:", auth.slice(0, 30), "| clientId:", clientId);
@@ -164,11 +185,10 @@
             window.__costcoAuth = { token: auth.slice(7), clientId };
           }
         }
-        window.__origFetch = window.fetch.bind(window);
-        const origFetch = window.fetch.bind(window);
+        const origFetch = window.__origFetch;
         window.fetch = async function(input, init) {
-          const url = typeof input === "string" ? input : input.url;
-          if (init?.headers) tryCapture(url, init.headers);
+          const url = typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+          tryCapture(url, headersToPlain(init?.headers));
           return origFetch(input, init);
         };
         const origOpen = XMLHttpRequest.prototype.open;
@@ -180,11 +200,9 @@
         };
         XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
           const self2 = this;
-          self2.__xhrHeaders[name.toLowerCase()] = value;
-          tryCapture(
-            self2.__xhrUrl ?? "",
-            { ...self2.__xhrHeaders, [name.toLowerCase()]: value }
-          );
+          const h = self2.__xhrHeaders;
+          h[name.toLowerCase()] = value;
+          tryCapture(self2.__xhrUrl ?? "", h);
           return origSetHeader.call(this, name, value);
         };
       })();

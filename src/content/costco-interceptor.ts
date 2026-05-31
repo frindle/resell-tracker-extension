@@ -1,10 +1,32 @@
 // Runs in MAIN world at document_start — wraps fetch AND XHR to capture the
 // token Costco's own app uses for ecom-api calls, then stores it for our sync.
+console.log('[CST-INT] interceptor script executing');
+
 (function () {
+  // Save pristine fetch before any page scripts wrap it
+  (window as Record<string, unknown>).__origFetch = window.fetch.bind(window);
+  console.log('[CST-INT] __origFetch saved, interceptor installed');
+
+  function headersToPlain(h: HeadersInit | undefined): Record<string, string> {
+    if (!h) return {};
+    if (h instanceof Headers) {
+      const out: Record<string, string> = {};
+      h.forEach((v, k) => { out[k.toLowerCase()] = v; });
+      return out;
+    }
+    if (Array.isArray(h)) {
+      const out: Record<string, string> = {};
+      for (const [k, v] of h) out[k.toLowerCase()] = v;
+      return out;
+    }
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(h as Record<string, string>)) out[k.toLowerCase()] = v;
+    return out;
+  }
+
   function tryCapture(url: string, headers: Record<string, string>) {
-    const auth = headers['costco-x-authorization'] ?? headers['Authorization'] ?? '';
+    const auth = headers['costco-x-authorization'] ?? headers['authorization'] ?? '';
     const clientId = headers['costco-x-wcs-clientid'] ?? '';
-    // Log all outbound fetch calls with auth headers so we can see what API and token Costco uses
     if (auth || clientId) {
       console.log('[CST-INT] fetch with auth →', url, '| auth prefix:', auth.slice(0, 30), '| clientId:', clientId);
     }
@@ -15,18 +37,15 @@
     }
   }
 
-  // Save a reference to the pristine fetch before any page scripts wrap it
-  (window as Record<string, unknown>).__origFetch = window.fetch.bind(window);
-
   // Wrap fetch
-  const origFetch = window.fetch.bind(window);
+  const origFetch = (window as Record<string, unknown>).__origFetch as typeof fetch;
   window.fetch = async function (input, init) {
-    const url = typeof input === 'string' ? input : (input as Request).url;
-    if (init?.headers) tryCapture(url, init.headers as Record<string, string>);
+    const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+    tryCapture(url, headersToPlain(init?.headers));
     return origFetch(input, init);
   };
 
-  // Wrap XHR in case Costco uses it
+  // Wrap XHR
   const origOpen = XMLHttpRequest.prototype.open;
   const origSetHeader = XMLHttpRequest.prototype.setRequestHeader;
   XMLHttpRequest.prototype.open = function (method: string, url: string, ...rest: unknown[]) {
@@ -36,11 +55,9 @@
   };
   XMLHttpRequest.prototype.setRequestHeader = function (name: string, value: string) {
     const self = this as unknown as Record<string, unknown>;
-    (self.__xhrHeaders as Record<string, string>)[name.toLowerCase()] = value;
-    tryCapture(
-      (self.__xhrUrl as string) ?? '',
-      { ...(self.__xhrHeaders as Record<string, string>), [name.toLowerCase()]: value },
-    );
+    const h = self.__xhrHeaders as Record<string, string>;
+    h[name.toLowerCase()] = value;
+    tryCapture((self.__xhrUrl as string) ?? '', h);
     return (origSetHeader as Function).call(this, name, value);
   };
 })();
