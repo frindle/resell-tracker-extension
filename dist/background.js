@@ -139,16 +139,22 @@
       async function inPageCostcoGraphql(token, clientId, body) {
         const fetchFn = window.__origFetch ?? fetch;
         console.log("[CST-MAIN] using __origFetch:", !!window.__origFetch);
+        const captured = window.__costcoAuth;
+        const baseHeaders = captured?.allHeaders ? { ...captured.allHeaders } : {
+          "content-type": "application/json-patch+json",
+          "costco-x-authorization": `Bearer ${token}`,
+          "costco-x-wcs-clientid": clientId,
+          "costco.env": "ecom",
+          "costco.service": "restOrders"
+        };
+        baseHeaders["content-type"] = "application/json-patch+json";
+        baseHeaders["costco-x-authorization"] = `Bearer ${token}`;
+        baseHeaders["costco-x-wcs-clientid"] = clientId;
+        baseHeaders["client-identifier"] = crypto.randomUUID();
+        console.log("[CST-MAIN] sending headers:", JSON.stringify(baseHeaders));
         const res = await fetchFn("https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json-patch+json",
-            "costco-x-authorization": `Bearer ${token}`,
-            "costco-x-wcs-clientid": clientId,
-            "costco.env": "ecom",
-            "costco.service": "restOrders",
-            "client-identifier": crypto.randomUUID()
-          },
+          headers: baseHeaders,
           body
         });
         const text = await res.text();

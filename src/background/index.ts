@@ -136,20 +136,30 @@ async function inPageGetMsalToken(): Promise<string | null> {
 
 // Runs in the page's MAIN world — fetch has correct Origin/sec-fetch headers
 async function inPageCostcoGraphql(token: string, clientId: string, body: string) {
-  // Use the pristine fetch saved by costco-interceptor before queueconfigloader/airgap/LogRocket
-  // wrapped it — those wrappers may replace or drop our auth header.
   const fetchFn = ((window as Record<string, unknown>).__origFetch as typeof fetch | undefined) ?? fetch;
   console.log('[CST-MAIN] using __origFetch:', !!((window as Record<string, unknown>).__origFetch));
+
+  // Use the full header set captured from Costco's own ecom-api request if available
+  const captured = (window as Record<string, unknown>).__costcoAuth as { token: string; clientId: string; allHeaders?: Record<string, string> } | undefined;
+  const baseHeaders: Record<string, string> = captured?.allHeaders
+    ? { ...captured.allHeaders }
+    : {
+        'content-type': 'application/json-patch+json',
+        'costco-x-authorization': `Bearer ${token}`,
+        'costco-x-wcs-clientid': clientId,
+        'costco.env': 'ecom',
+        'costco.service': 'restOrders',
+      };
+  // Override/add the fields we control
+  baseHeaders['content-type'] = 'application/json-patch+json';
+  baseHeaders['costco-x-authorization'] = `Bearer ${token}`;
+  baseHeaders['costco-x-wcs-clientid'] = clientId;
+  baseHeaders['client-identifier'] = crypto.randomUUID();
+  console.log('[CST-MAIN] sending headers:', JSON.stringify(baseHeaders));
+
   const res = await fetchFn('https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json-patch+json',
-      'costco-x-authorization': `Bearer ${token}`,
-      'costco-x-wcs-clientid': clientId,
-      'costco.env': 'ecom',
-      'costco.service': 'restOrders',
-      'client-identifier': crypto.randomUUID(),
-    },
+    headers: baseHeaders,
     body,
   });
   const text = await res.text();

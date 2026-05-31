@@ -25,15 +25,14 @@ console.log('[CST-INT] interceptor script executing');
   }
 
   function tryCapture(url: string, headers: Record<string, string>) {
+    if (!url.includes('ecom-api.costco.com')) return;
     const auth = headers['costco-x-authorization'] ?? headers['authorization'] ?? '';
     const clientId = headers['costco-x-wcs-clientid'] ?? '';
-    if (auth || clientId) {
-      console.log('[CST-INT] fetch with auth →', url, '| auth prefix:', auth.slice(0, 30), '| clientId:', clientId);
-    }
-    if (!url.includes('ecom-api.costco.com')) return;
+    console.log('[CST-INT] ecom-api →', url);
+    console.log('[CST-INT] all headers:', JSON.stringify(headers));
     if (auth.startsWith('Bearer ') && clientId) {
       console.log('[CST-INT] captured ecom-api auth token');
-      (window as Record<string, unknown>).__costcoAuth = { token: auth.slice(7), clientId };
+      (window as Record<string, unknown>).__costcoAuth = { token: auth.slice(7), clientId, allHeaders: { ...headers } };
     }
   }
 
