@@ -99,6 +99,21 @@ async function init() {
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.amazonLastSync?.newValue) setMeta('Amazon', `Last sync: ${changes.amazonLastSync.newValue}`);
     if (changes.walmartLastSync?.newValue) setMeta('Walmart', `Last sync: ${changes.walmartLastSync.newValue}`);
+    // Live sync status updates for popups opened mid-sync
+    const s = changes.amazonSyncStatus?.newValue as { type: string; message?: string; result?: { scraped: number; imported: number; updated: number; platform: string }; error?: string; ts: number } | undefined;
+    if (s) {
+      if (s.type === 'SYNC_STARTED' || s.type === 'SYNC_PROGRESS') {
+        setStatus('Amazon', s.message ?? 'syncing…', 'syncing');
+        setSyncBtn('Amazon', true);
+      } else if (s.type === 'SYNC_DONE' && s.result) {
+        const text = s.result.scraped === 0 ? 'no new orders' : `+${s.result.imported} new, ${s.result.updated} updated`;
+        setStatus('Amazon', text, 'ok');
+        setSyncBtn('Amazon', false);
+      } else if (s.type === 'SYNC_ERROR') {
+        setStatus('Amazon', `Error: ${s.error}`, 'fail');
+        setSyncBtn('Amazon', false);
+      }
+    }
   });
 
   document.getElementById('syncAmazon')!.addEventListener('click', () => triggerSync('Amazon'));

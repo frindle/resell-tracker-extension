@@ -48,3 +48,11 @@ npm run watch   # rebuilds on file changes
 ## Tracker-side requirement
 
 The `/api/import` endpoint needs to accept a `trackingNumbers` array on each order. This is tracked in the main repo's TODO.
+
+## Changelog
+
+### 1.0.1
+- Fix popup status not updating when opened mid-sync in a new tab — now tracks live status via `chrome.storage.onChanged`
+
+### 1.0.0
+- Initial release

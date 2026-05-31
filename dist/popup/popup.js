@@ -261,6 +261,20 @@
         chrome.storage.onChanged.addListener((changes) => {
           if (changes.amazonLastSync?.newValue) setMeta("Amazon", `Last sync: ${changes.amazonLastSync.newValue}`);
           if (changes.walmartLastSync?.newValue) setMeta("Walmart", `Last sync: ${changes.walmartLastSync.newValue}`);
+          const s2 = changes.amazonSyncStatus?.newValue;
+          if (s2) {
+            if (s2.type === "SYNC_STARTED" || s2.type === "SYNC_PROGRESS") {
+              setStatus("Amazon", s2.message ?? "syncing\u2026", "syncing");
+              setSyncBtn("Amazon", true);
+            } else if (s2.type === "SYNC_DONE" && s2.result) {
+              const text = s2.result.scraped === 0 ? "no new orders" : `+${s2.result.imported} new, ${s2.result.updated} updated`;
+              setStatus("Amazon", text, "ok");
+              setSyncBtn("Amazon", false);
+            } else if (s2.type === "SYNC_ERROR") {
+              setStatus("Amazon", `Error: ${s2.error}`, "fail");
+              setSyncBtn("Amazon", false);
+            }
+          }
         });
         document.getElementById("syncAmazon").addEventListener("click", () => triggerSync("Amazon"));
         document.getElementById("syncWalmart").addEventListener("click", () => triggerSync("Walmart"));
