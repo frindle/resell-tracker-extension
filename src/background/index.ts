@@ -139,8 +139,10 @@ async function inPageCostcoGraphql(token: string, clientId: string, body: string
   // Use the pristine fetch saved by costco-interceptor before queueconfigloader/airgap/LogRocket
   // wrapped it — those wrappers may replace or drop our auth header.
   const fetchFn = ((window as Record<string, unknown>).__origFetch as typeof fetch | undefined) ?? fetch;
+  console.log('[CST-MAIN] using __origFetch:', !!((window as Record<string, unknown>).__origFetch));
   const res = await fetchFn('https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql', {
     method: 'POST',
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json-patch+json',
       'costco-x-authorization': `Bearer ${token}`,

@@ -138,8 +138,10 @@
       }
       async function inPageCostcoGraphql(token, clientId, body) {
         const fetchFn = window.__origFetch ?? fetch;
+        console.log("[CST-MAIN] using __origFetch:", !!window.__origFetch);
         const res = await fetchFn("https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql", {
           method: "POST",
+          credentials: "include",
           headers: {
             "Content-Type": "application/json-patch+json",
             "costco-x-authorization": `Bearer ${token}`,
