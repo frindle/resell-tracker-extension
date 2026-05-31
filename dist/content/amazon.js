@@ -219,13 +219,13 @@
           const orderId = idMatch[1];
           if (seen.has(orderId)) continue;
           seen.add(orderId);
-          let card = link;
-          for (let i = 0; i < 20; i++) {
-            card = card?.parentElement ?? null;
-            if (!card) break;
-            const t = (card.textContent ?? "").trim();
-            if (t.length > 200 && /\$[\d,]+/.test(t) && /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d{4})\b/.test(t) && card.querySelector('a[href*="/dp/"]')) break;
+          let header = link;
+          for (let i = 0; i < 15; i++) {
+            header = header?.parentElement ?? null;
+            if (!header) break;
+            if (header.className && /order-header/.test(header.className)) break;
           }
+          const card = header?.parentElement ?? null;
           if (!card) continue;
           const cardText = (card.textContent ?? "").replace(/\s+/g, " ");
           const dateMatch = cardText.match(/Order placed\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ?? cardText.match(/((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})/i) ?? cardText.match(/((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+\d{4})/i);

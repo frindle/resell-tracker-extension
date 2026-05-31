@@ -36,20 +36,15 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
     if (seen.has(orderId)) continue;
     seen.add(orderId);
 
-    // Walk up until we find the full order card — must contain both a date/amount AND a product link
-    let card: Element | null = link;
-    for (let i = 0; i < 20; i++) {
-      card = card?.parentElement ?? null;
-      if (!card) break;
-      const t = (card.textContent ?? '').trim();
-      if (
-        t.length > 200 &&
-        /\$[\d,]+/.test(t) &&
-        /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d{4})\b/.test(t) &&
-        card.querySelector('a[href*="/dp/"]')
-      ) break;
+    // Walk up to the order-header box, then go one level higher to the full order container
+    // (items are in a sibling of the header, not inside it)
+    let header: Element | null = link;
+    for (let i = 0; i < 15; i++) {
+      header = header?.parentElement ?? null;
+      if (!header) break;
+      if (header.className && /order-header/.test(header.className)) break;
     }
-
+    const card: Element | null = header?.parentElement ?? null;
     if (!card) continue;
     const cardText = (card.textContent ?? '').replace(/\s+/g, ' ');
 
