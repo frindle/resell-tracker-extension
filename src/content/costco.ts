@@ -26,13 +26,33 @@ function formatDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function getMsalToken(): string {
+  // MSAL stores tokens in sessionStorage keyed by the account/request
+  for (const key of Object.keys(sessionStorage)) {
+    if (!key.includes('signin.costco.com')) continue;
+    try {
+      const item = JSON.parse(sessionStorage.getItem(key) ?? '{}');
+      const secret = item.secret ?? item.access_token ?? item.id_token ?? '';
+      if (secret && secret.includes('.')) return secret;
+    } catch { /* skip */ }
+  }
+  return '';
+}
+
 async function getAuth(): Promise<{ token: string; clientId: string; warehouseNumber: string } | null> {
   try {
-    const res = await fetch('/gettoken', { credentials: 'include' });
-    if (!res.ok) { console.error('[CST] gettoken returned', res.status); return null; }
-    const data = await res.json();
-    const token: string = data.id_token ?? data.access_token ?? data.token ?? '';
-    if (!token) { console.error('[CST] no token in gettoken response', Object.keys(data)); return null; }
+    // Try MSAL sessionStorage first (matches what the browser actually sends)
+    let token = getMsalToken();
+    console.log('[CST] msal token found:', !!token);
+
+    // Fall back to /gettoken
+    if (!token) {
+      const res = await fetch('/gettoken', { credentials: 'include' });
+      if (!res.ok) { console.error('[CST] gettoken returned', res.status); return null; }
+      const data = await res.json();
+      token = data.id_token ?? data.access_token ?? data.token ?? '';
+      if (!token) { console.error('[CST] no token in gettoken response', Object.keys(data)); return null; }
+    }
 
     // Extract clientId from JWT payload
     let clientId = '';
@@ -116,9 +136,10 @@ async function fetchPage(
       headers: {
         'Content-Type': 'application/json-patch+json',
         'costco-x-authorization': `Bearer ${auth.token}`,
-        'costco-x-wcs-clientId': auth.clientId,
+        'costco-x-wcs-clientid': auth.clientId,
         'costco.env': 'ecom',
         'costco.service': 'restOrders',
+        'client-identifier': crypto.randomUUID(),
         'Origin': 'https://www.costco.com',
         'Referer': 'https://www.costco.com/',
       },
