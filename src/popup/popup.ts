@@ -25,27 +25,38 @@ async function triggerSync(platform: 'Amazon' | 'Walmart') {
   }
 
   const expectedHost = platform === 'Amazon' ? 'www.amazon.com' : 'www.walmart.com';
-  try {
-    const host = new URL(tab.url).hostname;
-    if (host !== expectedHost) {
-      setStatus(platform, `Open ${expectedHost} first`, 'fail');
-      return;
-    }
-  } catch {
-    setStatus(platform, 'Invalid tab URL', 'fail');
-    return;
-  }
+  const ordersUrl = platform === 'Amazon'
+    ? 'https://www.amazon.com/your-orders/orders'
+    : 'https://www.walmart.com/orders';
+  const scriptFile = platform === 'Amazon' ? 'content/amazon.js' : 'content/walmart.js';
 
   setSyncBtn(platform, true);
   setStatus(platform, 'syncing…', 'syncing');
 
-  const scriptFile = platform === 'Amazon' ? 'content/amazon.js' : 'content/walmart.js';
+  let targetTabId = tab.id;
+  let isCorrectHost = false;
+  try { isCorrectHost = new URL(tab.url ?? '').hostname === expectedHost; } catch { /* ignore */ }
+
+  if (!isCorrectHost) {
+    // Open orders page in a new tab and inject after it loads
+    const newTab = await chrome.tabs.create({ url: ordersUrl });
+    if (!newTab.id) { setStatus(platform, 'Could not open tab', 'fail'); setSyncBtn(platform, false); return; }
+    targetTabId = newTab.id;
+    await new Promise<void>(resolve => {
+      chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
+        if (tabId === targetTabId && info.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      });
+    });
+  }
 
   // Ping to check if content script is already loaded; inject only if not
-  const alive = await chrome.tabs.sendMessage(tab.id, { type: 'PING' }).catch(() => null);
+  const alive = await chrome.tabs.sendMessage(targetTabId!, { type: 'PING' }).catch(() => null);
   if (!alive) {
     try {
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: [scriptFile] });
+      await chrome.scripting.executeScript({ target: { tabId: targetTabId! }, files: [scriptFile] });
     } catch {
       setStatus(platform, 'Injection failed — refresh the tab', 'fail');
       setSyncBtn(platform, false);
@@ -53,7 +64,7 @@ async function triggerSync(platform: 'Amazon' | 'Walmart') {
     }
   }
 
-  chrome.tabs.sendMessage(tab.id, { type: 'START_SYNC', platform }).catch(() => {
+  chrome.tabs.sendMessage(targetTabId!, { type: 'START_SYNC', platform }).catch(() => {
     setStatus(platform, 'Injection failed — refresh the tab', 'fail');
     setSyncBtn(platform, false);
   });
