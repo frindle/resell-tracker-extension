@@ -181,14 +181,26 @@ function extractTitleFromDoc(doc: Document): string {
 }
 
 function extractAddressFromDoc(doc: Document): string {
-  const text = (doc.body?.innerText ?? doc.body?.textContent ?? '').replace(/\s+/g, ' ');
-  // Look for address after "Ship to" or "Deliver to" labels
-  const m = text.match(/(?:Ship(?:s)? to|Deliver(?:ed)? to)[:\s]+([^\n]{10,200})/i);
-  if (m) {
-    const full = m[1].replace(/\s+/g, ' ').trim();
-    // Strip leading name (before first digit)
-    const digitIdx = full.search(/\d/);
-    return digitIdx > 0 ? full.slice(digitIdx).trim() : full;
+  // Use raw innerText so newlines are preserved — address blocks end at a blank line
+  const raw = (doc.body?.innerText ?? doc.body?.textContent ?? '');
+
+  // Find the line containing "Ship to" or "Deliver to", then grab the next 2-5 non-empty lines
+  const lines = raw.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    if (/(?:Ship(?:s)?\s+to|Deliver(?:ed)?\s+to)/i.test(lines[i])) {
+      // Collect the following non-empty lines (the address block)
+      const addrLines: string[] = [];
+      for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
+        const l = lines[j].trim();
+        if (!l) break; // blank line ends the block
+        addrLines.push(l);
+      }
+      if (addrLines.length === 0) continue;
+      const full = addrLines.join(', ');
+      // Strip leading name (everything before the first digit = street number)
+      const digitIdx = full.search(/\d/);
+      return (digitIdx > 0 ? full.slice(digitIdx) : full).trim().slice(0, 200);
+    }
   }
   return '';
 }
