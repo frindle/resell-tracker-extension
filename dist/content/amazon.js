@@ -267,8 +267,8 @@
           );
           let itemDescription = (titleEl?.textContent ?? "").trim().slice(0, 120);
           if (!itemDescription) {
-            const candidates = Array.from(card.querySelectorAll("a[href]")).filter((a) => !a.href.includes("order") && !a.href.includes("ship")).map((a) => (a.textContent ?? "").trim()).filter((t) => t.length > 10);
-            itemDescription = candidates.sort((a, b) => b.length - a.length)[0]?.slice(0, 120) ?? "";
+            const productLink = card.querySelector('a[href*="/dp/"], a[href*="/gp/product/"]');
+            itemDescription = (productLink?.textContent ?? "").trim().slice(0, 120);
           }
           orders.push({
             platform: "Amazon",

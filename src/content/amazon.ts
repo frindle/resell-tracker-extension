@@ -81,14 +81,11 @@ function scrapeDoc(doc: Document, sinceDate: Date): { orders: ScrapedOrder[]; ha
     const titleEl = card.querySelector(
       '[class*="product-title"],[class*="item-title"],[class*="yohtmlc-item"],[class*="a-link-normal"][href*="/dp/"],[data-component*="item"] a,a[href*="/dp/"],a[href*="/gp/product/"]'
     );
-    // Fallback: find the longest non-nav link text in the card
+    // Fallback: look specifically for product page links (/dp/ or /gp/product/)
     let itemDescription = (titleEl?.textContent ?? '').trim().slice(0, 120);
     if (!itemDescription) {
-      const candidates = Array.from(card.querySelectorAll('a[href]'))
-        .filter((a: Element) => !(a as HTMLAnchorElement).href.includes('order') && !(a as HTMLAnchorElement).href.includes('ship'))
-        .map((a: Element) => (a.textContent ?? '').trim())
-        .filter(t => t.length > 10);
-      itemDescription = candidates.sort((a, b) => b.length - a.length)[0]?.slice(0, 120) ?? '';
+      const productLink = card.querySelector<HTMLAnchorElement>('a[href*="/dp/"], a[href*="/gp/product/"]');
+      itemDescription = (productLink?.textContent ?? '').trim().slice(0, 120);
     }
 
     orders.push({
