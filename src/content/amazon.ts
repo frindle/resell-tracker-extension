@@ -115,17 +115,40 @@ async function fetchHtml(url: string): Promise<Document | null> {
   }
 }
 
-function extractCarrierTracking(text: string): string[] {
+function extractCarrierTracking(doc: Document): string[] {
   const found: string[] = [];
+  const text = (doc.body?.textContent ?? '').replace(/\s+/g, ' ');
+
+  // Amazon Logistics: TBA + 12 digits
+  const amzl = text.match(/\b(TBA\d{12,15})\b/g);
   // UPS: 1Z + 16 alphanumeric
   const ups = text.match(/\b(1Z[A-Z0-9]{16})\b/g);
   // USPS: 20-22 digits starting with 9
   const usps = text.match(/\b(9[0-9]{19,21})\b/g);
-  // FedEx: 12 or 15 digits (not starting with 9 to avoid USPS overlap)
-  const fedex = text.match(/\b([0-9]{15})\b/g);
+  // FedEx: exactly 15 digits not starting with 9
+  const fedex = text.match(/\b([1-8][0-9]{14})\b/g);
+
+  // Prefer numbers near a "Tracking" label — more likely to be the right one
+  const nearLabel = text.match(/Tracking(?:\s+ID|\s+number)?[:\s]+([A-Z0-9]{10,30})/gi) ?? [];
+  for (const m of nearLabel) {
+    const val = m.replace(/Tracking(?:\s+ID|\s+number)?[:\s]+/i, '').trim().split(' ')[0];
+    if (val) found.unshift(val); // prioritise label-adjacent matches
+  }
+
+  if (amzl) found.push(...amzl);
   if (ups) found.push(...ups);
   if (usps) found.push(...usps);
   if (fedex) found.push(...fedex);
+
+  // Also check carrier links
+  const carrierLinks = Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href]'))
+    .map(a => a.href)
+    .filter(h => /usps\.com|ups\.com|fedex\.com|dhl\.com/i.test(h));
+  for (const href of carrierLinks) {
+    const m = href.match(/[?&](?:qtc_tLabels1|tLabels|tracknum|InquiryNumber\d*|tracknumbers|trknbr|AWB)=([A-Z0-9]{8,30})/i);
+    if (m) found.unshift(m[1]);
+  }
+
   return [...new Set(found)];
 }
 
@@ -137,34 +160,26 @@ async function fetchTrackingNumbers(orderId: string): Promise<string[]> {
   // Extract ship-track URLs — each has a unique shipmentId
   const shipTrackUrls = Array.from(detailDoc.querySelectorAll<HTMLAnchorElement>('a[href*="ship-track"]'))
     .map(a => a.href)
-    .filter((href, i, arr) => arr.indexOf(href) === i); // dedupe
+    .filter((href, i, arr) => arr.indexOf(href) === i);
 
   if (shipTrackUrls.length === 0) {
     console.log('[AMZ] no ship-track links for', orderId);
     return [];
   }
 
-  // Step 2: fetch each ship-track page and extract real carrier tracking numbers
+  // Step 2: fetch each ship-track page and extract carrier tracking numbers
+  // Only look at the main content — limit to first 3 shipments
   const tracking: string[] = [];
   for (const url of shipTrackUrls.slice(0, 3)) {
     await new Promise(r => setTimeout(r, 600));
     const doc = await fetchHtml(url);
     if (!doc) continue;
-    const text = (doc.body?.textContent ?? '').replace(/\s+/g, ' ');
 
-    // Check for carrier links in the ship-track page
-    const carrierLinks = Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href]'))
-      .map(a => a.href)
-      .filter(h => /usps\.com|ups\.com|fedex\.com|dhl\.com/i.test(h));
+    // Remove nav/footer to avoid picking up tracking numbers from other orders in sidebar
+    doc.querySelectorAll('nav, footer, #navbar, #navFooter, #rhf').forEach(el => el.remove());
 
-    for (const href of carrierLinks) {
-      const m = href.match(/[?&](?:qtc_tLabels1|tLabels|tracknum|InquiryNumber\d*|tracknumbers|trknbr|AWB)=([A-Z0-9]{8,30})/i);
-      if (m) tracking.push(m[1]);
-    }
-
-    // Also scan page text for carrier tracking patterns
-    const fromText = extractCarrierTracking(text);
-    tracking.push(...fromText);
+    const fromPage = extractCarrierTracking(doc);
+    tracking.push(...fromPage);
   }
 
   const unique = [...new Set(tracking)].slice(0, 5);

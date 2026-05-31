@@ -295,14 +295,27 @@
           return null;
         }
       }
-      function extractCarrierTracking(text) {
+      function extractCarrierTracking(doc) {
         const found = [];
+        const text = (doc.body?.textContent ?? "").replace(/\s+/g, " ");
+        const amzl = text.match(/\b(TBA\d{12,15})\b/g);
         const ups = text.match(/\b(1Z[A-Z0-9]{16})\b/g);
         const usps = text.match(/\b(9[0-9]{19,21})\b/g);
-        const fedex = text.match(/\b([0-9]{15})\b/g);
+        const fedex = text.match(/\b([1-8][0-9]{14})\b/g);
+        const nearLabel = text.match(/Tracking(?:\s+ID|\s+number)?[:\s]+([A-Z0-9]{10,30})/gi) ?? [];
+        for (const m of nearLabel) {
+          const val = m.replace(/Tracking(?:\s+ID|\s+number)?[:\s]+/i, "").trim().split(" ")[0];
+          if (val) found.unshift(val);
+        }
+        if (amzl) found.push(...amzl);
         if (ups) found.push(...ups);
         if (usps) found.push(...usps);
         if (fedex) found.push(...fedex);
+        const carrierLinks = Array.from(doc.querySelectorAll("a[href]")).map((a) => a.href).filter((h) => /usps\.com|ups\.com|fedex\.com|dhl\.com/i.test(h));
+        for (const href of carrierLinks) {
+          const m = href.match(/[?&](?:qtc_tLabels1|tLabels|tracknum|InquiryNumber\d*|tracknumbers|trknbr|AWB)=([A-Z0-9]{8,30})/i);
+          if (m) found.unshift(m[1]);
+        }
         return [...new Set(found)];
       }
       async function fetchTrackingNumbers(orderId) {
@@ -318,14 +331,9 @@
           await new Promise((r) => setTimeout(r, 600));
           const doc = await fetchHtml(url);
           if (!doc) continue;
-          const text = (doc.body?.textContent ?? "").replace(/\s+/g, " ");
-          const carrierLinks = Array.from(doc.querySelectorAll("a[href]")).map((a) => a.href).filter((h) => /usps\.com|ups\.com|fedex\.com|dhl\.com/i.test(h));
-          for (const href of carrierLinks) {
-            const m = href.match(/[?&](?:qtc_tLabels1|tLabels|tracknum|InquiryNumber\d*|tracknumbers|trknbr|AWB)=([A-Z0-9]{8,30})/i);
-            if (m) tracking.push(m[1]);
-          }
-          const fromText = extractCarrierTracking(text);
-          tracking.push(...fromText);
+          doc.querySelectorAll("nav, footer, #navbar, #navFooter, #rhf").forEach((el) => el.remove());
+          const fromPage = extractCarrierTracking(doc);
+          tracking.push(...fromPage);
         }
         const unique = [...new Set(tracking)].slice(0, 5);
         console.log("[AMZ] tracking for", orderId, ":", unique);
