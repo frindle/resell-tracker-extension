@@ -293,10 +293,12 @@
           function check() {
             const links = document.querySelectorAll('a[href*="orderID="], a[href*="orderId="], a[href*="order-details"]');
             if (links.length > 0) {
+              console.log("[AMZ] found", links.length, "order links");
               resolve();
               return;
             }
             if (Date.now() - start > timeoutMs) {
+              console.warn("[AMZ] waitForOrders timed out \u2014 url:", location.href, "\u2014 sample links:", Array.from(document.querySelectorAll("a[href]")).slice(0, 5).map((a) => a.href));
               resolve();
               return;
             }
@@ -326,8 +328,11 @@
         const allOrders = [];
         const seen = /* @__PURE__ */ new Set();
         sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: 0, message: "Scraping page 1\u2026" });
+        console.log("[AMZ] waiting for orders on", location.href);
         await waitForOrders();
+        console.log("[AMZ] scraping page 1, sinceDate:", sinceDate.toISOString().split("T")[0]);
         const page1 = scrapeDoc(document, sinceDate);
+        console.log("[AMZ] page 1 result:", page1.orders.length, "orders, hasOlder:", page1.hasOlder);
         for (const o of page1.orders) {
           if (!seen.has(o.orderNumber)) {
             seen.add(o.orderNumber);

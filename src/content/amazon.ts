@@ -125,8 +125,12 @@ function waitForOrders(timeoutMs = 15000): Promise<void> {
     const start = Date.now();
     function check() {
       const links = document.querySelectorAll('a[href*="orderID="], a[href*="orderId="], a[href*="order-details"]');
-      if (links.length > 0) { resolve(); return; }
-      if (Date.now() - start > timeoutMs) { resolve(); return; }
+      if (links.length > 0) { console.log('[AMZ] found', links.length, 'order links'); resolve(); return; }
+      if (Date.now() - start > timeoutMs) {
+        console.warn('[AMZ] waitForOrders timed out — url:', location.href, '— sample links:', Array.from(document.querySelectorAll('a[href]')).slice(0, 5).map((a: Element) => (a as HTMLAnchorElement).href));
+        resolve();
+        return;
+      }
       setTimeout(check, 500);
     }
     check();
@@ -175,8 +179,11 @@ async function runSync(state: SyncState) {
   sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: 0, message: 'Scraping page 1…' });
 
   // Page 1: read live DOM (React-rendered)
+  console.log('[AMZ] waiting for orders on', location.href);
   await waitForOrders();
+  console.log('[AMZ] scraping page 1, sinceDate:', sinceDate.toISOString().split('T')[0]);
   const page1 = scrapeDoc(document, sinceDate);
+  console.log('[AMZ] page 1 result:', page1.orders.length, 'orders, hasOlder:', page1.hasOlder);
   for (const o of page1.orders) {
     if (!seen.has(o.orderNumber)) { seen.add(o.orderNumber); allOrders.push(o); }
   }
