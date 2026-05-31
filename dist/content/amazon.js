@@ -328,13 +328,51 @@
         }
         return [...new Set(found)];
       }
-      async function fetchTrackingNumbers(orderId) {
+      function extractTitleFromDoc(doc) {
+        const bySelector = [
+          doc.querySelector('[data-component="itemTitle"] a'),
+          doc.querySelector(".yohtmlc-item a.a-link-normal"),
+          doc.querySelector('.a-link-normal[href*="/dp/"]'),
+          doc.querySelector('.a-link-normal[href*="/gp/product/"]')
+        ];
+        for (const el of bySelector) {
+          const text = (el?.textContent ?? "").trim().replace(/\s+/g, " ");
+          if (text.length > 5) return text.slice(0, 120);
+        }
+        for (const a of Array.from(doc.querySelectorAll("a[href]"))) {
+          if (!/\/dp\/[A-Z0-9]{10}|\/gp\/product\/[A-Z0-9]{10}/.test(a.href)) continue;
+          const text = (a.textContent ?? "").trim().replace(/\s+/g, " ");
+          if (text.length > 5) return text.slice(0, 120);
+        }
+        console.warn("[AMZ] extractTitle: no match \u2014 sample links:", Array.from(doc.querySelectorAll("a[href]")).slice(0, 5).map((a) => a.href));
+        return "";
+      }
+      function extractAddressFromDoc(doc) {
+        const headers = Array.from(doc.querySelectorAll("h5"));
+        for (const h of headers) {
+          if (!/ship\s+to/i.test(h.textContent ?? "")) continue;
+          const ul = h.nextElementSibling;
+          if (!ul || ul.tagName !== "UL") continue;
+          const items = Array.from(ul.querySelectorAll("li span.a-list-item")).map((el) => (el.innerHTML ?? "").replace(/<br\s*\/?>/gi, ", ").replace(/<[^>]+>/g, "").trim().replace(/\s+/g, " ")).filter((t) => t && !/^united states$/i.test(t));
+          const addrItems = items.slice(1);
+          if (addrItems.length > 0) return addrItems.join(", ").slice(0, 200);
+        }
+        console.warn('[AMZ] extractAddress: no "Ship to" h5 found');
+        return "";
+      }
+      async function fetchOrderDetails(orderId) {
+        console.log("[AMZ] fetchOrderDetails", orderId);
         const detailDoc = await fetchHtml(`https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`);
-        if (!detailDoc) return [];
+        if (!detailDoc) {
+          console.warn("[AMZ] fetchOrderDetails: no doc for", orderId);
+          return { tracking: [], title: "", address: "" };
+        }
+        const title = extractTitleFromDoc(detailDoc);
+        const address = extractAddressFromDoc(detailDoc);
         const shipTrackUrls = Array.from(detailDoc.querySelectorAll('a[href*="ship-track"]')).map((a) => a.href).filter((href, i, arr) => arr.indexOf(href) === i);
         if (shipTrackUrls.length === 0) {
-          console.log("[AMZ] no ship-track links for", orderId);
-          return [];
+          console.log("[AMZ] no ship-track links for", orderId, "| title:", title || "(none)", "| addr:", address || "(none)");
+          return { tracking: [], title, address };
         }
         const tracking = [];
         for (const url of shipTrackUrls.slice(0, 3)) {
@@ -347,8 +385,8 @@
         }
         const cleaned = [...new Set(tracking)].map((t) => t.replace(/[A-Za-z]+$/, ""));
         const unique = [...new Set(cleaned)].filter((t) => !cleaned.some((other) => other !== t && t.startsWith(other))).slice(0, 5);
-        console.log("[AMZ] tracking for", orderId, ":", unique);
-        return unique;
+        console.log("[AMZ] tracking for", orderId, ":", unique, "| title:", title || "(none)", "| addr:", address || "(none)");
+        return { tracking: unique, title, address };
       }
       async function fetchOrdersPage(startIndex) {
         return fetchHtml(`https://www.amazon.com/your-orders/orders?startIndex=${startIndex}`);
@@ -437,11 +475,13 @@
         }
         clearState();
         if (allOrders.length > 0) {
-          sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Fetching tracking for ${allOrders.length} orders\u2026` });
+          sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Fetching details for ${allOrders.length} orders\u2026` });
           for (const order of allOrders) {
             await new Promise((r) => setTimeout(r, 800));
-            const tracking = await fetchTrackingNumbers(order.orderNumber);
+            const { tracking, title, address } = await fetchOrderDetails(order.orderNumber);
             if (tracking.length > 0) order.trackingNumbers = tracking;
+            if (!order.itemDescription && title) order.itemDescription = title;
+            if (!order.shippingAddress && address) order.shippingAddress = address;
           }
         }
         if (allOrders.length === 0) {
