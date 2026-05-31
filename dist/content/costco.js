@@ -227,33 +227,21 @@
             return false;
           }
         };
+        let idTokenFallback = "";
         for (const storage of [sessionStorage, localStorage]) {
           for (const key of Object.keys(storage)) {
-            if (!key.toLowerCase().includes("accesstoken")) continue;
             try {
               const item = JSON.parse(storage.getItem(key) ?? "{}");
               const secret = item.secret ?? "";
-              if (isJwt(secret) && isCostcoToken(secret)) {
-                console.log("[CST] msal key:", key);
-                return secret;
-              }
+              if (!isJwt(secret) || !isCostcoToken(secret)) continue;
+              console.log("[CST] msal key:", key);
+              if (key.toLowerCase().includes("accesstoken")) return secret;
+              if (key.toLowerCase().includes("idtoken")) idTokenFallback = secret;
             } catch {
             }
           }
         }
-        for (const storage of [sessionStorage, localStorage]) {
-          for (const key of Object.keys(storage)) {
-            if (key.toLowerCase().includes("idtoken")) continue;
-            try {
-              const raw = storage.getItem(key) ?? "";
-              const item = JSON.parse(raw);
-              const secret = item.secret ?? item.access_token ?? "";
-              if (isJwt(secret) && isCostcoToken(secret)) return secret;
-            } catch {
-            }
-          }
-        }
-        return "";
+        return idTokenFallback;
       }
       async function getAuth() {
         try {
@@ -341,6 +329,7 @@
         try {
           const res = await fetch(GRAPHQL_URL, {
             method: "POST",
+            credentials: "include",
             headers: {
               "Content-Type": "application/json-patch+json",
               "costco-x-authorization": `Bearer ${auth.token}`,

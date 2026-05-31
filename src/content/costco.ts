@@ -35,31 +35,21 @@ function getMsalToken(): string {
     } catch { return false; }
   };
 
-  // Prefer keys explicitly containing "accesstoken"
+  // Scan all storage — prefer accesstoken keys, accept idtoken if no access token found
+  let idTokenFallback = '';
   for (const storage of [sessionStorage, localStorage]) {
     for (const key of Object.keys(storage)) {
-      if (!key.toLowerCase().includes('accesstoken')) continue;
       try {
         const item = JSON.parse(storage.getItem(key) ?? '{}');
         const secret = item.secret ?? '';
-        if (isJwt(secret) && isCostcoToken(secret)) { console.log('[CST] msal key:', key); return secret; }
+        if (!isJwt(secret) || !isCostcoToken(secret)) continue;
+        console.log('[CST] msal key:', key);
+        if (key.toLowerCase().includes('accesstoken')) return secret;
+        if (key.toLowerCase().includes('idtoken')) idTokenFallback = secret;
       } catch { /* skip */ }
     }
   }
-
-  // Fallback: any storage value with a matching JWT (skip idtoken keys)
-  for (const storage of [sessionStorage, localStorage]) {
-    for (const key of Object.keys(storage)) {
-      if (key.toLowerCase().includes('idtoken')) continue;
-      try {
-        const raw = storage.getItem(key) ?? '';
-        const item = JSON.parse(raw);
-        const secret = item.secret ?? item.access_token ?? '';
-        if (isJwt(secret) && isCostcoToken(secret)) return secret;
-      } catch { /* skip */ }
-    }
-  }
-  return '';
+  return idTokenFallback;
 }
 
 async function getAuth(): Promise<{ token: string; clientId: string; warehouseNumber: string } | null> {
@@ -171,6 +161,7 @@ async function fetchPage(
   try {
     const res = await fetch(GRAPHQL_URL, {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json-patch+json',
         'costco-x-authorization': `Bearer ${auth.token}`,
