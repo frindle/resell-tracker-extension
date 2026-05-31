@@ -10,6 +10,12 @@ function parseMoney(text: string): number {
 
 function sendMessage(msg: SyncMessage) {
   chrome.runtime.sendMessage(msg).catch(() => {});
+  // Persist status to storage so popup can read it after reopening
+  if (msg.type === 'SYNC_PROGRESS' || msg.type === 'SYNC_STARTED') {
+    chrome.storage.local.set({ amazonSyncStatus: { type: msg.type, message: (msg as {message?: string}).message ?? 'syncing…', ts: Date.now() } });
+  } else if (msg.type === 'SYNC_DONE' || msg.type === 'SYNC_ERROR') {
+    chrome.storage.local.set({ amazonSyncStatus: { type: msg.type, result: (msg as {result?: unknown}).result, error: (msg as {error?: string}).error, ts: Date.now() } });
+  }
 }
 
 function setBadge(text: string, color = '#3b82f6') {
@@ -45,7 +51,9 @@ function scrapeDoc(doc: Document, sinceDate: Date): { orders: ScrapedOrder[]; ha
       if (t.length > 100 && /(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|January|February|March|April|June|July|August|September|October|November|December)/i.test(t)) break;
     }
     if (!card) { console.warn('[AMZ] no card for', orderId); continue; }
-    const cardText = (card.textContent ?? '').replace(/\s+/g, ' ');
+    // innerText adds spaces/newlines between block elements; textContent doesn't
+    const rawText = ('innerText' in card) ? (card as HTMLElement).innerText : (card.textContent ?? '');
+    const cardText = rawText.replace(/\s+/g, ' ');
 
     const dateMatch = cardText.match(/Order placed\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i)
       ?? cardText.match(/((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})/i)

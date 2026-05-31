@@ -80,6 +80,21 @@ async function init() {
   if (settings.amazonLastSync) setMeta('Amazon', `Last sync: ${settings.amazonLastSync}`);
   if (settings.walmartLastSync) setMeta('Walmart', `Last sync: ${settings.walmartLastSync}`);
 
+  // Restore in-progress or recent sync status if popup was closed during sync
+  const stored = await chrome.storage.local.get('amazonSyncStatus');
+  const s = stored.amazonSyncStatus as { type: string; message?: string; result?: { scraped: number; imported: number; updated: number; platform: string }; error?: string; ts: number } | undefined;
+  if (s && Date.now() - s.ts < 5 * 60 * 1000) {
+    if (s.type === 'SYNC_STARTED' || s.type === 'SYNC_PROGRESS') {
+      setStatus('Amazon', s.message ?? 'syncing…', 'syncing');
+      setSyncBtn('Amazon', true);
+    } else if (s.type === 'SYNC_DONE' && s.result) {
+      const text = s.result.scraped === 0 ? 'no new orders' : `+${s.result.imported} new, ${s.result.updated} updated`;
+      setStatus('Amazon', text, 'ok');
+    } else if (s.type === 'SYNC_ERROR') {
+      setStatus('Amazon', `Error: ${s.error}`, 'fail');
+    }
+  }
+
   // Update last sync display live when storage changes (e.g. after Walmart navigation)
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.amazonLastSync?.newValue) setMeta('Amazon', `Last sync: ${changes.amazonLastSync.newValue}`);
