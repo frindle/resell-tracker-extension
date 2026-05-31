@@ -164,15 +164,17 @@
           xhr.send(body);
         });
       }
+      function upgradeUrl(trackerUrl) {
+        return trackerUrl.replace(/\/$/, "").replace(/^http:\/\/([^0-9])/i, "https://$1");
+      }
       async function handleFetchUsers(trackerUrl) {
-        const url = `${trackerUrl.replace(/\/$/, "")}/api/users`;
+        const url = `${upgradeUrl(trackerUrl)}/api/users`;
         const res = await fetch(url, { headers: { "Content-Type": "application/json" } });
         if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => res.statusText)}`);
         return res.json();
       }
       async function handlePushOrders(trackerUrl, apiKey, userId, orders) {
-        const normalizedBase = trackerUrl.replace(/\/$/, "").replace(/^http:\/\/([^0-9])/i, "https://$1");
-        const url = `${normalizedBase}/api/import`;
+        const url = `${upgradeUrl(trackerUrl)}/api/import`;
         const res = await fetch(url, {
           method: "POST",
           headers: {

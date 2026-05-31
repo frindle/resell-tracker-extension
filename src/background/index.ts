@@ -163,8 +163,12 @@ function inPageCostcoGraphql(token: string, clientId: string, body: string): Pro
   });
 }
 
+function upgradeUrl(trackerUrl: string): string {
+  return trackerUrl.replace(/\/$/, '').replace(/^http:\/\/([^0-9])/i, 'https://$1');
+}
+
 async function handleFetchUsers(trackerUrl: string) {
-  const url = `${trackerUrl.replace(/\/$/, '')}/api/users`;
+  const url = `${upgradeUrl(trackerUrl)}/api/users`;
   const res = await fetch(url, { headers: { 'Content-Type': 'application/json' } });
   if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => res.statusText)}`);
   return res.json();
@@ -178,8 +182,7 @@ async function handlePushOrders(
 ) {
   // Upgrade http:// to https:// for known domain URLs to avoid Cloudflare 301
   // redirects that convert POST → GET (fetch follows 301 but drops the body).
-  const normalizedBase = trackerUrl.replace(/\/$/, '').replace(/^http:\/\/([^0-9])/i, 'https://$1');
-  const url = `${normalizedBase}/api/import`;
+  const url = `${upgradeUrl(trackerUrl)}/api/import`;
   const res = await fetch(url, {
     method: 'POST',
     headers: {
