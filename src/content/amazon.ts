@@ -164,11 +164,25 @@ function clearState() {
 
 let syncing = false;
 
+function waitForOrders(timeoutMs = 15000): Promise<void> {
+  return new Promise(resolve => {
+    const start = Date.now();
+    function check() {
+      const links = document.querySelectorAll('a[href*="orderID="], a[href*="orderId="], a[href*="order-details"]');
+      if (links.length > 0) { resolve(); return; }
+      if (Date.now() - start > timeoutMs) { resolve(); return; }
+      setTimeout(check, 500);
+    }
+    check();
+  });
+}
+
 async function runSync(state: SyncState) {
   const sinceDate = new Date(state.sinceDate);
 
   sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: state.orders.length, message: `Scraping page ${state.page}…` });
 
+  await waitForOrders();
   const { orders, hasOlder } = scrapeCurrentPage(sinceDate);
   const seen = new Set(state.orders.map(o => o.orderNumber));
   for (const o of orders) {
@@ -229,8 +243,10 @@ async function startSync() {
   setBadge('…');
   sendMessage({ type: 'SYNC_STARTED', platform: 'Amazon' });
 
-  // Navigate to orders page if not already there
-  if (!location.pathname.includes('your-orders') && !location.pathname.includes('order-history') && !location.href.includes('order-history')) {
+  // Navigate to orders page 1 if not already there (also resets if on a paginated URL)
+  const onOrdersPage = location.pathname.includes('your-orders') || location.pathname.includes('order-history') || location.href.includes('order-history');
+  const hasStartIndex = new URL(location.href).searchParams.has('startIndex');
+  if (!onOrdersPage || hasStartIndex) {
     const state: SyncState = {
       sinceDate: sinceDate.toISOString(),
       orders: [],

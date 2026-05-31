@@ -290,9 +290,28 @@
         sessionStorage.removeItem(STATE_KEY);
       }
       var syncing = false;
+      function waitForOrders(timeoutMs = 15e3) {
+        return new Promise((resolve) => {
+          const start = Date.now();
+          function check() {
+            const links = document.querySelectorAll('a[href*="orderID="], a[href*="orderId="], a[href*="order-details"]');
+            if (links.length > 0) {
+              resolve();
+              return;
+            }
+            if (Date.now() - start > timeoutMs) {
+              resolve();
+              return;
+            }
+            setTimeout(check, 500);
+          }
+          check();
+        });
+      }
       async function runSync(state) {
         const sinceDate = new Date(state.sinceDate);
         sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: state.orders.length, message: `Scraping page ${state.page}\u2026` });
+        await waitForOrders();
         const { orders, hasOlder } = scrapeCurrentPage(sinceDate);
         const seen = new Set(state.orders.map((o) => o.orderNumber));
         for (const o of orders) {
@@ -341,7 +360,9 @@
         const sinceDate = settings.amazonLastSync ? new Date(new Date(settings.amazonLastSync).getTime() - 24 * 60 * 60 * 1e3) : new Date(Date.now() - 90 * 24 * 60 * 60 * 1e3);
         setBadge("\u2026");
         sendMessage({ type: "SYNC_STARTED", platform: "Amazon" });
-        if (!location.pathname.includes("your-orders") && !location.pathname.includes("order-history") && !location.href.includes("order-history")) {
+        const onOrdersPage = location.pathname.includes("your-orders") || location.pathname.includes("order-history") || location.href.includes("order-history");
+        const hasStartIndex = new URL(location.href).searchParams.has("startIndex");
+        if (!onOrdersPage || hasStartIndex) {
           const state2 = {
             sinceDate: sinceDate.toISOString(),
             orders: [],
