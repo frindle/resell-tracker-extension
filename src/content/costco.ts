@@ -40,6 +40,19 @@ function getMsalRefreshToken(): string {
   return '';
 }
 
+function dumpMsalAccessTokens() {
+  for (const storage of [sessionStorage, localStorage]) {
+    for (const key of Object.keys(storage)) {
+      if (!key.toLowerCase().includes('accesstoken')) continue;
+      try {
+        const item = JSON.parse(storage.getItem(key) ?? '{}');
+        console.log('[CST] msal accesstoken key:', key);
+        console.log('[CST] msal accesstoken target/scope:', item.target, 'realm:', item.realm, 'exp:', item.expiresOn, 'secret prefix:', item.secret?.slice(0, 40));
+      } catch { /* skip */ }
+    }
+  }
+}
+
 async function getMsalToken(): Promise<string> {
   const refreshToken = getMsalRefreshToken();
   if (!refreshToken) { console.log('[CST] no refresh token found'); return ''; }
@@ -78,6 +91,7 @@ async function getAuth(): Promise<{ token: string; clientId: string; warehouseNu
       return { token: intercepted.token, clientId: intercepted.clientId, warehouseNumber: getWarehouseNumber() || '0' };
     }
     console.log('[CST] no intercepted token — falling back to MSAL refresh grant');
+    dumpMsalAccessTokens();;
 
     // Try getting a fresh token via MSAL refresh token exchange
     let token = await getMsalToken();

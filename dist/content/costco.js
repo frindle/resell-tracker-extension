@@ -230,6 +230,19 @@
         }
         return "";
       }
+      function dumpMsalAccessTokens() {
+        for (const storage of [sessionStorage, localStorage]) {
+          for (const key of Object.keys(storage)) {
+            if (!key.toLowerCase().includes("accesstoken")) continue;
+            try {
+              const item = JSON.parse(storage.getItem(key) ?? "{}");
+              console.log("[CST] msal accesstoken key:", key);
+              console.log("[CST] msal accesstoken target/scope:", item.target, "realm:", item.realm, "exp:", item.expiresOn, "secret prefix:", item.secret?.slice(0, 40));
+            } catch {
+            }
+          }
+        }
+      }
       async function getMsalToken() {
         const refreshToken = getMsalRefreshToken();
         if (!refreshToken) {
@@ -271,6 +284,8 @@
             return { token: intercepted.token, clientId: intercepted.clientId, warehouseNumber: getWarehouseNumber() || "0" };
           }
           console.log("[CST] no intercepted token \u2014 falling back to MSAL refresh grant");
+          dumpMsalAccessTokens();
+          ;
           let token = await getMsalToken();
           console.log("[CST] msal token found:", !!token);
           if (token) {
