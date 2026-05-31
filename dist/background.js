@@ -30,7 +30,17 @@
           return true;
         }
         if (message.type === "COSTCO_GRAPHQL") {
-          handleCostcoGraphql(message.token, message.clientId, message.body).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+          const tabId = sender.tab?.id;
+          if (!tabId) {
+            sendResponse({ error: "no tab id" });
+            return;
+          }
+          chrome.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            func: inPageCostcoGraphql,
+            args: [message.token, message.clientId, message.body]
+          }).then((results) => sendResponse(results[0]?.result ?? { error: "no result" })).catch((e) => sendResponse({ error: String(e) }));
           return true;
         }
         if (message.type === "PUSH_ORDERS") {
@@ -38,7 +48,7 @@
           return true;
         }
       });
-      async function handleCostcoGraphql(token, clientId, body) {
+      async function inPageCostcoGraphql(token, clientId, body) {
         const res = await fetch("https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql", {
           method: "POST",
           headers: {
@@ -47,9 +57,7 @@
             "costco-x-wcs-clientid": clientId,
             "costco.env": "ecom",
             "costco.service": "restOrders",
-            "client-identifier": crypto.randomUUID(),
-            "Origin": "https://www.costco.com",
-            "Referer": "https://www.costco.com/"
+            "client-identifier": crypto.randomUUID()
           },
           body
         });

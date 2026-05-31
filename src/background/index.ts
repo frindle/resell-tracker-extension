@@ -32,8 +32,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'COSTCO_GRAPHQL') {
-    handleCostcoGraphql(message.token, message.clientId, message.body)
-      .then(sendResponse)
+    const tabId = sender.tab?.id;
+    if (!tabId) { sendResponse({ error: 'no tab id' }); return; }
+    chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: inPageCostcoGraphql,
+      args: [message.token, message.clientId, message.body],
+    }).then(results => sendResponse(results[0]?.result ?? { error: 'no result' }))
       .catch(e => sendResponse({ error: String(e) }));
     return true;
   }
@@ -46,7 +52,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-async function handleCostcoGraphql(token: string, clientId: string, body: string) {
+// Runs in the page's MAIN world — fetch has correct Origin/sec-fetch headers
+async function inPageCostcoGraphql(token: string, clientId: string, body: string) {
   const res = await fetch('https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql', {
     method: 'POST',
     headers: {
@@ -56,8 +63,6 @@ async function handleCostcoGraphql(token: string, clientId: string, body: string
       'costco.env': 'ecom',
       'costco.service': 'restOrders',
       'client-identifier': crypto.randomUUID(),
-      'Origin': 'https://www.costco.com',
-      'Referer': 'https://www.costco.com/',
     },
     body,
   });
