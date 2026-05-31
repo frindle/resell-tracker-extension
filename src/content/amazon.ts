@@ -43,17 +43,17 @@ function scrapeDoc(doc: Document, sinceDate: Date): { orders: ScrapedOrder[]; ha
       if (header.className && /order-header/.test(header.className)) break;
     }
     const card: Element | null = header?.parentElement ?? null;
-    if (!card) continue;
+    if (!card) { console.warn('[AMZ] no card for', orderId); continue; }
     const cardText = (card.textContent ?? '').replace(/\s+/g, ' ');
 
     const dateMatch = cardText.match(/Order placed\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i)
       ?? cardText.match(/((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})/i)
       ?? cardText.match(/((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+\d{4})/i);
 
-    if (!dateMatch) continue;
+    if (!dateMatch) { console.warn('[AMZ] no date for', orderId, '— cardText:', cardText.slice(0, 200)); continue; }
 
     const orderDate = new Date(dateMatch[1]);
-    if (isNaN(orderDate.getTime())) continue;
+    if (isNaN(orderDate.getTime())) { console.warn('[AMZ] bad date for', orderId, dateMatch[1]); continue; }
     if (orderDate.toISOString().split('T')[0] < sinceDate.toISOString().split('T')[0]) { hasOlder = true; continue; }
 
     if (/\b(cancelled|canceled|refunded|returned)\b/i.test(cardText)) continue;
