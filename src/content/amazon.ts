@@ -294,12 +294,10 @@ async function runSync(state: SyncState) {
 
   clearState();
 
-  // Fetch tracking numbers for recent orders (last 60 days)
-  const trackingCutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-  const recentOrders = allOrders.filter(o => o.orderDate >= trackingCutoff);
-  if (recentOrders.length > 0) {
-    sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Fetching tracking for ${recentOrders.length} recent orders…` });
-    for (const order of recentOrders) {
+  // Fetch tracking for all scraped orders
+  if (allOrders.length > 0) {
+    sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Fetching tracking for ${allOrders.length} orders…` });
+    for (const order of allOrders) {
       await new Promise(r => setTimeout(r, 800));
       order.trackingNumbers = await fetchTrackingNumbers(order.orderNumber);
     }

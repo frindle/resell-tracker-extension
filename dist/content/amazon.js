@@ -417,11 +417,9 @@
           }
         }
         clearState();
-        const trackingCutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1e3).toISOString().split("T")[0];
-        const recentOrders = allOrders.filter((o) => o.orderDate >= trackingCutoff);
-        if (recentOrders.length > 0) {
-          sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Fetching tracking for ${recentOrders.length} recent orders\u2026` });
-          for (const order of recentOrders) {
+        if (allOrders.length > 0) {
+          sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Fetching tracking for ${allOrders.length} orders\u2026` });
+          for (const order of allOrders) {
             await new Promise((r) => setTimeout(r, 800));
             order.trackingNumbers = await fetchTrackingNumbers(order.orderNumber);
           }
