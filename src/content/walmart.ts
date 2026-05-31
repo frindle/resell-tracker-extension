@@ -240,7 +240,7 @@ async function startSync() {
   }
 
   const sinceDate = settings.walmartLastSync
-    ? new Date(settings.walmartLastSync)
+    ? new Date(new Date(settings.walmartLastSync).getTime() - 24 * 60 * 60 * 1000)
     : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
   setBadge('…');
@@ -283,9 +283,9 @@ async function startSync() {
     console.log('[WM] done scraping, total orders:', allOrders.length);
 
     if (allOrders.length === 0) {
-      sendMessage({ type: 'SYNC_COMPLETE', platform: 'Walmart', pushed: 0, skipped: 0 });
-      setBadge('0');
+      setBadge('—');
       await setLastSync('walmart', new Date().toISOString().split('T')[0]);
+      sendMessage({ type: 'SYNC_DONE', result: { platform: 'Walmart', scraped: 0, imported: 0, updated: 0 } });
       return;
     }
 
@@ -302,9 +302,8 @@ async function startSync() {
     const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? '', settings.userId, allOrders);
     console.log('[WM] push result:', JSON.stringify(result));
     await setLastSync('walmart', new Date().toISOString().split('T')[0]);
-    const pushed = result.imported ?? 0;
-    sendMessage({ type: 'SYNC_COMPLETE', platform: 'Walmart', pushed, skipped: result.skipped ?? 0 });
-    setBadge(String(pushed));
+    setBadge(`+${result.imported ?? 0}`, '#22c55e');
+    sendMessage({ type: 'SYNC_DONE', result: { platform: 'Walmart', scraped: allOrders.length, imported: result.imported ?? 0, updated: result.updated ?? 0 } });
   } catch (err) {
     console.error('[WM] sync error:', err);
     sendMessage({ type: 'SYNC_ERROR', platform: 'Walmart', error: String(err) });

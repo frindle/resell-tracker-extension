@@ -80,6 +80,12 @@ async function init() {
   if (settings.amazonLastSync) setMeta('Amazon', `Last sync: ${settings.amazonLastSync}`);
   if (settings.walmartLastSync) setMeta('Walmart', `Last sync: ${settings.walmartLastSync}`);
 
+  // Update last sync display live when storage changes (e.g. after Walmart navigation)
+  chrome.storage.onChanged.addListener((changes) => {
+    if (changes.amazonLastSync?.newValue) setMeta('Amazon', `Last sync: ${changes.amazonLastSync.newValue}`);
+    if (changes.walmartLastSync?.newValue) setMeta('Walmart', `Last sync: ${changes.walmartLastSync.newValue}`);
+  });
+
   document.getElementById('syncAmazon')!.addEventListener('click', () => triggerSync('Amazon'));
   document.getElementById('syncWalmart')!.addEventListener('click', () => triggerSync('Walmart'));
 

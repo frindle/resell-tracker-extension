@@ -338,7 +338,7 @@
           syncing = false;
           return;
         }
-        const sinceDate = settings.amazonLastSync ? new Date(settings.amazonLastSync) : new Date(Date.now() - 90 * 24 * 60 * 60 * 1e3);
+        const sinceDate = settings.amazonLastSync ? new Date(new Date(settings.amazonLastSync).getTime() - 24 * 60 * 60 * 1e3) : new Date(Date.now() - 90 * 24 * 60 * 60 * 1e3);
         setBadge("\u2026");
         sendMessage({ type: "SYNC_STARTED", platform: "Amazon" });
         if (!location.pathname.includes("your-orders") && !location.pathname.includes("order-history") && !location.href.includes("order-history")) {

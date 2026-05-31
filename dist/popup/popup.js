@@ -245,6 +245,10 @@
         }
         if (settings.amazonLastSync) setMeta("Amazon", `Last sync: ${settings.amazonLastSync}`);
         if (settings.walmartLastSync) setMeta("Walmart", `Last sync: ${settings.walmartLastSync}`);
+        chrome.storage.onChanged.addListener((changes) => {
+          if (changes.amazonLastSync?.newValue) setMeta("Amazon", `Last sync: ${changes.amazonLastSync.newValue}`);
+          if (changes.walmartLastSync?.newValue) setMeta("Walmart", `Last sync: ${changes.walmartLastSync.newValue}`);
+        });
         document.getElementById("syncAmazon").addEventListener("click", () => triggerSync("Amazon"));
         document.getElementById("syncWalmart").addEventListener("click", () => triggerSync("Walmart"));
         document.getElementById("openSettings").addEventListener("click", (e) => {

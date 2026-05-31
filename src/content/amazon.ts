@@ -223,7 +223,7 @@ async function startSync() {
   }
 
   const sinceDate = settings.amazonLastSync
-    ? new Date(settings.amazonLastSync)
+    ? new Date(new Date(settings.amazonLastSync).getTime() - 24 * 60 * 60 * 1000)
     : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
   setBadge('…');

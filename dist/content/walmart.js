@@ -373,7 +373,7 @@
           syncing = false;
           return;
         }
-        const sinceDate = settings.walmartLastSync ? new Date(settings.walmartLastSync) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1e3);
+        const sinceDate = settings.walmartLastSync ? new Date(new Date(settings.walmartLastSync).getTime() - 24 * 60 * 60 * 1e3) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1e3);
         setBadge("\u2026");
         sendMessage({ type: "SYNC_STARTED", platform: "Walmart" });
         const isOrdersPage = location.pathname.includes("/orders") || location.pathname.includes("/account/mypurchases");
@@ -410,9 +410,9 @@
           }
           console.log("[WM] done scraping, total orders:", allOrders.length);
           if (allOrders.length === 0) {
-            sendMessage({ type: "SYNC_COMPLETE", platform: "Walmart", pushed: 0, skipped: 0 });
-            setBadge("0");
+            setBadge("\u2014");
             await setLastSync("walmart", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
+            sendMessage({ type: "SYNC_DONE", result: { platform: "Walmart", scraped: 0, imported: 0, updated: 0 } });
             return;
           }
           sendMessage({ type: "SYNC_PROGRESS", platform: "Walmart", scraped: allOrders.length, message: "Fetching order details\u2026" });
@@ -426,9 +426,8 @@
           const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? "", settings.userId, allOrders);
           console.log("[WM] push result:", JSON.stringify(result));
           await setLastSync("walmart", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
-          const pushed = result.imported ?? 0;
-          sendMessage({ type: "SYNC_COMPLETE", platform: "Walmart", pushed, skipped: result.skipped ?? 0 });
-          setBadge(String(pushed));
+          setBadge(`+${result.imported ?? 0}`, "#22c55e");
+          sendMessage({ type: "SYNC_DONE", result: { platform: "Walmart", scraped: allOrders.length, imported: result.imported ?? 0, updated: result.updated ?? 0 } });
         } catch (err) {
           console.error("[WM] sync error:", err);
           sendMessage({ type: "SYNC_ERROR", platform: "Walmart", error: String(err) });
