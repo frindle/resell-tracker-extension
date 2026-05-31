@@ -399,9 +399,11 @@
             if (detail.tracking.length) order.trackingNumbers = detail.tracking;
           }));
           const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? "", settings.userId, allOrders);
+          console.log("[WM] push result:", JSON.stringify(result));
           await setLastSync("walmart");
-          sendMessage({ type: "SYNC_COMPLETE", platform: "Walmart", pushed: result.pushed, skipped: result.skipped });
-          setBadge(String(result.pushed));
+          const pushed = result.imported ?? 0;
+          sendMessage({ type: "SYNC_COMPLETE", platform: "Walmart", pushed, skipped: result.skipped ?? 0 });
+          setBadge(String(pushed));
         } catch (err) {
           console.error("[WM] sync error:", err);
           sendMessage({ type: "SYNC_ERROR", platform: "Walmart", error: String(err) });
