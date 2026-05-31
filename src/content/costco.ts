@@ -303,6 +303,9 @@ async function runSync() {
   console.log('[CST] syncing', startDate, '→', endDate);
   sendMessage({ type: 'SYNC_PROGRESS', platform: 'Costco', scraped: 0, message: 'Fetching orders…' });
 
+  // Auto-click through date range options back to sinceDate
+  await chrome.runtime.sendMessage({ type: 'CYCLE_DATE_FILTER', sinceDate: startDate }).catch(() => {});
+
   const allOrders: ScrapedOrder[] = [];
 
   // Try captured response first (Costco's own page load — bypasses Akamai bot protection)

@@ -31,6 +31,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'CYCLE_DATE_FILTER') {
+    const tabId = sender.tab?.id;
+    if (!tabId) { sendResponse(null); return; }
+    chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: inPageCycleDateFilter,
+      args: [message.sinceDate as string],
+    }).then(results => sendResponse(results[0]?.result ?? null))
+      .catch(e => { console.error('[BG] CYCLE_DATE_FILTER error', e); sendResponse(null); });
+    return true;
+  }
+
   if (message.type === 'GET_CAPTURED_ORDERS') {
     const tabId = sender.tab?.id;
     if (!tabId) { sendResponse(null); return; }
@@ -144,6 +157,62 @@ async function inPageGetMsalToken(): Promise<string | null> {
     console.error('[CST-MAIN] acquireTokenSilent failed', String(e));
     return null;
   }
+}
+
+// Runs in MAIN world — selects each date period in the dropdown back to sinceDate,
+// waiting for each XHR to be captured by the interceptor before moving on.
+async function inPageCycleDateFilter(sinceDate: string): Promise<number> {
+  const MONTHS: Record<string, number> = {
+    january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
+    july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
+  };
+
+  const since = new Date(sinceDate);
+
+  const sel = document.getElementById('Showing') as HTMLSelectElement | null;
+  if (!sel) { console.log('[CST-MAIN] date select not found'); return 0; }
+
+  // "Last 3 Months" is already loaded on page load — start from index 1
+  let clicked = 0;
+  for (let i = 1; i < sel.options.length; i++) {
+    const text = sel.options[i].text.trim(); // e.g. "2025 September - November"
+    const m = text.match(/^(\d{4})\s+(\w+)\s*-\s*(\w+)$/);
+    if (!m) continue;
+
+    const year = parseInt(m[1]);
+    const endMonthIdx = MONTHS[m[3].toLowerCase()];
+    if (endMonthIdx === undefined) continue;
+
+    // The period ends on the last day of endMonth in year
+    const periodEnd = new Date(year, endMonthIdx + 1, 0); // last day of endMonth
+    if (periodEnd < since) break; // periods are newest-first, stop when past sinceDate
+
+    const before = (window as Record<string, unknown>).__costcoAllOrders as unknown[] | undefined;
+    const beforeLen = before?.length ?? 0;
+
+    sel.value = sel.options[i].value || text;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    console.log('[CST-MAIN] selected date period:', text);
+    clicked++;
+
+    // Wait up to 8s for the interceptor to capture a new page
+    await new Promise<void>(resolve => {
+      let waited = 0;
+      const interval = setInterval(() => {
+        waited += 200;
+        const current = (window as Record<string, unknown>).__costcoAllOrders as unknown[] | undefined;
+        if ((current?.length ?? 0) > beforeLen || waited >= 8000) {
+          clearInterval(interval);
+          resolve();
+        }
+      }, 200);
+    });
+
+    await new Promise(r => setTimeout(r, 400)); // brief pause between selections
+  }
+
+  console.log('[CST-MAIN] date cycling done, clicked', clicked, 'periods');
+  return clicked;
 }
 
 // Runs in the page's MAIN world — uses XHR like Costco's own app (fetch gets 401, XHR gets 200)

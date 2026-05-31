@@ -448,6 +448,8 @@
         const endDate = formatDate(now);
         console.log("[CST] syncing", startDate, "\u2192", endDate);
         sendMessage({ type: "SYNC_PROGRESS", platform: "Costco", scraped: 0, message: "Fetching orders\u2026" });
+        await chrome.runtime.sendMessage({ type: "CYCLE_DATE_FILTER", sinceDate: startDate }).catch(() => {
+        });
         const allOrders = [];
         const captured = await chrome.runtime.sendMessage({ type: "GET_CAPTURED_ORDERS" }).catch(() => null);
         if (Array.isArray(captured) && captured.length > 0) {

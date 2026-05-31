@@ -29,6 +29,23 @@
           fetch(message.url, { credentials: "include" }).then((r) => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))).then((html) => sendResponse({ html })).catch((e) => sendResponse({ error: String(e) }));
           return true;
         }
+        if (message.type === "CYCLE_DATE_FILTER") {
+          const tabId = sender.tab?.id;
+          if (!tabId) {
+            sendResponse(null);
+            return;
+          }
+          chrome.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            func: inPageCycleDateFilter,
+            args: [message.sinceDate]
+          }).then((results) => sendResponse(results[0]?.result ?? null)).catch((e) => {
+            console.error("[BG] CYCLE_DATE_FILTER error", e);
+            sendResponse(null);
+          });
+          return true;
+        }
         if (message.type === "GET_CAPTURED_ORDERS") {
           const tabId = sender.tab?.id;
           if (!tabId) {
@@ -148,6 +165,59 @@
           console.error("[CST-MAIN] acquireTokenSilent failed", String(e));
           return null;
         }
+      }
+      async function inPageCycleDateFilter(sinceDate) {
+        const MONTHS = {
+          january: 0,
+          february: 1,
+          march: 2,
+          april: 3,
+          may: 4,
+          june: 5,
+          july: 6,
+          august: 7,
+          september: 8,
+          october: 9,
+          november: 10,
+          december: 11
+        };
+        const since = new Date(sinceDate);
+        const sel = document.getElementById("Showing");
+        if (!sel) {
+          console.log("[CST-MAIN] date select not found");
+          return 0;
+        }
+        let clicked = 0;
+        for (let i = 1; i < sel.options.length; i++) {
+          const text = sel.options[i].text.trim();
+          const m = text.match(/^(\d{4})\s+(\w+)\s*-\s*(\w+)$/);
+          if (!m) continue;
+          const year = parseInt(m[1]);
+          const endMonthIdx = MONTHS[m[3].toLowerCase()];
+          if (endMonthIdx === void 0) continue;
+          const periodEnd = new Date(year, endMonthIdx + 1, 0);
+          if (periodEnd < since) break;
+          const before = window.__costcoAllOrders;
+          const beforeLen = before?.length ?? 0;
+          sel.value = sel.options[i].value || text;
+          sel.dispatchEvent(new Event("change", { bubbles: true }));
+          console.log("[CST-MAIN] selected date period:", text);
+          clicked++;
+          await new Promise((resolve) => {
+            let waited = 0;
+            const interval = setInterval(() => {
+              waited += 200;
+              const current = window.__costcoAllOrders;
+              if ((current?.length ?? 0) > beforeLen || waited >= 8e3) {
+                clearInterval(interval);
+                resolve();
+              }
+            }, 200);
+          });
+          await new Promise((r) => setTimeout(r, 400));
+        }
+        console.log("[CST-MAIN] date cycling done, clicked", clicked, "periods");
+        return clicked;
       }
       function inPageCostcoGraphql(token, clientId, body) {
         return new Promise((resolve) => {
