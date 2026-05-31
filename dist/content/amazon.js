@@ -271,13 +271,31 @@
           const addrEl = doc.querySelector('.displayAddressDiv, [class*="ship-to"], #shippingAddress');
           const address = (addrEl?.textContent ?? "").replace(/\s+/g, " ").trim();
           const trackNums = /* @__PURE__ */ new Set();
-          const patterns = [/trackingId[=\s"':]+([A-Z0-9]{10,30})/g, /\b(1Z[A-Z0-9]{16})\b/g];
+          const patterns = [
+            /trackingId[=\s"':]+([A-Z0-9]{10,30})/g,
+            // query param / JSON key
+            /tracking[_-]?number[=\s"':]+([A-Z0-9]{10,30})/gi,
+            /\b(1Z[A-Z0-9]{16})\b/g,
+            // UPS
+            /\b(9[2345]\d{20})\b/g,
+            // USPS (22 digits)
+            /\b(9[0-9]{21})\b/g,
+            // USPS other formats
+            /\b([0-9]{12})\b/g,
+            // FedEx 12-digit
+            /\b([0-9]{15})\b/g,
+            // FedEx 15-digit
+            /\b(TBA\d{12,16})\b/g
+            // Amazon Logistics
+          ];
           for (const pat of patterns) {
             let tm;
             while ((tm = pat.exec(html)) !== null) trackNums.add(tm[1]);
           }
+          console.log("[AMZ] detail", orderUrl.slice(-20), "address:", address.slice(0, 40) || "(none)", "tracking:", [...trackNums]);
           return { address, tracking: [...trackNums] };
-        } catch {
+        } catch (e) {
+          console.log("[AMZ] detail fetch failed:", orderUrl.slice(-20), String(e));
           return { address: "", tracking: [] };
         }
       }
