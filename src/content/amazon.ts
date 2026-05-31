@@ -232,10 +232,12 @@ function waitForOrders(timeoutMs = 15000): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Sync state stored in sessionStorage so it survives page navigation
+// Sync state — stored in both sessionStorage (same-tab navigation) and
+// chrome.storage.local (new-tab handoff from popup)
 // ---------------------------------------------------------------------------
 
 const STATE_KEY = '__resell_sync_state__';
+const STORAGE_KEY = 'amazonPendingSync';
 
 interface SyncState {
   sinceDate: string;
@@ -246,17 +248,27 @@ interface SyncState {
 
 function saveState(state: SyncState) {
   sessionStorage.setItem(STATE_KEY, JSON.stringify(state));
+  chrome.storage.local.set({ [STORAGE_KEY]: { ...state, ts: Date.now() } });
 }
 
-function loadState(): SyncState | null {
+async function loadState(): Promise<SyncState | null> {
+  // Prefer sessionStorage (same tab); fall back to chrome.storage (new tab from popup)
   try {
     const raw = sessionStorage.getItem(STATE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  try {
+    const result = await chrome.storage.local.get(STORAGE_KEY);
+    const stored = result[STORAGE_KEY] as (SyncState & { ts: number }) | undefined;
+    // Only use if fresh (within last 2 minutes) — avoids stale state from a previous session
+    if (stored && Date.now() - stored.ts < 2 * 60 * 1000) return stored;
+  } catch { /* ignore */ }
+  return null;
 }
 
 function clearState() {
   sessionStorage.removeItem(STATE_KEY);
+  chrome.storage.local.remove(STORAGE_KEY);
 }
 
 // ---------------------------------------------------------------------------
@@ -382,7 +394,8 @@ async function startSync() {
 
 // On page load, check if there's a pending sync to resume
 (async () => {
-  const state = loadState();
+  if (!location.pathname.includes('your-orders') && !location.pathname.includes('order-history')) return;
+  const state = await loadState();
   if (state) {
     syncing = true;
     sendMessage({ type: 'SYNC_STARTED', platform: 'Amazon' });

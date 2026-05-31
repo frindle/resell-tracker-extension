@@ -374,19 +374,28 @@
         });
       }
       var STATE_KEY = "__resell_sync_state__";
+      var STORAGE_KEY = "amazonPendingSync";
       function saveState(state) {
         sessionStorage.setItem(STATE_KEY, JSON.stringify(state));
+        chrome.storage.local.set({ [STORAGE_KEY]: { ...state, ts: Date.now() } });
       }
-      function loadState() {
+      async function loadState() {
         try {
           const raw = sessionStorage.getItem(STATE_KEY);
-          return raw ? JSON.parse(raw) : null;
+          if (raw) return JSON.parse(raw);
         } catch {
-          return null;
         }
+        try {
+          const result = await chrome.storage.local.get(STORAGE_KEY);
+          const stored = result[STORAGE_KEY];
+          if (stored && Date.now() - stored.ts < 2 * 60 * 1e3) return stored;
+        } catch {
+        }
+        return null;
       }
       function clearState() {
         sessionStorage.removeItem(STATE_KEY);
+        chrome.storage.local.remove(STORAGE_KEY);
       }
       var syncing = false;
       async function runSync(state) {
@@ -483,7 +492,8 @@
         }
       }
       (async () => {
-        const state = loadState();
+        if (!location.pathname.includes("your-orders") && !location.pathname.includes("order-history")) return;
+        const state = await loadState();
         if (state) {
           syncing = true;
           sendMessage({ type: "SYNC_STARTED", platform: "Amazon" });
