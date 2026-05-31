@@ -48,9 +48,10 @@ console.log('[CST-INT] interceptor script executing');
     return res;
   };
 
-  // Wrap XHR
+  // Wrap XHR — capture headers and responses
   const origOpen = XMLHttpRequest.prototype.open;
   const origSetHeader = XMLHttpRequest.prototype.setRequestHeader;
+  const origSend = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.open = function (method: string, url: string, ...rest: unknown[]) {
     (this as unknown as Record<string, unknown>).__xhrUrl = url;
     (this as unknown as Record<string, unknown>).__xhrHeaders = {};
@@ -62,5 +63,22 @@ console.log('[CST-INT] interceptor script executing');
     h[name.toLowerCase()] = value;
     tryCapture((self.__xhrUrl as string) ?? '', h);
     return (origSetHeader as Function).call(this, name, value);
+  };
+  XMLHttpRequest.prototype.send = function (body?: Document | XMLHttpRequestBodyInit | null) {
+    const self = this as unknown as Record<string, unknown>;
+    const url = (self.__xhrUrl as string) ?? '';
+    if (url.includes('ecom-api.costco.com')) {
+      this.addEventListener('load', function () {
+        console.log('[CST-INT] XHR response ←', url, this.status, this.status < 400 ? 'OK' : 'FAIL');
+        if (this.status < 400 && url.includes('order/v1/orders/graphql')) {
+          try {
+            const data = JSON.parse(this.responseText);
+            console.log('[CST-INT] captured orders GraphQL response, keys:', Object.keys(data));
+            (window as Record<string, unknown>).__costcoOrdersResponse = data;
+          } catch { /* skip */ }
+        }
+      });
+    }
+    return (origSend as Function).call(this, body);
   };
 })();

@@ -53,6 +53,7 @@
         };
         const origOpen = XMLHttpRequest.prototype.open;
         const origSetHeader = XMLHttpRequest.prototype.setRequestHeader;
+        const origSend = XMLHttpRequest.prototype.send;
         XMLHttpRequest.prototype.open = function(method, url, ...rest) {
           this.__xhrUrl = url;
           this.__xhrHeaders = {};
@@ -64,6 +65,24 @@
           h[name.toLowerCase()] = value;
           tryCapture(self.__xhrUrl ?? "", h);
           return origSetHeader.call(this, name, value);
+        };
+        XMLHttpRequest.prototype.send = function(body) {
+          const self = this;
+          const url = self.__xhrUrl ?? "";
+          if (url.includes("ecom-api.costco.com")) {
+            this.addEventListener("load", function() {
+              console.log("[CST-INT] XHR response \u2190", url, this.status, this.status < 400 ? "OK" : "FAIL");
+              if (this.status < 400 && url.includes("order/v1/orders/graphql")) {
+                try {
+                  const data = JSON.parse(this.responseText);
+                  console.log("[CST-INT] captured orders GraphQL response, keys:", Object.keys(data));
+                  window.__costcoOrdersResponse = data;
+                } catch {
+                }
+              }
+            });
+          }
+          return origSend.call(this, body);
         };
       })();
     }
