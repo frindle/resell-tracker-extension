@@ -129,21 +129,23 @@ async function fetchOrderDetail(orderUrl: string): Promise<{ address: string; tr
 
     const trackNums = new Set<string>();
     const patterns = [
-      /trackingId[=\s"':]+([A-Z0-9]{10,30})/g,        // query param / JSON key
-      /tracking[_-]?number[=\s"':]+([A-Z0-9]{10,30})/gi,
-      /\b(1Z[A-Z0-9]{16})\b/g,                         // UPS
-      /\b(9[2345]\d{20})\b/g,                           // USPS (22 digits)
-      /\b(9[0-9]{21})\b/g,                              // USPS other formats
-      /\b([0-9]{12})\b/g,                               // FedEx 12-digit
-      /\b([0-9]{15})\b/g,                               // FedEx 15-digit
-      /\b(TBA\d{12,16})\b/g,                            // Amazon Logistics
+      /trackingId[=\s"':]+([A-Z0-9]{10,30})/g,           // query param / JSON key
+      /tracking[_-]?number["\s:=]+["']?([A-Z0-9]{10,30})/gi,
+      /\b(1Z[A-Z0-9]{16})\b/g,                            // UPS
+      /\b(9[2345]\d{20})\b/g,                             // USPS 22-digit
+      /\b(94\d{20})\b/g,                                  // USPS Priority
+      /\b(TBA\d{9,16})\b/gi,                              // Amazon Logistics
+      // FedEx: door-tag numbers start with DT, express start with specific digits
+      /\b(DT\d{12})\b/g,
+      /\b(61[0-9]{18})\b/g,                              // FedEx SmartPost 20-digit
+      /\b(96[0-9]{18})\b/g,                              // FedEx Express/Ground 20-digit
     ];
     for (const pat of patterns) {
       let tm: RegExpExecArray | null;
       while ((tm = pat.exec(html)) !== null) trackNums.add(tm[1]);
     }
 
-    console.log('[AMZ] detail', orderUrl.slice(-20), 'address:', address.slice(0, 40) || '(none)', 'tracking:', [...trackNums]);
+    console.log('[AMZ] detail', orderUrl.slice(-20), 'finalUrl:', res.url.slice(-40), 'tracking:', [...trackNums]);
     return { address, tracking: [...trackNums] };
   } catch (e) {
     console.log('[AMZ] detail fetch failed:', orderUrl.slice(-20), String(e));
