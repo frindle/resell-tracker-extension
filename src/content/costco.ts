@@ -55,7 +55,7 @@ async function getMsalToken(): Promise<string> {
           grant_type: 'refresh_token',
           refresh_token: refreshToken,
           client_id: 'a3a5186b-7c89-4b4c-93a8-dd604e930757',
-          scope: 'openid a3a5186b-7c89-4b4c-93a8-dd604e930757',
+          scope: 'openid profile offline_access',
         }).toString(),
       },
     );
