@@ -27,37 +27,35 @@ function formatDate(d: Date): string {
 }
 
 function getMsalToken(): string {
-  // MSAL B2C stores tokens in sessionStorage or localStorage
-  // Key format varies but values are JSON objects with a "secret" field containing the JWT
+  const isJwt = (s: string) => typeof s === 'string' && s.split('.').length === 3;
+  const isCostcoToken = (s: string) => {
+    try {
+      const p = JSON.parse(atob(s.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      return p.iss?.includes('signin.costco.com') && p.aud === 'a3a5186b-7c89-4b4c-93a8-dd604e930757';
+    } catch { return false; }
+  };
+
+  // Prefer keys explicitly containing "accesstoken"
   for (const storage of [sessionStorage, localStorage]) {
     for (const key of Object.keys(storage)) {
-      if (!/msal|costco|signin\.costco|a3a5186b/i.test(key)) continue;
+      if (!key.toLowerCase().includes('accesstoken')) continue;
       try {
-        const raw = storage.getItem(key) ?? '';
-        // Try JSON-wrapped token
-        const item = JSON.parse(raw);
-        const secret = item.secret ?? item.access_token ?? item.id_token ?? '';
-        if (secret && secret.split('.').length === 3) {
-          const payload = JSON.parse(atob(secret.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-          if (payload.iss?.includes('signin.costco.com')) return secret;
-        }
+        const item = JSON.parse(storage.getItem(key) ?? '{}');
+        const secret = item.secret ?? '';
+        if (isJwt(secret) && isCostcoToken(secret)) { console.log('[CST] msal key:', key); return secret; }
       } catch { /* skip */ }
     }
   }
-  // Fallback: scan all storage for any JWT issued by signin.costco.com
+
+  // Fallback: any storage value with a matching JWT (skip idtoken keys)
   for (const storage of [sessionStorage, localStorage]) {
     for (const key of Object.keys(storage)) {
+      if (key.toLowerCase().includes('idtoken')) continue;
       try {
         const raw = storage.getItem(key) ?? '';
-        const candidates = [raw];
-        try { const j = JSON.parse(raw); candidates.push(j.secret, j.access_token, j.id_token); } catch { /* skip */ }
-        for (const c of candidates) {
-          if (!c || typeof c !== 'string' || c.split('.').length !== 3) continue;
-          try {
-            const payload = JSON.parse(atob(c.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-            if (payload.iss?.includes('signin.costco.com') && payload.aud === 'a3a5186b-7c89-4b4c-93a8-dd604e930757') return c;
-          } catch { /* skip */ }
-        }
+        const item = JSON.parse(raw);
+        const secret = item.secret ?? item.access_token ?? '';
+        if (isJwt(secret) && isCostcoToken(secret)) return secret;
       } catch { /* skip */ }
     }
   }
