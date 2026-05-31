@@ -38,8 +38,18 @@
           chrome.scripting.executeScript({
             target: { tabId },
             world: "MAIN",
-            func: inPageCostcoGraphql,
-            args: [message.token, message.clientId, message.body]
+            func: () => window.__costcoAuth
+          }).then((authResults) => {
+            const intercepted = authResults[0]?.result;
+            const token = intercepted?.token || message.token;
+            const clientId = intercepted?.clientId || message.clientId;
+            if (intercepted?.token) console.log("[BG] using intercepted Costco auth token");
+            return chrome.scripting.executeScript({
+              target: { tabId },
+              world: "MAIN",
+              func: inPageCostcoGraphql,
+              args: [token, clientId, message.body]
+            });
           }).then((results) => sendResponse(results[0]?.result ?? { error: "no result" })).catch((e) => sendResponse({ error: String(e) }));
           return true;
         }

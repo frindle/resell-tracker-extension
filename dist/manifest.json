@@ -44,6 +44,16 @@
         "https://www.costco.com/myaccount*"
       ],
       "js": [
+        "content/costco-interceptor.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://www.costco.com/myaccount*"
+      ],
+      "js": [
         "content/costco.js"
       ],
       "run_at": "document_idle"
