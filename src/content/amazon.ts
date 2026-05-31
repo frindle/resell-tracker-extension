@@ -345,9 +345,6 @@ async function startSync() {
   setBadge('…');
   sendMessage({ type: 'SYNC_STARTED', platform: 'Amazon' });
 
-  const onOrdersPage = location.pathname.includes('your-orders') || location.pathname.includes('order-history');
-  const hasStartIndex = new URL(location.href).searchParams.has('startIndex');
-
   const state: SyncState = {
     sinceDate: sinceDate.toISOString(),
     trackerUrl: settings.trackerUrl,
@@ -355,15 +352,16 @@ async function startSync() {
     userId: settings.userId,
   };
 
-  if (!onOrdersPage || hasStartIndex) {
-    // Navigate to page 1 — content script will auto-resume via sessionStorage
+  // Always navigate to the clean orders page 1 to ensure a consistent starting point
+  const cleanOrdersUrl = 'https://www.amazon.com/your-orders/orders';
+  if (location.href.replace(/\/$/, '') === cleanOrdersUrl) {
+    // Already on the exact right page — run directly
     saveState(state);
-    window.location.href = 'https://www.amazon.com/your-orders/orders';
-    return;
+    await runSync(state);
+  } else {
+    saveState(state);
+    window.location.href = cleanOrdersUrl;
   }
-
-  saveState(state);
-  await runSync(state);
 }
 
 // On page load, check if there's a pending sync to resume

@@ -457,21 +457,20 @@
         const sinceDate = lastSyncDate && lastSyncDate < sixtyDaysAgo ? lastSyncDate : sixtyDaysAgo;
         setBadge("\u2026");
         sendMessage({ type: "SYNC_STARTED", platform: "Amazon" });
-        const onOrdersPage = location.pathname.includes("your-orders") || location.pathname.includes("order-history");
-        const hasStartIndex = new URL(location.href).searchParams.has("startIndex");
         const state = {
           sinceDate: sinceDate.toISOString(),
           trackerUrl: settings.trackerUrl,
           apiKey: settings.apiKey ?? "",
           userId: settings.userId
         };
-        if (!onOrdersPage || hasStartIndex) {
+        const cleanOrdersUrl = "https://www.amazon.com/your-orders/orders";
+        if (location.href.replace(/\/$/, "") === cleanOrdersUrl) {
           saveState(state);
-          window.location.href = "https://www.amazon.com/your-orders/orders";
-          return;
+          await runSync(state);
+        } else {
+          saveState(state);
+          window.location.href = cleanOrdersUrl;
         }
-        saveState(state);
-        await runSync(state);
       }
       (async () => {
         const state = loadState();
