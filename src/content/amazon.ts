@@ -79,9 +79,17 @@ function scrapeDoc(doc: Document, sinceDate: Date): { orders: ScrapedOrder[]; ha
     }
 
     const titleEl = card.querySelector(
-      '[class*="product-title"],[class*="item-title"],[class*="yohtmlc-item"],[class*="a-link-normal"][href*="/dp/"],[data-component*="item"] a,a[href*="/dp/"]'
+      '[class*="product-title"],[class*="item-title"],[class*="yohtmlc-item"],[class*="a-link-normal"][href*="/dp/"],[data-component*="item"] a,a[href*="/dp/"],a[href*="/gp/product/"]'
     );
-    const itemDescription = (titleEl?.textContent ?? '').trim().slice(0, 120);
+    // Fallback: find the longest non-nav link text in the card
+    let itemDescription = (titleEl?.textContent ?? '').trim().slice(0, 120);
+    if (!itemDescription) {
+      const candidates = Array.from(card.querySelectorAll('a[href]'))
+        .filter((a: Element) => !(a as HTMLAnchorElement).href.includes('order') && !(a as HTMLAnchorElement).href.includes('ship'))
+        .map((a: Element) => (a.textContent ?? '').trim())
+        .filter(t => t.length > 10);
+      itemDescription = candidates.sort((a, b) => b.length - a.length)[0]?.slice(0, 120) ?? '';
+    }
 
     orders.push({
       platform: 'Amazon',

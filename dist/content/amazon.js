@@ -263,9 +263,13 @@
             shippingAddress = digitIdx > 0 ? full.slice(digitIdx) : full;
           }
           const titleEl = card.querySelector(
-            '[class*="product-title"],[class*="item-title"],[class*="yohtmlc-item"],[class*="a-link-normal"][href*="/dp/"],[data-component*="item"] a,a[href*="/dp/"]'
+            '[class*="product-title"],[class*="item-title"],[class*="yohtmlc-item"],[class*="a-link-normal"][href*="/dp/"],[data-component*="item"] a,a[href*="/dp/"],a[href*="/gp/product/"]'
           );
-          const itemDescription = (titleEl?.textContent ?? "").trim().slice(0, 120);
+          let itemDescription = (titleEl?.textContent ?? "").trim().slice(0, 120);
+          if (!itemDescription) {
+            const candidates = Array.from(card.querySelectorAll("a[href]")).filter((a) => !a.href.includes("order") && !a.href.includes("ship")).map((a) => (a.textContent ?? "").trim()).filter((t) => t.length > 10);
+            itemDescription = candidates.sort((a, b) => b.length - a.length)[0]?.slice(0, 120) ?? "";
+          }
           orders.push({
             platform: "Amazon",
             orderNumber: orderId,
