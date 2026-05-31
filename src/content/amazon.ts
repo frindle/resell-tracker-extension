@@ -82,7 +82,8 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
     );
     const itemDescription = (titleEl?.textContent ?? '').trim().slice(0, 120);
     if (!itemDescription) {
-      console.log('[AMZ] no title found for', orderId, '— card classes:', Array.from(card.querySelectorAll('[class]')).map(e => e.className).slice(0, 10).join(' | '));
+      const links = Array.from(card.querySelectorAll('a[href]')).map((e: Element) => (e as HTMLAnchorElement).href).slice(0, 8);
+      console.log('[AMZ] no title for', orderId, '— links:', links, '— cardText:', cardText.slice(0, 300));
     }
 
     orders.push({

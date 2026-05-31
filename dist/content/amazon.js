@@ -251,7 +251,8 @@
           );
           const itemDescription = (titleEl?.textContent ?? "").trim().slice(0, 120);
           if (!itemDescription) {
-            console.log("[AMZ] no title found for", orderId, "\u2014 card classes:", Array.from(card.querySelectorAll("[class]")).map((e) => e.className).slice(0, 10).join(" | "));
+            const links = Array.from(card.querySelectorAll("a[href]")).map((e) => e.href).slice(0, 8);
+            console.log("[AMZ] no title for", orderId, "\u2014 links:", links, "\u2014 cardText:", cardText.slice(0, 300));
           }
           orders.push({
             platform: "Amazon",
