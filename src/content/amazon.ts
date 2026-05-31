@@ -299,7 +299,9 @@ async function runSync(state: SyncState) {
     sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Fetching tracking for ${allOrders.length} orders…` });
     for (const order of allOrders) {
       await new Promise(r => setTimeout(r, 800));
-      order.trackingNumbers = await fetchTrackingNumbers(order.orderNumber);
+      const tracking = await fetchTrackingNumbers(order.orderNumber);
+      if (tracking.length > 0) order.trackingNumbers = tracking;
+      // If nothing found, leave trackingNumbers empty so import won't overwrite existing
     }
   }
 
@@ -335,9 +337,10 @@ async function startSync() {
     return;
   }
 
-  const sinceDate = settings.amazonLastSync
-    ? new Date(new Date(settings.amazonLastSync).getTime() - 14 * 24 * 60 * 60 * 1000)
-    : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+  const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+  const lastSyncDate = settings.amazonLastSync ? new Date(settings.amazonLastSync) : null;
+  // Use whichever is further back: 60 days ago or the last sync date
+  const sinceDate = lastSyncDate && lastSyncDate < sixtyDaysAgo ? lastSyncDate : sixtyDaysAgo;
 
   setBadge('…');
   sendMessage({ type: 'SYNC_STARTED', platform: 'Amazon' });
