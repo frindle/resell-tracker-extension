@@ -11,9 +11,12 @@ const contentEntries = {
   'content/amazon': 'src/content/amazon.ts',
   'content/walmart': 'src/content/walmart.ts',
   'content/costco': 'src/content/costco.ts',
-  'content/costco-interceptor': 'src/content/costco-interceptor.ts',
   'options/options': 'src/options/options.ts',
   'popup/popup': 'src/popup/popup.ts',
+};
+// MAIN world scripts must NOT include the polyfill — they run as page scripts
+const mainWorldEntries = {
+  'content/costco-interceptor': 'src/content/costco-interceptor.ts',
 };
 
 const polyfillPath = path.resolve('node_modules/webextension-polyfill/dist/browser-polyfill.min.js');
@@ -31,6 +34,8 @@ const commonOptions = {
 const ctxBackground = esbuild.context({ ...commonOptions, entryPoints: backgroundEntry });
 // Content/popup scripts get the polyfill for Firefox compatibility
 const ctxContent = esbuild.context({ ...commonOptions, entryPoints: contentEntries, inject: [polyfillPath] });
+// MAIN world content scripts run as page scripts — no polyfill, no chrome.* APIs
+const ctxMainWorld = esbuild.context({ ...commonOptions, entryPoints: mainWorldEntries });
 
 function buildManifest(target) {
   const base = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
@@ -50,8 +55,8 @@ function buildManifest(target) {
 async function build() {
   fs.mkdirSync(outdir, { recursive: true });
 
-  const [bg, content] = await Promise.all([ctxBackground, ctxContent]);
-  await Promise.all([bg.rebuild(), content.rebuild()]);
+  const [bg, content, mainWorld] = await Promise.all([ctxBackground, ctxContent, ctxMainWorld]);
+  await Promise.all([bg.rebuild(), content.rebuild(), mainWorld.rebuild()]);
 
   // Write manifest (browser-specific)
   fs.writeFileSync(path.join(outdir, 'manifest.json'), buildManifest(target));
@@ -72,10 +77,10 @@ async function build() {
   console.log(`Build complete → ${outdir}/`);
 
   if (watch) {
-    await Promise.all([bg.watch(), content.watch()]);
+    await Promise.all([bg.watch(), content.watch(), mainWorld.watch()]);
     console.log('Watching for changes…');
   } else {
-    await Promise.all([bg.dispose(), content.dispose()]);
+    await Promise.all([bg.dispose(), content.dispose(), mainWorld.dispose()]);
   }
 }
 
