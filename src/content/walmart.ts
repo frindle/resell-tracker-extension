@@ -128,12 +128,13 @@ function getNextPageUrl(): string | null {
 // Enrich order detail pages for tracking + address
 // ---------------------------------------------------------------------------
 
-async function fetchOrderDetail(orderUrl: string): Promise<{ address: string; tracking: string[] }> {
+async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<{ address: string; tracking: string[] }> {
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 5000);
     const res = await fetch(orderUrl, { credentials: 'include', signal: ctrl.signal });
     clearTimeout(timer);
+    console.log('[WM] detail fetch status:', orderNumber, res.status, res.url);
     const html = await res.text();
     const doc = new DOMParser().parseFromString(html, 'text/html');
 
@@ -152,7 +153,8 @@ async function fetchOrderDetail(orderUrl: string): Promise<{ address: string; tr
     }
 
     return { address, tracking: [...numbers] };
-  } catch {
+  } catch (e) {
+    console.log('[WM] detail fetch failed:', orderNumber, String(e));
     return { address: '', tracking: [] };
   }
 }
@@ -259,7 +261,9 @@ async function startSync() {
     sendMessage({ type: 'SYNC_PROGRESS', platform: 'Walmart', scraped: allOrders.length, message: 'Fetching order details…' } as never);
 
     await Promise.all(allOrders.map(async order => {
-      const detail = await fetchOrderDetail(order.sourceUrl);
+      console.log('[WM] fetching detail:', order.orderNumber, order.sourceUrl);
+      const detail = await fetchOrderDetail(order.orderNumber, order.sourceUrl);
+      console.log('[WM] detail done:', order.orderNumber, 'address:', detail.address.slice(0, 40) || '(none)', 'tracking:', detail.tracking);
       if (detail.address) order.shippingAddress = detail.address;
       if (detail.tracking.length) order.trackingNumbers = detail.tracking;
     }));
