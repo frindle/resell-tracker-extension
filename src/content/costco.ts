@@ -90,10 +90,17 @@ async function getAuth(): Promise<{ token: string; clientId: string; warehouseNu
       console.log('[CST] using intercepted auth token');
       return { token: intercepted.token, clientId: intercepted.clientId, warehouseNumber: getWarehouseNumber() || '0' };
     }
-    console.log('[CST] no intercepted token — falling back to MSAL refresh grant');
-    dumpMsalAccessTokens();;
+    console.log('[CST] no intercepted token — trying live MSAL instance…');
 
-    // Try getting a fresh token via MSAL refresh token exchange
+    // Try acquiring a token from Costco's own MSAL instance in the MAIN world
+    const msalToken = await chrome.runtime.sendMessage({ type: 'GET_MSAL_TOKEN' }).catch(() => null) as string | null;
+    if (msalToken) {
+      console.log('[CST] got token from MSAL instance');
+      const clientId = location.href.match(/\/app\/([0-9a-f-]{36})\//i)?.[1] ?? '';
+      return { token: msalToken, clientId, warehouseNumber: getWarehouseNumber() || '0' };
+    }
+
+    // Fall back to MSAL refresh token grant
     let token = await getMsalToken();
     console.log('[CST] msal token found:', !!token);
     if (token) {

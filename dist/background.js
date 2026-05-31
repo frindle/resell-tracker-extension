@@ -29,6 +29,22 @@
           fetch(message.url, { credentials: "include" }).then((r) => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))).then((html) => sendResponse({ html })).catch((e) => sendResponse({ error: String(e) }));
           return true;
         }
+        if (message.type === "GET_MSAL_TOKEN") {
+          const tabId = sender.tab?.id;
+          if (!tabId) {
+            sendResponse(null);
+            return;
+          }
+          chrome.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            func: inPageGetMsalToken
+          }).then((results) => sendResponse(results[0]?.result ?? null)).catch((e) => {
+            console.error("[BG] GET_MSAL_TOKEN error", e);
+            sendResponse(null);
+          });
+          return true;
+        }
         if (message.type === "GET_COSTCO_AUTH") {
           const tabId = sender.tab?.id;
           if (!tabId) {
@@ -61,6 +77,38 @@
           return true;
         }
       });
+      async function inPageGetMsalToken() {
+        const w = window;
+        let msalInstance = null;
+        for (const key of Object.keys(w)) {
+          const v = w[key];
+          if (v && typeof v === "object" && typeof v.getAllAccounts === "function" && typeof v.acquireTokenSilent === "function") {
+            msalInstance = v;
+            console.log("[CST-MAIN] found MSAL instance at window." + key);
+            break;
+          }
+        }
+        if (!msalInstance) {
+          console.log("[CST-MAIN] no MSAL instance found on window");
+          return null;
+        }
+        const accounts = msalInstance.getAllAccounts();
+        if (!accounts.length) {
+          console.log("[CST-MAIN] MSAL: no accounts");
+          return null;
+        }
+        const account = accounts[0];
+        console.log("[CST-MAIN] acquiring token silently for account", account.username ?? account.localAccountId);
+        try {
+          const result = await msalInstance.acquireTokenSilent({ account, scopes: ["openid", "profile"] });
+          const token = result.idToken ?? result.accessToken ?? null;
+          console.log("[CST-MAIN] acquireTokenSilent ok, got idToken:", !!result.idToken, "accessToken:", !!result.accessToken);
+          return token ?? null;
+        } catch (e) {
+          console.error("[CST-MAIN] acquireTokenSilent failed", e);
+          return null;
+        }
+      }
       async function inPageCostcoGraphql(token, clientId, body) {
         const res = await fetch("https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql", {
           method: "POST",

@@ -31,6 +31,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'GET_MSAL_TOKEN') {
+    const tabId = sender.tab?.id;
+    if (!tabId) { sendResponse(null); return; }
+    chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: inPageGetMsalToken,
+    }).then(results => sendResponse(results[0]?.result ?? null))
+      .catch(e => { console.error('[BG] GET_MSAL_TOKEN error', e); sendResponse(null); });
+    return true;
+  }
+
   if (message.type === 'GET_COSTCO_AUTH') {
     const tabId = sender.tab?.id;
     if (!tabId) { sendResponse(null); return; }
@@ -63,6 +75,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 });
+
+// Runs in MAIN world — finds Costco's MSAL instance and calls acquireTokenSilent
+async function inPageGetMsalToken(): Promise<string | null> {
+  const w = window as Record<string, unknown>;
+
+  // Costco stores their MSAL instance under various names — find it by duck-typing
+  let msalInstance: { getAllAccounts(): unknown[]; acquireTokenSilent(req: unknown): Promise<{ idToken?: string; accessToken?: string }> } | null = null;
+  for (const key of Object.keys(w)) {
+    const v = w[key] as Record<string, unknown> | null;
+    if (v && typeof v === 'object' && typeof (v as Record<string, unknown>).getAllAccounts === 'function' && typeof (v as Record<string, unknown>).acquireTokenSilent === 'function') {
+      msalInstance = v as typeof msalInstance;
+      console.log('[CST-MAIN] found MSAL instance at window.' + key);
+      break;
+    }
+  }
+  if (!msalInstance) { console.log('[CST-MAIN] no MSAL instance found on window'); return null; }
+
+  const accounts = msalInstance.getAllAccounts();
+  if (!accounts.length) { console.log('[CST-MAIN] MSAL: no accounts'); return null; }
+  const account = accounts[0] as Record<string, unknown>;
+  console.log('[CST-MAIN] acquiring token silently for account', account.username ?? account.localAccountId);
+
+  try {
+    const result = await msalInstance.acquireTokenSilent({ account, scopes: ['openid', 'profile'] });
+    const token = result.idToken ?? result.accessToken ?? null;
+    console.log('[CST-MAIN] acquireTokenSilent ok, got idToken:', !!result.idToken, 'accessToken:', !!result.accessToken);
+    return token ?? null;
+  } catch (e) {
+    console.error('[CST-MAIN] acquireTokenSilent failed', e);
+    return null;
+  }
+}
 
 // Runs in the page's MAIN world — fetch has correct Origin/sec-fetch headers
 async function inPageCostcoGraphql(token: string, clientId: string, body: string) {
