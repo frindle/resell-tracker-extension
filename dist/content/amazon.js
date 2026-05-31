@@ -220,11 +220,11 @@
           if (seen.has(orderId)) continue;
           seen.add(orderId);
           let card = link;
-          for (let i = 0; i < 12; i++) {
+          for (let i = 0; i < 20; i++) {
             card = card?.parentElement ?? null;
             if (!card) break;
             const t = (card.textContent ?? "").trim();
-            if (t.length > 200 && /\$[\d,]+/.test(t) && /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d{4})\b/.test(t)) break;
+            if (t.length > 200 && /\$[\d,]+/.test(t) && /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d{4})\b/.test(t) && card.querySelector('a[href*="/dp/"]')) break;
           }
           if (!card) continue;
           const cardText = (card.textContent ?? "").replace(/\s+/g, " ");
