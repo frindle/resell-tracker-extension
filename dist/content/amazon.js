@@ -239,8 +239,12 @@
           if (/\b(cancelled|canceled|refunded|returned)\b/i.test(cardText)) continue;
           const totalMatch = cardText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
           const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
-          const addrMatch = cardText.match(/Ship to\s+.+?\s+(.+?)\s+Order #/s);
-          const shippingAddress = addrMatch ? addrMatch[1].replace(/\s+/g, " ").trim() : "";
+          const addrEl = card.querySelector('[class*="ship-to"], [class*="shipTo"], [class*="shipping-address"]');
+          let shippingAddress = (addrEl?.textContent ?? "").replace(/\s+/g, " ").trim();
+          if (!shippingAddress) {
+            const m = cardText.match(/(?:Ship(?:ped)? to|Delivered to)[:\s]+([A-Z][^$\n]{5,80?)(?=\s+(?:Order|Buy|Return|\$))/i);
+            if (m) shippingAddress = m[1].replace(/\s+/g, " ").trim();
+          }
           const titleEl = card.querySelector('[class*="product-title"],[class*="item-title"],a[href*="/dp/"]');
           const itemDescription = (titleEl?.textContent ?? "").trim().slice(0, 120);
           orders.push({
@@ -262,50 +266,6 @@
           '.a-pagination .a-last:not(.a-disabled) a, [aria-label="Next page"] a'
         );
         return nextEl?.href ?? null;
-      }
-      async function fetchOrderDetail(orderUrl) {
-        try {
-          const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 8e3);
-          const res = await fetch(orderUrl, { credentials: "include", signal: ctrl.signal });
-          clearTimeout(timer);
-          const html = await res.text();
-          const doc = new DOMParser().parseFromString(html, "text/html");
-          const addrEl = doc.querySelector('.displayAddressDiv, [class*="ship-to"], #shippingAddress');
-          const address = (addrEl?.textContent ?? "").replace(/\s+/g, " ").trim();
-          const trackNums = /* @__PURE__ */ new Set();
-          const patterns = [
-            /trackingId[=\s"':]+([A-Z0-9]{10,30})/g,
-            // query param / JSON key
-            /tracking[_-]?number["\s:=]+["']?([A-Z0-9]{10,30})/gi,
-            /\b(1Z[A-Z0-9]{16})\b/g,
-            // UPS
-            /\b(9[2345]\d{20})\b/g,
-            // USPS 22-digit
-            /\b(94\d{20})\b/g,
-            // USPS Priority
-            /\b(TBA\d{9,16})\b/gi,
-            // Amazon Logistics
-            // FedEx: door-tag numbers start with DT, express start with specific digits
-            /\b(DT\d{12})\b/g,
-            /\b(61[0-9]{18})\b/g,
-            // FedEx SmartPost 20-digit
-            /\b(96[0-9]{18})\b/g
-            // FedEx Express/Ground 20-digit
-          ];
-          for (const pat of patterns) {
-            let tm;
-            while ((tm = pat.exec(html)) !== null) trackNums.add(tm[1]);
-          }
-          const trackIdx = html.toLowerCase().indexOf("track");
-          if (trackIdx !== -1) console.log('[AMZ] html around "track":', html.slice(Math.max(0, trackIdx - 50), trackIdx + 200).replace(/\s+/g, " "));
-          else console.log('[AMZ] no "track" in html, length:', html.length);
-          console.log("[AMZ] detail", orderUrl.slice(-20), "finalUrl:", res.url.slice(-40), "tracking:", [...trackNums]);
-          return { address, tracking: [...trackNums] };
-        } catch (e) {
-          console.log("[AMZ] detail fetch failed:", orderUrl.slice(-20), String(e));
-          return { address: "", tracking: [] };
-        }
       }
       var STATE_KEY = "__resell_sync_state__";
       function saveState(state) {
@@ -350,14 +310,6 @@
           syncing = false;
           return;
         }
-        sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Found ${allOrders.length} orders, fetching details\u2026` });
-        await Promise.all(allOrders.map(async (order) => {
-          console.log("[AMZ] fetching detail:", order.orderNumber);
-          const detail = await fetchOrderDetail(order.sourceUrl);
-          console.log("[AMZ] detail done:", order.orderNumber, "tracking:", detail.tracking, "address:", detail.address.slice(0, 40) || "(none)");
-          order.shippingAddress = detail.address;
-          order.trackingNumbers = detail.tracking;
-        }));
         try {
           const result = await pushOrders(state.trackerUrl, state.apiKey, state.userId, allOrders);
           await setLastSync("amazon", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
