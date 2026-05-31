@@ -182,7 +182,10 @@ async function fetchTrackingNumbers(orderId: string): Promise<string[]> {
     tracking.push(...fromPage);
   }
 
-  const unique = [...new Set(tracking)].slice(0, 5);
+  // Clean each candidate: strip trailing letters (e.g. "TBA123See" → "TBA123", "9339...See" → "9339...")
+  const cleaned = [...new Set(tracking)].map(t => t.replace(/[A-Za-z]+$/, ''));
+  // Drop any entry that is a superstring of another (keep the shorter canonical form)
+  const unique = [...new Set(cleaned)].filter(t => !cleaned.some(other => other !== t && t.startsWith(other))).slice(0, 5);
   console.log('[AMZ] tracking for', orderId, ':', unique);
   return unique;
 }

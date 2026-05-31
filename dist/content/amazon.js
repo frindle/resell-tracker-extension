@@ -335,7 +335,8 @@
           const fromPage = extractCarrierTracking(doc);
           tracking.push(...fromPage);
         }
-        const unique = [...new Set(tracking)].slice(0, 5);
+        const cleaned = [...new Set(tracking)].map((t) => t.replace(/[A-Za-z]+$/, ""));
+        const unique = [...new Set(cleaned)].filter((t) => !cleaned.some((other) => other !== t && t.startsWith(other))).slice(0, 5);
         console.log("[AMZ] tracking for", orderId, ":", unique);
         return unique;
       }
