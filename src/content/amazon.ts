@@ -166,48 +166,70 @@ function extractCarrierTracking(doc: Document): string[] {
 }
 
 function extractTitleFromDoc(doc: Document): string {
-  const candidates = [
+  // Try structured selectors first
+  const bySelector = [
     doc.querySelector('[data-component="itemTitle"] a'),
     doc.querySelector('.yohtmlc-item a.a-link-normal'),
-    ...Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href]')).filter(a =>
-      /\/dp\/[A-Z0-9]{10}/.test(a.href) || /\/gp\/product\/[A-Z0-9]{10}/.test(a.href)
-    ),
+    doc.querySelector('.a-link-normal[href*="/dp/"]'),
+    doc.querySelector('.a-link-normal[href*="/gp/product/"]'),
   ];
-  for (const el of candidates) {
+  for (const el of bySelector) {
     const text = (el?.textContent ?? '').trim().replace(/\s+/g, ' ');
     if (text.length > 5) return text.slice(0, 120);
   }
+  // Fallback: any anchor whose href contains an ASIN pattern
+  for (const a of Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href]'))) {
+    if (!/\/dp\/[A-Z0-9]{10}|\/gp\/product\/[A-Z0-9]{10}/.test(a.href)) continue;
+    const text = (a.textContent ?? '').trim().replace(/\s+/g, ' ');
+    if (text.length > 5) return text.slice(0, 120);
+  }
+  console.warn('[AMZ] extractTitle: no match — sample links:', Array.from(doc.querySelectorAll('a[href]')).slice(0, 5).map(a => (a as HTMLAnchorElement).href));
   return '';
 }
 
 function extractAddressFromDoc(doc: Document): string {
-  // Use raw innerText so newlines are preserved — address blocks end at a blank line
   const raw = (doc.body?.innerText ?? doc.body?.textContent ?? '');
-
-  // Find the line containing "Ship to" or "Deliver to", then grab the next 2-5 non-empty lines
   const lines = raw.split(/\r?\n/);
+
+  // Amazon detail page uses "Shipping address" label; list page uses "Ship to"
+  const labelRe = /^(?:Shipping\s+address|Ship(?:s)?\s+to|Deliver(?:ed)?\s+to)\s*:?\s*$/i;
+
   for (let i = 0; i < lines.length; i++) {
-    if (/(?:Ship(?:s)?\s+to|Deliver(?:ed)?\s+to)/i.test(lines[i])) {
-      // Collect the following non-empty lines (the address block)
+    const line = lines[i].trim();
+    // Match as a standalone label line OR label followed by address on same line
+    const inlineMatch = line.match(/(?:Shipping\s+address|Ship(?:s)?\s+to|Deliver(?:ed)?\s+to)\s*:?\s+(.+)/i);
+    if (inlineMatch) {
+      // Address is on the same line after the label
+      const rest = inlineMatch[1].trim();
+      const digitIdx = rest.search(/\d/);
+      return (digitIdx > 0 ? rest.slice(digitIdx) : rest).slice(0, 200);
+    }
+
+    if (labelRe.test(line)) {
+      // Address follows on subsequent lines
       const addrLines: string[] = [];
       for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
         const l = lines[j].trim();
-        if (!l) break; // blank line ends the block
+        if (!l) break;
         addrLines.push(l);
       }
       if (addrLines.length === 0) continue;
       const full = addrLines.join(', ');
-      // Strip leading name (everything before the first digit = street number)
       const digitIdx = full.search(/\d/);
       return (digitIdx > 0 ? full.slice(digitIdx) : full).trim().slice(0, 200);
     }
   }
+
+  // Log a snippet so we can see what labels actually appear on the page
+  const snippet = lines.filter(l => l.trim().length > 0).slice(0, 30).join(' | ');
+  console.warn('[AMZ] extractAddress: no match — page lines:', snippet.slice(0, 400));
   return '';
 }
 
 async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[]; title: string; address: string }> {
+  console.log('[AMZ] fetchOrderDetails', orderId);
   const detailDoc = await fetchHtml(`https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`);
-  if (!detailDoc) return { tracking: [], title: '', address: '' };
+  if (!detailDoc) { console.warn('[AMZ] fetchOrderDetails: no doc for', orderId); return { tracking: [], title: '', address: '' }; }
 
   const title = extractTitleFromDoc(detailDoc);
   const address = extractAddressFromDoc(detailDoc);
@@ -218,8 +240,8 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
     .filter((href, i, arr) => arr.indexOf(href) === i);
 
   if (shipTrackUrls.length === 0) {
-    console.log('[AMZ] no ship-track links for', orderId);
-    return { tracking: [], title };
+    console.log('[AMZ] no ship-track links for', orderId, '| title:', title || '(none)', '| addr:', address || '(none)');
+    return { tracking: [], title, address };
   }
 
   // Fetch each ship-track page and extract carrier tracking numbers
