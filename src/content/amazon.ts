@@ -145,6 +145,9 @@ async function fetchOrderDetail(orderUrl: string): Promise<{ address: string; tr
       while ((tm = pat.exec(html)) !== null) trackNums.add(tm[1]);
     }
 
+    const trackIdx = html.toLowerCase().indexOf('track');
+    if (trackIdx !== -1) console.log('[AMZ] html around "track":', html.slice(Math.max(0, trackIdx - 50), trackIdx + 200).replace(/\s+/g, ' '));
+    else console.log('[AMZ] no "track" in html, length:', html.length);
     console.log('[AMZ] detail', orderUrl.slice(-20), 'finalUrl:', res.url.slice(-40), 'tracking:', [...trackNums]);
     return { address, tracking: [...trackNums] };
   } catch (e) {
