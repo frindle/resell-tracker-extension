@@ -248,6 +248,112 @@
             saved.style.display = "none";
           }, 2e3);
         });
+        document.getElementById("backfillBtn").addEventListener("click", async () => {
+          const btn = document.getElementById("backfillBtn");
+          const status = document.getElementById("backfillStatus");
+          const currentSettings = await getSettings();
+          if (!currentSettings.trackerUrl || !currentSettings.userId) {
+            status.textContent = "Configure tracker URL and user first.";
+            status.className = "status fail";
+            return;
+          }
+          btn.disabled = true;
+          status.textContent = "Fetching orders\u2026";
+          status.className = "status";
+          try {
+            const res = await fetch(`${currentSettings.trackerUrl}/api/orders/backfill`, {
+              headers: { "X-Extension-User-Id": currentSettings.userId }
+            });
+            if (!res.ok) throw new Error(`API error ${res.status}`);
+            const orders = await res.json();
+            if (orders.length === 0) {
+              status.textContent = "Nothing to backfill.";
+              status.className = "status ok";
+              btn.disabled = false;
+              return;
+            }
+            status.textContent = `Backfilling ${orders.length} orders\u2026`;
+            let filled = 0;
+            let skipped = 0;
+            for (const order of orders) {
+              status.textContent = `Backfilling ${filled + skipped + 1}/${orders.length}\u2026`;
+              await new Promise((r) => setTimeout(r, 800));
+              try {
+                const resp = await chrome.runtime.sendMessage({
+                  type: "FETCH_HTML",
+                  url: `https://www.amazon.com/gp/your-account/order-details?orderID=${order.orderNumber}`
+                });
+                if (resp?.error || !resp?.html) {
+                  skipped++;
+                  continue;
+                }
+                const doc = new DOMParser().parseFromString(resp.html, "text/html");
+                let title = "";
+                if (!order.itemDescription) {
+                  const titleSelectors = [
+                    '[data-component="itemTitle"] a',
+                    ".yohtmlc-item a.a-link-normal",
+                    '.a-link-normal[href*="/dp/"]'
+                  ];
+                  for (const sel of titleSelectors) {
+                    const el = doc.querySelector(sel);
+                    const t = (el?.textContent ?? "").trim().replace(/\s+/g, " ");
+                    if (t.length > 5) {
+                      title = t.slice(0, 120);
+                      break;
+                    }
+                  }
+                  if (!title) {
+                    for (const a of Array.from(doc.querySelectorAll("a[href]"))) {
+                      if (!/\/dp\/[A-Z0-9]{10}|\/gp\/product\/[A-Z0-9]{10}/.test(a.href)) continue;
+                      const t = (a.textContent ?? "").trim().replace(/\s+/g, " ");
+                      if (t.length > 5) {
+                        title = t.slice(0, 120);
+                        break;
+                      }
+                    }
+                  }
+                }
+                let address = "";
+                if (!order.shippingAddress) {
+                  const headers = Array.from(doc.querySelectorAll("h5"));
+                  for (const h of headers) {
+                    if (!/ship\s+to/i.test(h.textContent ?? "")) continue;
+                    const ul = h.nextElementSibling;
+                    if (!ul || ul.tagName !== "UL") continue;
+                    const items = Array.from(ul.querySelectorAll("li span.a-list-item")).map((el) => (el.innerHTML ?? "").replace(/<br\s*\/?>/gi, ", ").replace(/<[^>]+>/g, "").trim().replace(/\s+/g, " ")).filter((t) => t && !/^united states$/i.test(t));
+                    const addrItems = items.slice(1);
+                    if (addrItems.length > 0) {
+                      address = addrItems.join(", ").slice(0, 200);
+                      break;
+                    }
+                  }
+                }
+                if (!title && !address) {
+                  skipped++;
+                  continue;
+                }
+                const patch = {};
+                if (title) patch.itemDescription = title;
+                if (address) patch.shippingAddress = address;
+                await fetch(`${currentSettings.trackerUrl}/api/orders/${order.id}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json", "X-Extension-User-Id": currentSettings.userId },
+                  body: JSON.stringify(patch)
+                });
+                filled++;
+              } catch {
+                skipped++;
+              }
+            }
+            status.textContent = `Done \u2014 ${filled} updated, ${skipped} skipped.`;
+            status.className = "status ok";
+          } catch (err) {
+            status.textContent = `Failed: ${err instanceof Error ? err.message : String(err)}`;
+            status.className = "status fail";
+          }
+          btn.disabled = false;
+        });
       }
       init();
     }
