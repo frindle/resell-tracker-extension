@@ -300,36 +300,40 @@
         const doc = await fetchHtml(url);
         if (!doc) return [];
         const tracking = [];
-        const text = doc.body?.innerText ?? doc.body?.textContent ?? "";
-        const patterns = [
-          /\b(1Z[A-Z0-9]{16})\b/g,
-          // UPS
-          /\b([0-9]{20,22})\b/g,
-          // USPS/FedEx 20-22 digit
-          /\b(9[2345][0-9]{18,20})\b/g,
-          // USPS
-          /\b([0-9]{12,15})\b/g
-          // FedEx
+        const allLinks = Array.from(doc.querySelectorAll("a[href]"));
+        const carrierPatterns = [
+          [/usps\.com/i, /(?:qtc_tLabels1|tLabels)=([A-Z0-9]{10,30})/i],
+          [/ups\.com/i, /(?:tracknum|InquiryNumber1?)=([A-Z0-9]{10,30})/i],
+          [/fedex\.com/i, /(?:tracknumbers|trknbr)=([A-Z0-9]{10,30})/i],
+          [/dhl\.com/i, /(?:AWB)=([A-Z0-9]{8,20})/i]
         ];
-        const trackLinks = Array.from(doc.querySelectorAll('a[href*="tracking"], a[href*="track"]'));
-        for (const a of trackLinks) {
-          const href = a.href;
-          const m = href.match(/[?&](?:trackingId|tracking_number|number|p_shipment_tracking_id|shipmentId)=([A-Z0-9]+)/i);
-          if (m && m[1].length >= 10) tracking.push(m[1]);
-          const linkText = (a.textContent ?? "").trim().replace(/\s+/g, "");
-          if (/^[A-Z0-9]{10,}$/.test(linkText)) tracking.push(linkText);
-        }
-        if (tracking.length === 0) {
-          for (const pattern of patterns) {
-            let m;
-            while ((m = pattern.exec(text)) !== null) {
-              if (!tracking.includes(m[1])) tracking.push(m[1]);
-              if (tracking.length >= 3) break;
+        for (const a of allLinks) {
+          for (const [carrierRe, paramRe] of carrierPatterns) {
+            if (carrierRe.test(a.href)) {
+              const m = a.href.match(paramRe);
+              if (m) tracking.push(m[1]);
             }
           }
         }
+        const bodyText = (doc.body?.textContent ?? "").replace(/\s+/g, " ");
+        const trackingIdMatch = bodyText.match(/Tracking\s+(?:ID|number)[:\s]+([A-Z0-9]{10,30})/gi);
+        if (trackingIdMatch) {
+          for (const m of trackingIdMatch) {
+            const val = m.replace(/Tracking\s+(?:ID|number)[:\s]+/i, "").trim();
+            if (/^1Z[A-Z0-9]{16}$/.test(val) || /^9[0-9]{19,21}$/.test(val) || /^[0-9]{12,15}$/.test(val)) {
+              tracking.push(val);
+            }
+          }
+        }
+        if (tracking.length === 0) {
+          const ups = bodyText.match(/\b(1Z[A-Z0-9]{16})\b/g);
+          const usps = bodyText.match(/\b(9[2345][0-9]{18,20})\b/g);
+          if (ups) tracking.push(...ups);
+          if (usps) tracking.push(...usps);
+        }
         const unique = [...new Set(tracking)].slice(0, 5);
-        if (unique.length) console.log("[AMZ] tracking for", orderId, ":", unique);
+        const trackRelated = allLinks.filter((a) => /track|shipment|deliver/i.test(a.href) || /track/i.test(a.textContent ?? "")).map((a) => a.href).slice(0, 6);
+        console.log("[AMZ] tracking for", orderId, ":", unique, "| track links:", trackRelated);
         return unique;
       }
       async function fetchOrdersPage(startIndex) {
