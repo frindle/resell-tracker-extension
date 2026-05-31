@@ -217,35 +217,56 @@
       function formatDate(d) {
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       }
-      function getMsalToken() {
-        const isJwt = (s) => typeof s === "string" && s.split(".").length === 3;
-        const isCostcoToken = (s) => {
-          try {
-            const p = JSON.parse(atob(s.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-            return p.iss?.includes("signin.costco.com") && p.aud === "a3a5186b-7c89-4b4c-93a8-dd604e930757";
-          } catch {
-            return false;
-          }
-        };
-        let idTokenFallback = "";
+      function getMsalRefreshToken() {
         for (const storage of [sessionStorage, localStorage]) {
           for (const key of Object.keys(storage)) {
+            if (!key.toLowerCase().includes("refreshtoken")) continue;
+            if (!key.includes("a3a5186b")) continue;
             try {
               const item = JSON.parse(storage.getItem(key) ?? "{}");
-              const secret = item.secret ?? "";
-              if (!isJwt(secret) || !isCostcoToken(secret)) continue;
-              console.log("[CST] msal key:", key);
-              if (key.toLowerCase().includes("accesstoken")) return secret;
-              if (key.toLowerCase().includes("idtoken")) idTokenFallback = secret;
+              if (item.secret) return item.secret;
             } catch {
             }
           }
         }
-        return idTokenFallback;
+        return "";
+      }
+      async function getMsalToken() {
+        const refreshToken = getMsalRefreshToken();
+        if (!refreshToken) {
+          console.log("[CST] no refresh token found");
+          return "";
+        }
+        console.log("[CST] exchanging refresh token for fresh id_token\u2026");
+        try {
+          const res = await fetch(
+            "https://signin.costco.com/e0714dd4-784d-46d6-a278-3e29553483eb/B2C_1A_SSO_WCS_signup_signin_209/oauth2/v2.0/token",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: new URLSearchParams({
+                grant_type: "refresh_token",
+                refresh_token: refreshToken,
+                client_id: "a3a5186b-7c89-4b4c-93a8-dd604e930757",
+                scope: "openid a3a5186b-7c89-4b4c-93a8-dd604e930757"
+              }).toString()
+            }
+          );
+          if (!res.ok) {
+            console.error("[CST] token refresh failed", res.status, await res.text());
+            return "";
+          }
+          const data = await res.json();
+          console.log("[CST] token refresh ok, keys:", Object.keys(data));
+          return data.access_token ?? data.id_token ?? "";
+        } catch (e) {
+          console.error("[CST] token refresh error", e);
+          return "";
+        }
       }
       async function getAuth() {
         try {
-          let token = getMsalToken();
+          let token = await getMsalToken();
           console.log("[CST] msal token found:", !!token);
           if (token) {
             try {
@@ -329,7 +350,6 @@
         try {
           const res = await fetch(GRAPHQL_URL, {
             method: "POST",
-            credentials: "include",
             headers: {
               "Content-Type": "application/json-patch+json",
               "costco-x-authorization": `Bearer ${auth.token}`,
