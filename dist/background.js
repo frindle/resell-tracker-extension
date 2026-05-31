@@ -171,7 +171,8 @@
         return res.json();
       }
       async function handlePushOrders(trackerUrl, apiKey, userId, orders) {
-        const url = `${trackerUrl.replace(/\/$/, "")}/api/import`;
+        const normalizedBase = trackerUrl.replace(/\/$/, "").replace(/^http:\/\/([^0-9])/i, "https://$1");
+        const url = `${normalizedBase}/api/import`;
         const res = await fetch(url, {
           method: "POST",
           headers: {

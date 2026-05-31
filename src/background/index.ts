@@ -176,7 +176,10 @@ async function handlePushOrders(
   userId: string,
   orders: ScrapedOrder[],
 ) {
-  const url = `${trackerUrl.replace(/\/$/, '')}/api/import`;
+  // Upgrade http:// to https:// for known domain URLs to avoid Cloudflare 301
+  // redirects that convert POST → GET (fetch follows 301 but drops the body).
+  const normalizedBase = trackerUrl.replace(/\/$/, '').replace(/^http:\/\/([^0-9])/i, 'https://$1');
+  const url = `${normalizedBase}/api/import`;
   const res = await fetch(url, {
     method: 'POST',
     headers: {
