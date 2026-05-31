@@ -176,25 +176,14 @@ async function fetchPage(
   pageNumber: number,
 ): Promise<{ orders: BcOrder[]; total: number } | null> {
   try {
-    const res = await fetch(GRAPHQL_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json-patch+json',
-        'costco-x-authorization': `Bearer ${auth.token}`,
-        'costco-x-wcs-clientid': auth.clientId,
-        'costco.env': 'ecom',
-        'costco.service': 'restOrders',
-        'client-identifier': crypto.randomUUID(),
-        'Origin': 'https://www.costco.com',
-        'Referer': 'https://www.costco.com/',
-      },
-      body: JSON.stringify({
-        query: ORDER_QUERY,
-        variables: { startDate, endDate, pageNumber, pageSize: PAGE_SIZE, warehouseNumber: auth.warehouseNumber },
-      }),
+    const body = JSON.stringify({
+      query: ORDER_QUERY,
+      variables: { startDate, endDate, pageNumber, pageSize: PAGE_SIZE, warehouseNumber: auth.warehouseNumber },
     });
-    if (!res.ok) { console.error('[CST] GraphQL error', res.status, await res.text()); return null; }
-    const json = await res.json();
+    const resp = await chrome.runtime.sendMessage({ type: 'COSTCO_GRAPHQL', token: auth.token, clientId: auth.clientId, body });
+    if (resp?.error) { console.error('[CST] GraphQL background error', resp.error); return null; }
+    if (!resp?.ok) { console.error('[CST] GraphQL error', resp?.status, resp?.text); return null; }
+    const json = JSON.parse(resp.text);
     const result = json?.data?.getOnlineOrders?.[0];
     if (!result) { console.error('[CST] unexpected GraphQL response shape', JSON.stringify(json).slice(0, 200)); return null; }
     return { orders: result.bcOrders ?? [], total: result.totalNumberOfRecords ?? 0 };

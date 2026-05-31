@@ -31,6 +31,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'COSTCO_GRAPHQL') {
+    handleCostcoGraphql(message.token, message.clientId, message.body)
+      .then(sendResponse)
+      .catch(e => sendResponse({ error: String(e) }));
+    return true;
+  }
+
   if (message.type === 'PUSH_ORDERS') {
     handlePushOrders(message.trackerUrl, message.apiKey, message.userId, message.orders)
       .then(sendResponse)
@@ -38,6 +45,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 });
+
+async function handleCostcoGraphql(token: string, clientId: string, body: string) {
+  const res = await fetch('https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json-patch+json',
+      'costco-x-authorization': `Bearer ${token}`,
+      'costco-x-wcs-clientid': clientId,
+      'costco.env': 'ecom',
+      'costco.service': 'restOrders',
+      'client-identifier': crypto.randomUUID(),
+      'Origin': 'https://www.costco.com',
+      'Referer': 'https://www.costco.com/',
+    },
+    body,
+  });
+  const text = await res.text();
+  return { ok: res.ok, status: res.status, text };
+}
 
 async function handleFetchUsers(trackerUrl: string) {
   const url = `${trackerUrl.replace(/\/$/, '')}/api/users`;

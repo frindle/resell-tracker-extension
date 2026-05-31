@@ -196,7 +196,6 @@
       var import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min());
       init_storage();
       init_api();
-      var GRAPHQL_URL = "https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql";
       var PAGE_SIZE = 16;
       var SKIP_STATUSES = /* @__PURE__ */ new Set(["cancelled", "canceled"]);
       var DIGITAL_CARRIERS = /* @__PURE__ */ new Set(["electronic delivery service", "email delivery", "email"]);
@@ -348,28 +347,20 @@
 }`;
       async function fetchPage(auth, startDate, endDate, pageNumber) {
         try {
-          const res = await fetch(GRAPHQL_URL, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json-patch+json",
-              "costco-x-authorization": `Bearer ${auth.token}`,
-              "costco-x-wcs-clientid": auth.clientId,
-              "costco.env": "ecom",
-              "costco.service": "restOrders",
-              "client-identifier": crypto.randomUUID(),
-              "Origin": "https://www.costco.com",
-              "Referer": "https://www.costco.com/"
-            },
-            body: JSON.stringify({
-              query: ORDER_QUERY,
-              variables: { startDate, endDate, pageNumber, pageSize: PAGE_SIZE, warehouseNumber: auth.warehouseNumber }
-            })
+          const body = JSON.stringify({
+            query: ORDER_QUERY,
+            variables: { startDate, endDate, pageNumber, pageSize: PAGE_SIZE, warehouseNumber: auth.warehouseNumber }
           });
-          if (!res.ok) {
-            console.error("[CST] GraphQL error", res.status, await res.text());
+          const resp = await chrome.runtime.sendMessage({ type: "COSTCO_GRAPHQL", token: auth.token, clientId: auth.clientId, body });
+          if (resp?.error) {
+            console.error("[CST] GraphQL background error", resp.error);
             return null;
           }
-          const json = await res.json();
+          if (!resp?.ok) {
+            console.error("[CST] GraphQL error", resp?.status, resp?.text);
+            return null;
+          }
+          const json = JSON.parse(resp.text);
           const result = json?.data?.getOnlineOrders?.[0];
           if (!result) {
             console.error("[CST] unexpected GraphQL response shape", JSON.stringify(json).slice(0, 200));
