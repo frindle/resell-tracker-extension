@@ -188,41 +188,21 @@ function extractTitleFromDoc(doc: Document): string {
 }
 
 function extractAddressFromDoc(doc: Document): string {
-  const raw = (doc.body?.innerText ?? doc.body?.textContent ?? '');
-  const lines = raw.split(/\r?\n/);
-
-  // Amazon detail page uses "Shipping address" label; list page uses "Ship to"
-  const labelRe = /^(?:Shipping\s+address|Ship(?:s)?\s+to|Deliver(?:ed)?\s+to)\s*:?\s*$/i;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    // Match as a standalone label line OR label followed by address on same line
-    const inlineMatch = line.match(/(?:Shipping\s+address|Ship(?:s)?\s+to|Deliver(?:ed)?\s+to)\s*:?\s+(.+)/i);
-    if (inlineMatch) {
-      // Address is on the same line after the label
-      const rest = inlineMatch[1].trim();
-      const digitIdx = rest.search(/\d/);
-      return (digitIdx > 0 ? rest.slice(digitIdx) : rest).slice(0, 200);
-    }
-
-    if (labelRe.test(line)) {
-      // Address follows on subsequent lines
-      const addrLines: string[] = [];
-      for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
-        const l = lines[j].trim();
-        if (!l) break;
-        addrLines.push(l);
-      }
-      if (addrLines.length === 0) continue;
-      const full = addrLines.join(', ');
-      const digitIdx = full.search(/\d/);
-      return (digitIdx > 0 ? full.slice(digitIdx) : full).trim().slice(0, 200);
-    }
+  // Amazon detail page: <h5>Ship to</h5> followed by <ul> with <li> items
+  // Items are: name, street address, "United States"
+  const headers = Array.from(doc.querySelectorAll('h5'));
+  for (const h of headers) {
+    if (!/ship\s+to/i.test(h.textContent ?? '')) continue;
+    const ul = h.nextElementSibling;
+    if (!ul || ul.tagName !== 'UL') continue;
+    const items = Array.from(ul.querySelectorAll('li span.a-list-item'))
+      .map(el => (el.innerHTML ?? '').replace(/<br\s*\/?>/gi, ', ').replace(/<[^>]+>/g, '').trim().replace(/\s+/g, ' '))
+      .filter(t => t && !/^united states$/i.test(t));
+    // First item is the name, remaining items are the address lines
+    const addrItems = items.slice(1);
+    if (addrItems.length > 0) return addrItems.join(', ').slice(0, 200);
   }
-
-  // Log a snippet so we can see what labels actually appear on the page
-  const snippet = lines.filter(l => l.trim().length > 0).slice(0, 30).join(' | ');
-  console.warn('[AMZ] extractAddress: no match — page lines:', snippet.slice(0, 400));
+  console.warn('[AMZ] extractAddress: no "Ship to" h5 found');
   return '';
 }
 
