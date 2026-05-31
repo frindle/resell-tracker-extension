@@ -23,7 +23,7 @@ function setBadge(text: string, color = '#3b82f6') {
 }
 
 function formatDate(d: Date): string {
-  return `${d.getFullYear()}-${d.getMonth() + 1}-${String(d.getDate()).padStart(2, '0')}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 async function getAuth(): Promise<{ token: string; clientId: string; warehouseNumber: string } | null> {
@@ -209,10 +209,11 @@ async function runSync() {
   let pageNumber = 1;
   let total = Infinity;
 
+  let fetchFailed = false;
   while ((pageNumber - 1) * PAGE_SIZE < total) {
     if (pageNumber > 1) await new Promise(r => setTimeout(r, 600));
     const page = await fetchPage(auth, startDate, endDate, pageNumber);
-    if (!page) break;
+    if (!page) { fetchFailed = true; break; }
     total = page.total;
 
     for (const o of page.orders) {
@@ -222,6 +223,13 @@ async function runSync() {
 
     sendMessage({ type: 'SYNC_PROGRESS', platform: 'Costco', scraped: allOrders.length, message: `Fetched ${allOrders.length} of ${total} orders…` });
     pageNumber++;
+  }
+
+  if (fetchFailed && allOrders.length === 0) {
+    setBadge('!', '#ef4444');
+    sendMessage({ type: 'SYNC_ERROR', platform: 'Costco', error: 'GraphQL request failed — check console for details.' });
+    syncing = false;
+    return;
   }
 
   if (allOrders.length === 0) {

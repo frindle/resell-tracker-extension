@@ -215,7 +215,7 @@
         });
       }
       function formatDate(d) {
-        return `${d.getFullYear()}-${d.getMonth() + 1}-${String(d.getDate()).padStart(2, "0")}`;
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       }
       async function getAuth() {
         try {
@@ -367,10 +367,14 @@
         const allOrders = [];
         let pageNumber = 1;
         let total = Infinity;
+        let fetchFailed = false;
         while ((pageNumber - 1) * PAGE_SIZE < total) {
           if (pageNumber > 1) await new Promise((r) => setTimeout(r, 600));
           const page = await fetchPage(auth, startDate, endDate, pageNumber);
-          if (!page) break;
+          if (!page) {
+            fetchFailed = true;
+            break;
+          }
           total = page.total;
           for (const o of page.orders) {
             const mapped = mapOrder(o);
@@ -378,6 +382,12 @@
           }
           sendMessage({ type: "SYNC_PROGRESS", platform: "Costco", scraped: allOrders.length, message: `Fetched ${allOrders.length} of ${total} orders\u2026` });
           pageNumber++;
+        }
+        if (fetchFailed && allOrders.length === 0) {
+          setBadge("!", "#ef4444");
+          sendMessage({ type: "SYNC_ERROR", platform: "Costco", error: "GraphQL request failed \u2014 check console for details." });
+          syncing = false;
+          return;
         }
         if (allOrders.length === 0) {
           setBadge("\u2014");
