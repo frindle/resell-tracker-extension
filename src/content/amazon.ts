@@ -77,6 +77,9 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
 
     const titleEl = card.querySelector('[class*="product-title"],[class*="item-title"],a[href*="/dp/"]');
     const itemDescription = (titleEl?.textContent ?? '').trim().slice(0, 120);
+    if (!itemDescription || !shippingAddress) {
+      console.log('[AMZ] order', orderId, 'missing fields — cardText slice:', cardText.slice(0, 400));
+    }
 
     orders.push({
       platform: 'Amazon',
