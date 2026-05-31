@@ -488,17 +488,19 @@
             return;
           }
         }
-        if (allOrders.length === 0) {
+        const filteredOrders = allOrders.filter((o) => new Date(o.orderDate) >= sinceDate);
+        console.log("[CST] filtered to", filteredOrders.length, "orders on/after", startDate, "(dropped", allOrders.length - filteredOrders.length, "older)");
+        if (filteredOrders.length === 0) {
           setBadge("\u2014");
           sendMessage({ type: "SYNC_DONE", result: { platform: "Costco", scraped: 0, imported: 0, updated: 0 } });
           syncing = false;
           return;
         }
         try {
-          const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? "", settings.userId, allOrders);
+          const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? "", settings.userId, filteredOrders);
           await setLastSync("costco", now.toISOString().split("T")[0]);
           setBadge(`+${result.imported}`, "#22c55e");
-          sendMessage({ type: "SYNC_DONE", result: { platform: "Costco", scraped: allOrders.length, ...result } });
+          sendMessage({ type: "SYNC_DONE", result: { platform: "Costco", scraped: filteredOrders.length, ...result } });
         } catch (err) {
           setBadge("!", "#ef4444");
           sendMessage({ type: "SYNC_ERROR", platform: "Costco", error: err instanceof Error ? err.message : String(err) });
