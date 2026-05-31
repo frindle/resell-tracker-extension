@@ -220,13 +220,13 @@
           const orderId = idMatch[1];
           if (seen.has(orderId)) continue;
           seen.add(orderId);
-          let header = link;
-          for (let i = 0; i < 15; i++) {
-            header = header?.parentElement ?? null;
-            if (!header) break;
-            if (header.className && /order-header/.test(header.className)) break;
+          let card = link;
+          for (let i = 0; i < 20; i++) {
+            card = card?.parentElement ?? null;
+            if (!card) break;
+            const t = (card.textContent ?? "").replace(/\s+/g, " ");
+            if (t.length > 100 && /(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|January|February|March|April|June|July|August|September|October|November|December)/i.test(t)) break;
           }
-          const card = header?.parentElement ?? null;
           if (!card) {
             console.warn("[AMZ] no card for", orderId);
             continue;

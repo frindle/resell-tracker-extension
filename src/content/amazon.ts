@@ -36,13 +36,14 @@ function scrapeDoc(doc: Document, sinceDate: Date): { orders: ScrapedOrder[]; ha
     if (seen.has(orderId)) continue;
     seen.add(orderId);
 
-    let header: Element | null = link;
-    for (let i = 0; i < 15; i++) {
-      header = header?.parentElement ?? null;
-      if (!header) break;
-      if (header.className && /order-header/.test(header.className)) break;
+    // Walk up until we find a container that includes date text
+    let card: Element | null = link;
+    for (let i = 0; i < 20; i++) {
+      card = card?.parentElement ?? null;
+      if (!card) break;
+      const t = (card.textContent ?? '').replace(/\s+/g, ' ');
+      if (t.length > 100 && /(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|January|February|March|April|June|July|August|September|October|November|December)/i.test(t)) break;
     }
-    const card: Element | null = header?.parentElement ?? null;
     if (!card) { console.warn('[AMZ] no card for', orderId); continue; }
     const cardText = (card.textContent ?? '').replace(/\s+/g, ' ');
 
