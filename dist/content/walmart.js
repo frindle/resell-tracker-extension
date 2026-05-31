@@ -391,7 +391,7 @@
             if (detail.address) order.shippingAddress = detail.address;
             if (detail.tracking.length) order.trackingNumbers = detail.tracking;
           }
-          const result = await pushOrders(allOrders, settings.trackerUrl, settings.userId, settings.apiKey ?? "");
+          const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? "", settings.userId, allOrders);
           await setLastSync("walmart");
           sendMessage({ type: "SYNC_COMPLETE", platform: "Walmart", pushed: result.pushed, skipped: result.skipped });
           setBadge(String(result.pushed));
