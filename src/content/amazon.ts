@@ -165,10 +165,40 @@ function extractCarrierTracking(doc: Document): string[] {
   return [...new Set(found)];
 }
 
-async function fetchTrackingNumbers(orderId: string): Promise<string[]> {
-  // Step 1: get order detail page to find shipmentId values
+function extractTitleFromDoc(doc: Document): string {
+  const candidates = [
+    doc.querySelector('[data-component="itemTitle"] a'),
+    doc.querySelector('.yohtmlc-item a.a-link-normal'),
+    ...Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href]')).filter(a =>
+      /\/dp\/[A-Z0-9]{10}/.test(a.href) || /\/gp\/product\/[A-Z0-9]{10}/.test(a.href)
+    ),
+  ];
+  for (const el of candidates) {
+    const text = (el?.textContent ?? '').trim().replace(/\s+/g, ' ');
+    if (text.length > 5) return text.slice(0, 120);
+  }
+  return '';
+}
+
+function extractAddressFromDoc(doc: Document): string {
+  const text = (doc.body?.innerText ?? doc.body?.textContent ?? '').replace(/\s+/g, ' ');
+  // Look for address after "Ship to" or "Deliver to" labels
+  const m = text.match(/(?:Ship(?:s)? to|Deliver(?:ed)? to)[:\s]+([^\n]{10,200})/i);
+  if (m) {
+    const full = m[1].replace(/\s+/g, ' ').trim();
+    // Strip leading name (before first digit)
+    const digitIdx = full.search(/\d/);
+    return digitIdx > 0 ? full.slice(digitIdx).trim() : full;
+  }
+  return '';
+}
+
+async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[]; title: string; address: string }> {
   const detailDoc = await fetchHtml(`https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`);
-  if (!detailDoc) return [];
+  if (!detailDoc) return { tracking: [], title: '', address: '' };
+
+  const title = extractTitleFromDoc(detailDoc);
+  const address = extractAddressFromDoc(detailDoc);
 
   // Extract ship-track URLs — each has a unique shipmentId
   const shipTrackUrls = Array.from(detailDoc.querySelectorAll<HTMLAnchorElement>('a[href*="ship-track"]'))
@@ -177,11 +207,10 @@ async function fetchTrackingNumbers(orderId: string): Promise<string[]> {
 
   if (shipTrackUrls.length === 0) {
     console.log('[AMZ] no ship-track links for', orderId);
-    return [];
+    return { tracking: [], title };
   }
 
-  // Step 2: fetch each ship-track page and extract carrier tracking numbers
-  // Only look at the main content — limit to first 3 shipments
+  // Fetch each ship-track page and extract carrier tracking numbers
   const tracking: string[] = [];
   for (const url of shipTrackUrls.slice(0, 3)) {
     await new Promise(r => setTimeout(r, 600));
@@ -199,8 +228,8 @@ async function fetchTrackingNumbers(orderId: string): Promise<string[]> {
   const cleaned = [...new Set(tracking)].map(t => t.replace(/[A-Za-z]+$/, ''));
   // Drop any entry that is a superstring of another (keep the shorter canonical form)
   const unique = [...new Set(cleaned)].filter(t => !cleaned.some(other => other !== t && t.startsWith(other))).slice(0, 5);
-  console.log('[AMZ] tracking for', orderId, ':', unique);
-  return unique;
+  console.log('[AMZ] tracking for', orderId, ':', unique, '| title:', title || '(none)', '| addr:', address || '(none)');
+  return { tracking: unique, title, address };
 }
 
 async function fetchOrdersPage(startIndex: number): Promise<Document | null> {
@@ -319,14 +348,15 @@ async function runSync(state: SyncState) {
 
   clearState();
 
-  // Fetch tracking for all scraped orders
+  // Fetch tracking + fill missing titles from order detail pages
   if (allOrders.length > 0) {
-    sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Fetching tracking for ${allOrders.length} orders…` });
+    sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Fetching details for ${allOrders.length} orders…` });
     for (const order of allOrders) {
       await new Promise(r => setTimeout(r, 800));
-      const tracking = await fetchTrackingNumbers(order.orderNumber);
+      const { tracking, title, address } = await fetchOrderDetails(order.orderNumber);
       if (tracking.length > 0) order.trackingNumbers = tracking;
-      // If nothing found, leave trackingNumbers empty so import won't overwrite existing
+      if (!order.itemDescription && title) order.itemDescription = title;
+      if (!order.shippingAddress && address) order.shippingAddress = address;
     }
   }
 
