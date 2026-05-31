@@ -29,6 +29,19 @@
           fetch(message.url, { credentials: "include" }).then((r) => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))).then((html) => sendResponse({ html })).catch((e) => sendResponse({ error: String(e) }));
           return true;
         }
+        if (message.type === "GET_CAPTURED_ORDERS") {
+          const tabId = sender.tab?.id;
+          if (!tabId) {
+            sendResponse(null);
+            return;
+          }
+          chrome.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            func: () => window.__costcoOrdersResponse ?? null
+          }).then((results) => sendResponse(results[0]?.result ?? null)).catch(() => sendResponse(null));
+          return true;
+        }
         if (message.type === "GET_MSAL_TOKEN") {
           const tabId = sender.tab?.id;
           if (!tabId) {

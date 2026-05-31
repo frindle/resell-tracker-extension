@@ -304,30 +304,47 @@ async function runSync() {
   sendMessage({ type: 'SYNC_PROGRESS', platform: 'Costco', scraped: 0, message: 'Fetching orders…' });
 
   const allOrders: ScrapedOrder[] = [];
-  let pageNumber = 1;
-  let total = Infinity;
 
-  let fetchFailed = false;
-  while ((pageNumber - 1) * PAGE_SIZE < total) {
-    if (pageNumber > 1) await new Promise(r => setTimeout(r, 600));
-    const page = await fetchPage(auth, startDate, endDate, pageNumber);
-    if (!page) { fetchFailed = true; break; }
-    total = page.total;
+  // Try captured response first (Costco's own page load — bypasses Akamai bot protection)
+  const captured = await chrome.runtime.sendMessage({ type: 'GET_CAPTURED_ORDERS' }).catch(() => null) as { data?: unknown } | null;
+  if (captured?.data) {
+    console.log('[CST] using captured orders response from page load');
+    const result = (captured.data as Record<string, unknown>)?.getOnlineOrders;
+    const pages = Array.isArray(result) ? result : [];
+    for (const page of pages) {
+      const p = page as { bcOrders?: BcOrder[]; totalNumberOfRecords?: number };
+      for (const o of p.bcOrders ?? []) {
+        const mapped = mapOrder(o);
+        if (mapped) allOrders.push(mapped);
+      }
+    }
+    console.log('[CST] captured orders:', allOrders.length);
+  } else {
+    // Fall back to direct API calls
+    let pageNumber = 1;
+    let total = Infinity;
+    let fetchFailed = false;
+    while ((pageNumber - 1) * PAGE_SIZE < total) {
+      if (pageNumber > 1) await new Promise(r => setTimeout(r, 600));
+      const page = await fetchPage(auth, startDate, endDate, pageNumber);
+      if (!page) { fetchFailed = true; break; }
+      total = page.total;
 
-    for (const o of page.orders) {
-      const mapped = mapOrder(o);
-      if (mapped) allOrders.push(mapped);
+      for (const o of page.orders) {
+        const mapped = mapOrder(o);
+        if (mapped) allOrders.push(mapped);
+      }
+
+      sendMessage({ type: 'SYNC_PROGRESS', platform: 'Costco', scraped: allOrders.length, message: `Fetched ${allOrders.length} of ${total} orders…` });
+      pageNumber++;
     }
 
-    sendMessage({ type: 'SYNC_PROGRESS', platform: 'Costco', scraped: allOrders.length, message: `Fetched ${allOrders.length} of ${total} orders…` });
-    pageNumber++;
-  }
-
-  if (fetchFailed && allOrders.length === 0) {
-    setBadge('!', '#ef4444');
-    sendMessage({ type: 'SYNC_ERROR', platform: 'Costco', error: 'GraphQL request failed — check console for details.' });
-    syncing = false;
-    return;
+    if (fetchFailed && allOrders.length === 0) {
+      setBadge('!', '#ef4444');
+      sendMessage({ type: 'SYNC_ERROR', platform: 'Costco', error: 'GraphQL request failed — navigate to your Costco Orders & Purchases page first, then sync.' });
+      syncing = false;
+      return;
+    }
   }
 
   if (allOrders.length === 0) {
