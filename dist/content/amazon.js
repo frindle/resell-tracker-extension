@@ -220,6 +220,7 @@
         const orderLinks = Array.from(doc.querySelectorAll(
           'a[href*="orderID="], a[href*="orderId="], a[href*="order-details"]'
         ));
+        console.log("[AMZ] scrapeDoc found", orderLinks.length, "order links:", orderLinks.map((a) => a.href.match(/[oO]rder[Ii][Dd]=([0-9A-Z-]{10,})/)?.[1]).filter(Boolean).join(", "));
         for (const link of orderLinks) {
           const idMatch = link.href.match(/[oO]rder[Ii][Dd]=([0-9A-Z-]{10,})/);
           if (!idMatch) continue;
