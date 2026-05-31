@@ -221,6 +221,8 @@
           'a[href*="orderID="], a[href*="orderId="], a[href*="order-details"]'
         ));
         console.log("[AMZ] scrapeDoc found", orderLinks.length, "order links:", orderLinks.map((a) => a.href.match(/[oO]rder[Ii][Dd]=([0-9A-Z-]{10,})/)?.[1]).filter(Boolean).join(", "));
+        const allOrderHrefs = Array.from(doc.querySelectorAll("a[href]")).map((a) => a.href).filter((h) => /order|invoice/i.test(h) && h.includes("amazon.com")).filter((h, i, arr) => arr.indexOf(h) === i);
+        console.log("[AMZ] all order-related hrefs:", allOrderHrefs);
         for (const link of orderLinks) {
           const idMatch = link.href.match(/[oO]rder[Ii][Dd]=([0-9A-Z-]{10,})/);
           if (!idMatch) continue;
