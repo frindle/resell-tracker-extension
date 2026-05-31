@@ -106,10 +106,10 @@ function getNextStartIndex(doc: Document): number | null {
 async function fetchOrdersPage(startIndex: number): Promise<Document | null> {
   const url = `https://www.amazon.com/your-orders/orders?startIndex=${startIndex}`;
   try {
-    const res = await fetch(url, { credentials: 'include' });
-    if (!res.ok) { console.warn('[AMZ] fetch page failed', res.status); return null; }
-    const html = await res.text();
-    return new DOMParser().parseFromString(html, 'text/html');
+    // Route through background service worker to avoid trust token quota errors
+    const resp = await chrome.runtime.sendMessage({ type: 'FETCH_HTML', url });
+    if (resp?.error) { console.warn('[AMZ] fetch page error', resp.error); return null; }
+    return new DOMParser().parseFromString(resp.html, 'text/html');
   } catch (e) {
     console.warn('[AMZ] fetch page error', e);
     return null;

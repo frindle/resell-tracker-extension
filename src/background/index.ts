@@ -23,6 +23,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // keep channel open for async response
   }
 
+  if (message.type === 'FETCH_HTML') {
+    fetch(message.url, { credentials: 'include' })
+      .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(html => sendResponse({ html }))
+      .catch(e => sendResponse({ error: String(e) }));
+    return true;
+  }
+
   if (message.type === 'PUSH_ORDERS') {
     handlePushOrders(message.trackerUrl, message.apiKey, message.userId, message.orders)
       .then(sendResponse)
