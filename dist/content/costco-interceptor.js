@@ -161,6 +161,7 @@
             window.__costcoAuth = { token: auth.slice(7), clientId };
           }
         }
+        window.__origFetch = window.fetch.bind(window);
         const origFetch = window.fetch.bind(window);
         window.fetch = async function(input, init) {
           const url = typeof input === "string" ? input : input.url;

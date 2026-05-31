@@ -137,7 +137,8 @@
         }
       }
       async function inPageCostcoGraphql(token, clientId, body) {
-        const res = await fetch("https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql", {
+        const fetchFn = window.__origFetch ?? fetch;
+        const res = await fetchFn("https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql", {
           method: "POST",
           headers: {
             "Content-Type": "application/json-patch+json",

@@ -136,7 +136,10 @@ async function inPageGetMsalToken(): Promise<string | null> {
 
 // Runs in the page's MAIN world — fetch has correct Origin/sec-fetch headers
 async function inPageCostcoGraphql(token: string, clientId: string, body: string) {
-  const res = await fetch('https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql', {
+  // Use the pristine fetch saved by costco-interceptor before queueconfigloader/airgap/LogRocket
+  // wrapped it — those wrappers may replace or drop our auth header.
+  const fetchFn = ((window as Record<string, unknown>).__origFetch as typeof fetch | undefined) ?? fetch;
+  const res = await fetchFn('https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json-patch+json',

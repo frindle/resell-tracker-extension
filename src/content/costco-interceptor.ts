@@ -11,6 +11,9 @@
     }
   }
 
+  // Save a reference to the pristine fetch before any page scripts wrap it
+  (window as Record<string, unknown>).__origFetch = window.fetch.bind(window);
+
   // Wrap fetch
   const origFetch = window.fetch.bind(window);
   window.fetch = async function (input, init) {
