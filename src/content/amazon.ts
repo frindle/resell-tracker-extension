@@ -316,6 +316,7 @@ function clearState() {
 // ---------------------------------------------------------------------------
 
 let syncing = false;
+let cancelRequested = false;
 
 async function runSync(state: SyncState) {
   const sinceDate = new Date(state.sinceDate);
@@ -364,10 +365,19 @@ async function runSync(state: SyncState) {
 
   // Fetch tracking + fill missing titles from order detail pages
   if (allOrders.length > 0) {
-    sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Fetching details for ${allOrders.length} orders…` });
-    for (const order of allOrders) {
+    cancelRequested = false;
+    for (let i = 0; i < allOrders.length; i++) {
+      if (cancelRequested) {
+        console.log('[AMZ] sync cancelled during detail fetch');
+        break;
+      }
+      const order = allOrders[i];
+      sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Fetching details for order ${i + 1} of ${allOrders.length}…` });
       await new Promise(r => setTimeout(r, 800));
-      const { tracking, title, address } = await fetchOrderDetails(order.orderNumber);
+      const timeout = new Promise<{ tracking: string[]; title: string; address: string }>(
+        r => setTimeout(() => r({ tracking: [], title: '', address: '' }), 12000)
+      );
+      const { tracking, title, address } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
       if (tracking.length > 0) order.trackingNumbers = tracking;
       if (!order.itemDescription && title) order.itemDescription = title;
       if (!order.shippingAddress && address) order.shippingAddress = address;
@@ -447,4 +457,8 @@ async function startSync() {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'PING') { sendResponse('ok'); return; }
   if (msg.type === 'START_SYNC' && msg.platform === 'Amazon') startSync();
+  if (msg.type === 'CANCEL_SYNC' && msg.platform === 'Amazon') {
+    cancelRequested = true;
+    sendResponse('ok');
+  }
 });

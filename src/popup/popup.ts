@@ -14,10 +14,20 @@ function setMeta(platform: Platform, text: string) {
   el.textContent = text;
 }
 
-function setSyncBtn(platform: Platform, disabled: boolean) {
+function setSyncBtn(platform: Platform, disabled: boolean, cancel = false) {
   const id = platform === 'Amazon' ? 'syncAmazon' : platform === 'Walmart' ? 'syncWalmart' : 'syncCostco';
   const btn = document.getElementById(id) as HTMLButtonElement;
-  btn.disabled = disabled;
+  btn.disabled = disabled && !cancel;
+  btn.textContent = cancel ? 'Cancel' : 'Sync';
+  btn.dataset.cancel = cancel ? '1' : '';
+}
+
+async function cancelSync(platform: Platform) {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return;
+  chrome.tabs.sendMessage(tab.id, { type: 'CANCEL_SYNC', platform }).catch(() => {});
+  setSyncBtn(platform, false);
+  setStatus(platform, 'cancelled', 'idle');
 }
 
 async function triggerSync(platform: Platform) {
@@ -35,7 +45,7 @@ async function triggerSync(platform: Platform) {
     : 'https://www.costco.com/myaccount/';
   const scriptFile = platform === 'Amazon' ? 'content/amazon.js' : platform === 'Walmart' ? 'content/walmart.js' : 'content/costco.js';
 
-  setSyncBtn(platform, true);
+  setSyncBtn(platform, true, platform === 'Amazon');
   setStatus(platform, 'syncing…', 'syncing');
 
   let targetTabId = tab.id;
@@ -92,7 +102,7 @@ async function init() {
   if (s && Date.now() - s.ts < 5 * 60 * 1000) {
     if (s.type === 'SYNC_STARTED' || s.type === 'SYNC_PROGRESS') {
       setStatus('Amazon', s.message ?? 'syncing…', 'syncing');
-      setSyncBtn('Amazon', true);
+      setSyncBtn('Amazon', true, true);
     } else if (s.type === 'SYNC_DONE' && s.result) {
       const text = s.result.scraped === 0 ? 'no new orders' : `+${s.result.imported} new, ${s.result.updated} updated`;
       setStatus('Amazon', text, 'ok');
@@ -137,7 +147,10 @@ async function init() {
     }
   });
 
-  document.getElementById('syncAmazon')!.addEventListener('click', () => triggerSync('Amazon'));
+  document.getElementById('syncAmazon')!.addEventListener('click', (e) => {
+    const btn = e.currentTarget as HTMLButtonElement;
+    if (btn.dataset.cancel) cancelSync('Amazon'); else triggerSync('Amazon');
+  });
   document.getElementById('syncWalmart')!.addEventListener('click', () => triggerSync('Walmart'));
   document.getElementById('syncCostco')!.addEventListener('click', () => triggerSync('Costco'));
 
@@ -149,7 +162,7 @@ async function init() {
   chrome.runtime.onMessage.addListener((message: SyncMessage) => {
     if (message.type === 'SYNC_STARTED') {
       setStatus(message.platform, 'syncing…', 'syncing');
-      setSyncBtn(message.platform, true);
+      setSyncBtn(message.platform, true, message.platform === 'Amazon');
     } else if (message.type === 'SYNC_PROGRESS') {
       setStatus(message.platform, message.message, 'syncing');
     } else if (message.type === 'SYNC_DONE') {

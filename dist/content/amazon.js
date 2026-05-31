@@ -437,6 +437,7 @@
         chrome.storage.local.remove(STORAGE_KEY);
       }
       var syncing = false;
+      var cancelRequested = false;
       async function runSync(state) {
         const sinceDate = new Date(state.sinceDate);
         const allOrders = [];
@@ -476,10 +477,19 @@
         }
         clearState();
         if (allOrders.length > 0) {
-          sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Fetching details for ${allOrders.length} orders\u2026` });
-          for (const order of allOrders) {
+          cancelRequested = false;
+          for (let i = 0; i < allOrders.length; i++) {
+            if (cancelRequested) {
+              console.log("[AMZ] sync cancelled during detail fetch");
+              break;
+            }
+            const order = allOrders[i];
+            sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Fetching details for order ${i + 1} of ${allOrders.length}\u2026` });
             await new Promise((r) => setTimeout(r, 800));
-            const { tracking, title, address } = await fetchOrderDetails(order.orderNumber);
+            const timeout = new Promise(
+              (r) => setTimeout(() => r({ tracking: [], title: "", address: "" }), 12e3)
+            );
+            const { tracking, title, address } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
             if (tracking.length > 0) order.trackingNumbers = tracking;
             if (!order.itemDescription && title) order.itemDescription = title;
             if (!order.shippingAddress && address) order.shippingAddress = address;
@@ -547,6 +557,10 @@
           return;
         }
         if (msg.type === "START_SYNC" && msg.platform === "Amazon") startSync();
+        if (msg.type === "CANCEL_SYNC" && msg.platform === "Amazon") {
+          cancelRequested = true;
+          sendResponse("ok");
+        }
       });
     }
   });
