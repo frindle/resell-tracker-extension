@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Reselling Tracker Sync",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Auto-syncs Amazon and Walmart orders to your Resell Tracker instance",
   "permissions": [
     "storage",
@@ -12,6 +12,8 @@
   "host_permissions": [
     "https://www.amazon.com/*",
     "https://www.walmart.com/*",
+    "https://www.costco.com/*",
+    "https://ecom-api.costco.com/*",
     "http://*/*",
     "https://*/*"
   ],
@@ -31,6 +33,13 @@
         "https://www.walmart.com/*"
       ],
       "js": ["content/walmart.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.costco.com/myaccount*"
+      ],
+      "js": ["content/costco.js"],
       "run_at": "document_idle"
     }
   ],

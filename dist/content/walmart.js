@@ -156,7 +156,7 @@
     return { ...DEFAULTS, ...result };
   }
   async function setLastSync(platform, date) {
-    const key = platform === "amazon" ? "amazonLastSync" : "walmartLastSync";
+    const key = platform === "amazon" ? "amazonLastSync" : platform === "walmart" ? "walmartLastSync" : "costcoLastSync";
     await chrome.storage.sync.set({ [key]: date });
   }
   var import_browser_polyfill_min, DEFAULTS;
@@ -170,7 +170,8 @@
         userId: "",
         userName: "",
         amazonLastSync: "",
-        walmartLastSync: ""
+        walmartLastSync: "",
+        costcoLastSync: ""
       };
     }
   });

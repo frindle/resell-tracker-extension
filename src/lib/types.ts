@@ -1,4 +1,4 @@
-export type Platform = 'Amazon' | 'Walmart';
+export type Platform = 'Amazon' | 'Walmart' | 'Costco';
 
 export interface ScrapedOrder {
   platform: Platform;
@@ -19,6 +19,7 @@ export interface SyncSettings {
   userName: string;         // display name
   amazonLastSync: string;   // ISO date
   walmartLastSync: string;  // ISO date
+  costcoLastSync: string;   // ISO date
 }
 
 export interface TrackerUser {

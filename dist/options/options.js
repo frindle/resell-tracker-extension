@@ -169,7 +169,8 @@
         userId: "",
         userName: "",
         amazonLastSync: "",
-        walmartLastSync: ""
+        walmartLastSync: "",
+        costcoLastSync: ""
       };
     }
   });
@@ -216,6 +217,7 @@
         document.getElementById("trackerUrl").value = settings.trackerUrl;
         document.getElementById("amazonLastSync").value = settings.amazonLastSync;
         document.getElementById("walmartLastSync").value = settings.walmartLastSync;
+        document.getElementById("costcoLastSync").value = settings.costcoLastSync;
         const userSection = document.getElementById("userSection");
         const select = document.getElementById("userSelect");
         if (settings.trackerUrl) {
@@ -241,7 +243,8 @@
         document.getElementById("saveDates").addEventListener("click", async () => {
           const amazonLastSync = document.getElementById("amazonLastSync").value;
           const walmartLastSync = document.getElementById("walmartLastSync").value;
-          await saveSettings({ amazonLastSync, walmartLastSync });
+          const costcoLastSync = document.getElementById("costcoLastSync").value;
+          await saveSettings({ amazonLastSync, walmartLastSync, costcoLastSync });
           const saved = document.getElementById("datesSaved");
           saved.style.display = "inline";
           setTimeout(() => {

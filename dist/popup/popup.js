@@ -166,7 +166,8 @@
         userId: "",
         userName: "",
         amazonLastSync: "",
-        walmartLastSync: ""
+        walmartLastSync: "",
+        costcoLastSync: ""
       };
     }
   });
@@ -177,16 +178,19 @@
       var import_browser_polyfill_min2 = __toESM(require_browser_polyfill_min());
       init_storage();
       function setStatus(platform, text, cls) {
-        const el = document.getElementById(platform === "Amazon" ? "amazonStatus" : "walmartStatus");
+        const id = platform === "Amazon" ? "amazonStatus" : platform === "Walmart" ? "walmartStatus" : "costcoStatus";
+        const el = document.getElementById(id);
         el.textContent = text;
         el.className = `status ${cls}`;
       }
       function setMeta(platform, text) {
-        const el = document.getElementById(platform === "Amazon" ? "amazonMeta" : "walmartMeta");
+        const id = platform === "Amazon" ? "amazonMeta" : platform === "Walmart" ? "walmartMeta" : "costcoMeta";
+        const el = document.getElementById(id);
         el.textContent = text;
       }
       function setSyncBtn(platform, disabled) {
-        const btn = document.getElementById(platform === "Amazon" ? "syncAmazon" : "syncWalmart");
+        const id = platform === "Amazon" ? "syncAmazon" : platform === "Walmart" ? "syncWalmart" : "syncCostco";
+        const btn = document.getElementById(id);
         btn.disabled = disabled;
       }
       async function triggerSync(platform) {
@@ -195,9 +199,9 @@
           setStatus(platform, "No active tab", "fail");
           return;
         }
-        const expectedHost = platform === "Amazon" ? "www.amazon.com" : "www.walmart.com";
-        const ordersUrl = platform === "Amazon" ? "https://www.amazon.com/your-orders/orders" : "https://www.walmart.com/orders";
-        const scriptFile = platform === "Amazon" ? "content/amazon.js" : "content/walmart.js";
+        const expectedHost = platform === "Amazon" ? "www.amazon.com" : platform === "Walmart" ? "www.walmart.com" : "www.costco.com";
+        const ordersUrl = platform === "Amazon" ? "https://www.amazon.com/your-orders/orders" : platform === "Walmart" ? "https://www.walmart.com/orders" : "https://www.costco.com/myaccount/";
+        const scriptFile = platform === "Amazon" ? "content/amazon.js" : platform === "Walmart" ? "content/walmart.js" : "content/costco.js";
         setSyncBtn(platform, true);
         setStatus(platform, "syncing\u2026", "syncing");
         let targetTabId = tab.id;
@@ -245,6 +249,7 @@
         }
         if (settings.amazonLastSync) setMeta("Amazon", `Last sync: ${settings.amazonLastSync}`);
         if (settings.walmartLastSync) setMeta("Walmart", `Last sync: ${settings.walmartLastSync}`);
+        if (settings.costcoLastSync) setMeta("Costco", `Last sync: ${settings.costcoLastSync}`);
         const stored = await chrome.storage.local.get("amazonSyncStatus");
         const s = stored.amazonSyncStatus;
         if (s && Date.now() - s.ts < 5 * 60 * 1e3) {
@@ -261,6 +266,21 @@
         chrome.storage.onChanged.addListener((changes) => {
           if (changes.amazonLastSync?.newValue) setMeta("Amazon", `Last sync: ${changes.amazonLastSync.newValue}`);
           if (changes.walmartLastSync?.newValue) setMeta("Walmart", `Last sync: ${changes.walmartLastSync.newValue}`);
+          if (changes.costcoLastSync?.newValue) setMeta("Costco", `Last sync: ${changes.costcoLastSync.newValue}`);
+          const cs = changes.costcoSyncStatus?.newValue;
+          if (cs) {
+            if (cs.type === "SYNC_STARTED" || cs.type === "SYNC_PROGRESS") {
+              setStatus("Costco", cs.message ?? "syncing\u2026", "syncing");
+              setSyncBtn("Costco", true);
+            } else if (cs.type === "SYNC_DONE" && cs.result) {
+              const text = cs.result.scraped === 0 ? "no new orders" : `+${cs.result.imported} new, ${cs.result.updated} updated`;
+              setStatus("Costco", text, "ok");
+              setSyncBtn("Costco", false);
+            } else if (cs.type === "SYNC_ERROR") {
+              setStatus("Costco", `Error: ${cs.error}`, "fail");
+              setSyncBtn("Costco", false);
+            }
+          }
           const s2 = changes.amazonSyncStatus?.newValue;
           if (s2) {
             if (s2.type === "SYNC_STARTED" || s2.type === "SYNC_PROGRESS") {
@@ -278,6 +298,7 @@
         });
         document.getElementById("syncAmazon").addEventListener("click", () => triggerSync("Amazon"));
         document.getElementById("syncWalmart").addEventListener("click", () => triggerSync("Walmart"));
+        document.getElementById("syncCostco").addEventListener("click", () => triggerSync("Costco"));
         document.getElementById("openSettings").addEventListener("click", (e) => {
           e.preventDefault();
           chrome.runtime.openOptionsPage();

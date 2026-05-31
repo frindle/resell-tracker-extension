@@ -29,6 +29,7 @@ async function init() {
   (document.getElementById('trackerUrl') as HTMLInputElement).value = settings.trackerUrl;
   (document.getElementById('amazonLastSync') as HTMLInputElement).value = settings.amazonLastSync;
   (document.getElementById('walmartLastSync') as HTMLInputElement).value = settings.walmartLastSync;
+  (document.getElementById('costcoLastSync') as HTMLInputElement).value = settings.costcoLastSync;
 
   const userSection = document.getElementById('userSection') as HTMLElement;
   const select = document.getElementById('userSelect') as HTMLSelectElement;
@@ -57,7 +58,8 @@ async function init() {
   document.getElementById('saveDates')!.addEventListener('click', async () => {
     const amazonLastSync = (document.getElementById('amazonLastSync') as HTMLInputElement).value;
     const walmartLastSync = (document.getElementById('walmartLastSync') as HTMLInputElement).value;
-    await saveSettings({ amazonLastSync, walmartLastSync });
+    const costcoLastSync = (document.getElementById('costcoLastSync') as HTMLInputElement).value;
+    await saveSettings({ amazonLastSync, walmartLastSync, costcoLastSync });
     const saved = document.getElementById('datesSaved')!;
     saved.style.display = 'inline';
     setTimeout(() => { saved.style.display = 'none'; }, 2000);

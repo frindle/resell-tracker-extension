@@ -7,6 +7,7 @@ const DEFAULTS: SyncSettings = {
   userName: '',
   amazonLastSync: '',
   walmartLastSync: '',
+  costcoLastSync: '',
 };
 
 export async function getSettings(): Promise<SyncSettings> {
@@ -18,7 +19,7 @@ export async function saveSettings(settings: Partial<SyncSettings>): Promise<voi
   await chrome.storage.sync.set(settings);
 }
 
-export async function setLastSync(platform: 'amazon' | 'walmart', date: string): Promise<void> {
-  const key = platform === 'amazon' ? 'amazonLastSync' : 'walmartLastSync';
+export async function setLastSync(platform: 'amazon' | 'walmart' | 'costco', date: string): Promise<void> {
+  const key = platform === 'amazon' ? 'amazonLastSync' : platform === 'walmart' ? 'walmartLastSync' : 'costcoLastSync';
   await chrome.storage.sync.set({ [key]: date });
 }

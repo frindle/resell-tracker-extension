@@ -51,6 +51,12 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.0.2
+- Add Costco online order scraping via GraphQL API
+- Bulk backfill button for existing Amazon orders missing item descriptions or shipping addresses
+- Fix calendar icon invisible in dark mode on options page
+- Add payment due date field support
+
 ### 1.0.1
 - Fix popup status not updating when opened mid-sync in a new tab — now tracks live status via `chrome.storage.onChanged`
 

@@ -190,365 +190,220 @@
     }
   });
 
-  // src/content/amazon.ts
-  var require_amazon = __commonJS({
-    "src/content/amazon.ts"() {
+  // src/content/costco.ts
+  var require_costco = __commonJS({
+    "src/content/costco.ts"() {
       var import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min());
       init_storage();
       init_api();
-      console.log("[AMZ] content script loaded", location.href);
-      function parseMoney(text) {
-        return parseFloat(text.replace(/[^0-9.-]/g, "")) || 0;
-      }
+      var GRAPHQL_URL = "https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql";
+      var PAGE_SIZE = 16;
+      var SKIP_STATUSES = /* @__PURE__ */ new Set(["cancelled", "canceled"]);
+      var DIGITAL_CARRIERS = /* @__PURE__ */ new Set(["electronic delivery service", "email delivery", "email"]);
+      console.log("[CST] content script loaded", location.href);
       function sendMessage(msg) {
         chrome.runtime.sendMessage(msg).catch(() => {
         });
         if (msg.type === "SYNC_PROGRESS" || msg.type === "SYNC_STARTED") {
-          chrome.storage.local.set({ amazonSyncStatus: { type: msg.type, message: msg.message ?? "syncing\u2026", ts: Date.now() } });
+          chrome.storage.local.set({ costcoSyncStatus: { type: msg.type, message: msg.message ?? "syncing\u2026", ts: Date.now() } });
         } else if (msg.type === "SYNC_DONE" || msg.type === "SYNC_ERROR") {
-          chrome.storage.local.set({ amazonSyncStatus: { type: msg.type, result: msg.result, error: msg.error, ts: Date.now() } });
+          chrome.storage.local.set({ costcoSyncStatus: { type: msg.type, result: msg.result, error: msg.error, ts: Date.now() } });
         }
       }
       function setBadge(text, color = "#3b82f6") {
         chrome.runtime.sendMessage({ type: "SET_BADGE", text, color }).catch(() => {
         });
       }
-      function scrapeDoc(doc, sinceDate) {
-        const orders = [];
-        let hasOlder = false;
-        const seen = /* @__PURE__ */ new Set();
-        const orderLinks = Array.from(doc.querySelectorAll(
-          'a[href*="orderID="], a[href*="orderId="], a[href*="order-details"]'
-        ));
-        for (const link of orderLinks) {
-          const idMatch = link.href.match(/[oO]rder[Ii][Dd]=([0-9A-Z-]{10,})/);
-          if (!idMatch) continue;
-          const orderId = idMatch[1];
-          if (seen.has(orderId)) continue;
-          seen.add(orderId);
-          let card = link;
-          for (let i = 0; i < 20; i++) {
-            card = card?.parentElement ?? null;
-            if (!card) break;
-            const t = (card.textContent ?? "").replace(/\s+/g, " ");
-            if (t.length > 100 && /(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|January|February|March|April|June|July|August|September|October|November|December)/i.test(t)) break;
-          }
-          if (!card) {
-            console.warn("[AMZ] no card for", orderId);
-            continue;
-          }
-          const rawText = "innerText" in card ? card.innerText : card.textContent ?? "";
-          const cardText = rawText.replace(/\s+/g, " ");
-          const dateMatch = cardText.match(/Order placed\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ?? cardText.match(/((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})/i) ?? cardText.match(/((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2},?\s+\d{4})/i);
-          if (!dateMatch) {
-            console.warn("[AMZ] no date for", orderId, "\u2014 cardText:", cardText.slice(0, 200));
-            continue;
-          }
-          const orderDate = new Date(dateMatch[1]);
-          if (isNaN(orderDate.getTime())) {
-            console.warn("[AMZ] bad date for", orderId, dateMatch[1]);
-            continue;
-          }
-          if (orderDate.toISOString().split("T")[0] < sinceDate.toISOString().split("T")[0]) {
-            hasOlder = true;
-            continue;
-          }
-          if (/\b(cancelled|canceled|refunded|returned)\b/i.test(cardText)) continue;
-          const totalMatch = cardText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
-          const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
-          let shippingAddress = "";
-          const addrMatch = cardText.match(/Ship to\s+(.+?)\s+United States/is);
-          if (addrMatch) {
-            const full = addrMatch[1].replace(/\s+/g, " ").trim();
-            const digitIdx = full.search(/\d/);
-            shippingAddress = digitIdx > 0 ? full.slice(digitIdx) : full;
-          }
-          const titleEl = card.querySelector(
-            '[class*="product-title"],[class*="item-title"],[class*="yohtmlc-item"],[class*="a-link-normal"][href*="/dp/"],[data-component*="item"] a,a[href*="/dp/"],a[href*="/gp/product/"]'
-          );
-          let itemDescription = (titleEl?.textContent ?? "").trim().slice(0, 120);
-          if (!itemDescription) {
-            const productLink = card.querySelector('a[href*="/dp/"], a[href*="/gp/product/"]');
-            itemDescription = (productLink?.textContent ?? "").trim().slice(0, 120);
-          }
-          orders.push({
-            platform: "Amazon",
-            orderNumber: orderId,
-            orderDate: orderDate.toISOString().split("T")[0],
-            itemDescription,
-            cost,
-            shippingCost: 0,
-            shippingAddress,
-            trackingNumbers: [],
-            sourceUrl: `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`
-          });
-        }
-        return { orders, hasOlder };
+      function formatDate(d) {
+        return `${d.getFullYear()}-${d.getMonth() + 1}-${String(d.getDate()).padStart(2, "0")}`;
       }
-      function getNextStartIndex(doc) {
-        const nextEl = doc.querySelector(
-          '.a-pagination .a-last:not(.a-disabled) a, [aria-label="Next page"] a'
-        );
-        if (!nextEl?.href) return null;
-        const m = nextEl.href.match(/startIndex=(\d+)/);
-        return m ? parseInt(m[1]) : null;
-      }
-      async function fetchHtml(url) {
+      async function getAuth() {
         try {
-          const resp = await chrome.runtime.sendMessage({ type: "FETCH_HTML", url });
-          if (resp?.error) {
-            console.warn("[AMZ] fetch error", url, resp.error);
+          const res = await fetch("/gettoken", { credentials: "include" });
+          if (!res.ok) {
+            console.error("[CST] gettoken returned", res.status);
             return null;
           }
-          return new DOMParser().parseFromString(resp.html, "text/html");
+          const data = await res.json();
+          const token = data.id_token ?? data.access_token ?? data.token ?? "";
+          if (!token) {
+            console.error("[CST] no token in gettoken response", Object.keys(data));
+            return null;
+          }
+          let clientId = "";
+          try {
+            const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+            clientId = payload.clientId ?? payload.aud ?? "";
+          } catch {
+          }
+          const warehouseNumber = getWarehouseNumber();
+          console.log("[CST] auth ok, clientId:", clientId, "warehouse:", warehouseNumber || "(not found, using 0)");
+          return { token, clientId, warehouseNumber: warehouseNumber || "0" };
         } catch (e) {
-          console.warn("[AMZ] fetch error", url, e);
+          console.error("[CST] getAuth failed", e);
           return null;
         }
       }
-      function extractCarrierTracking(doc) {
-        const found = [];
-        const text = (doc.body?.textContent ?? "").replace(/\s+/g, " ");
-        const amzl = text.match(/\bTBA(\d{12,15})(?!\d)/g)?.map((m) => m.replace(/\D+$/, ""));
-        const ups = text.match(/\b(1Z[A-Z0-9]{16})\b/g);
-        const usps = text.match(/\b(9[0-9]{19,21})\b/g);
-        const fedex = text.match(/\b([1-8][0-9]{14})\b/g);
-        const nearLabel = text.match(/Tracking(?:\s+ID|\s+number)?[:\s]+([A-Z0-9]{10,30})/gi) ?? [];
-        for (const m of nearLabel) {
-          const val = m.replace(/Tracking(?:\s+ID|\s+number)?[:\s]+/i, "").trim().split(" ")[0];
-          if (val) found.unshift(val);
+      function getWarehouseNumber() {
+        for (const cookie of document.cookie.split(";")) {
+          const [k, v] = cookie.trim().split("=");
+          if (/store|warehouse|wh/i.test(k) && v && /^\d{3,4}$/.test(v.trim())) return v.trim();
         }
-        if (amzl) found.push(...amzl);
-        if (ups) found.push(...ups);
-        if (usps) found.push(...usps);
-        if (fedex) found.push(...fedex);
-        const carrierLinks = Array.from(doc.querySelectorAll("a[href]")).map((a) => a.href).filter((h) => /usps\.com|ups\.com|fedex\.com|dhl\.com/i.test(h));
-        for (const href of carrierLinks) {
-          const m = href.match(/[?&](?:qtc_tLabels1|tLabels|tracknum|InquiryNumber\d*|tracknumbers|trknbr|AWB)=([A-Z0-9]{8,30})/i);
-          if (m) found.unshift(m[1]);
-        }
-        return [...new Set(found)];
-      }
-      function extractTitleFromDoc(doc) {
-        const bySelector = [
-          doc.querySelector('[data-component="itemTitle"] a'),
-          doc.querySelector(".yohtmlc-item a.a-link-normal"),
-          doc.querySelector('.a-link-normal[href*="/dp/"]'),
-          doc.querySelector('.a-link-normal[href*="/gp/product/"]')
-        ];
-        for (const el of bySelector) {
-          const text = (el?.textContent ?? "").trim().replace(/\s+/g, " ");
-          if (text.length > 5) return text.slice(0, 120);
-        }
-        for (const a of Array.from(doc.querySelectorAll("a[href]"))) {
-          if (!/\/dp\/[A-Z0-9]{10}|\/gp\/product\/[A-Z0-9]{10}/.test(a.href)) continue;
-          const text = (a.textContent ?? "").trim().replace(/\s+/g, " ");
-          if (text.length > 5) return text.slice(0, 120);
-        }
-        console.warn("[AMZ] extractTitle: no match \u2014 sample links:", Array.from(doc.querySelectorAll("a[href]")).slice(0, 5).map((a) => a.href));
-        return "";
-      }
-      function extractAddressFromDoc(doc) {
-        const headers = Array.from(doc.querySelectorAll("h5"));
-        for (const h of headers) {
-          if (!/ship\s+to/i.test(h.textContent ?? "")) continue;
-          const ul = h.nextElementSibling;
-          if (!ul || ul.tagName !== "UL") continue;
-          const items = Array.from(ul.querySelectorAll("li span.a-list-item")).map((el) => (el.innerHTML ?? "").replace(/<br\s*\/?>/gi, ", ").replace(/<[^>]+>/g, "").trim().replace(/\s+/g, " ")).filter((t) => t && !/^united states$/i.test(t));
-          const addrItems = items.slice(1);
-          if (addrItems.length > 0) return addrItems.join(", ").slice(0, 200);
-        }
-        console.warn('[AMZ] extractAddress: no "Ship to" h5 found');
-        return "";
-      }
-      async function fetchOrderDetails(orderId) {
-        console.log("[AMZ] fetchOrderDetails", orderId);
-        const detailDoc = await fetchHtml(`https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`);
-        if (!detailDoc) {
-          console.warn("[AMZ] fetchOrderDetails: no doc for", orderId);
-          return { tracking: [], title: "", address: "" };
-        }
-        const title = extractTitleFromDoc(detailDoc);
-        const address = extractAddressFromDoc(detailDoc);
-        const shipTrackUrls = Array.from(detailDoc.querySelectorAll('a[href*="ship-track"]')).map((a) => a.href).filter((href, i, arr) => arr.indexOf(href) === i);
-        if (shipTrackUrls.length === 0) {
-          console.log("[AMZ] no ship-track links for", orderId, "| title:", title || "(none)", "| addr:", address || "(none)");
-          return { tracking: [], title, address };
-        }
-        const tracking = [];
-        for (const url of shipTrackUrls.slice(0, 3)) {
-          await new Promise((r) => setTimeout(r, 600));
-          const doc = await fetchHtml(url);
-          if (!doc) continue;
-          doc.querySelectorAll("nav, footer, #navbar, #navFooter, #rhf").forEach((el) => el.remove());
-          const fromPage = extractCarrierTracking(doc);
-          tracking.push(...fromPage);
-        }
-        const cleaned = [...new Set(tracking)].map((t) => t.replace(/[A-Za-z]+$/, ""));
-        const unique = [...new Set(cleaned)].filter((t) => !cleaned.some((other) => other !== t && t.startsWith(other))).slice(0, 5);
-        console.log("[AMZ] tracking for", orderId, ":", unique, "| title:", title || "(none)", "| addr:", address || "(none)");
-        return { tracking: unique, title, address };
-      }
-      async function fetchOrdersPage(startIndex) {
-        return fetchHtml(`https://www.amazon.com/your-orders/orders?startIndex=${startIndex}`);
-      }
-      function waitForOrders(timeoutMs = 15e3) {
-        return new Promise((resolve) => {
-          const start = Date.now();
-          function check() {
-            const links = document.querySelectorAll('a[href*="orderID="], a[href*="orderId="], a[href*="order-details"]');
-            if (links.length > 0) {
-              console.log("[AMZ] found", links.length, "order links");
-              resolve();
-              return;
-            }
-            if (Date.now() - start > timeoutMs) {
-              console.warn("[AMZ] waitForOrders timed out \u2014 url:", location.href, "\u2014 sample links:", Array.from(document.querySelectorAll("a[href]")).slice(0, 5).map((a) => a.href));
-              resolve();
-              return;
-            }
-            setTimeout(check, 500);
+        for (const key of Object.keys(localStorage)) {
+          if (/store|warehouse|wh/i.test(key)) {
+            const v = localStorage.getItem(key) ?? "";
+            if (/^\d{3,4}$/.test(v.trim())) return v.trim();
           }
-          check();
-        });
-      }
-      var STATE_KEY = "__resell_sync_state__";
-      var STORAGE_KEY = "amazonPendingSync";
-      function saveState(state) {
-        sessionStorage.setItem(STATE_KEY, JSON.stringify(state));
-        chrome.storage.local.set({ [STORAGE_KEY]: { ...state, ts: Date.now() } });
-      }
-      async function loadState() {
-        try {
-          const raw = sessionStorage.getItem(STATE_KEY);
-          if (raw) return JSON.parse(raw);
-        } catch {
         }
-        try {
-          const result = await chrome.storage.local.get(STORAGE_KEY);
-          const stored = result[STORAGE_KEY];
-          if (stored && Date.now() - stored.ts < 2 * 60 * 1e3) return stored;
-        } catch {
-        }
-        return null;
+        return "";
       }
-      function clearState() {
-        sessionStorage.removeItem(STATE_KEY);
-        chrome.storage.local.remove(STORAGE_KEY);
+      var ORDER_QUERY = `query getOnlineOrders($startDate:String!, $endDate:String!, $pageNumber:Int, $pageSize:Int, $warehouseNumber:String!) {
+  getOnlineOrders(startDate:$startDate, endDate:$endDate, pageNumber:$pageNumber, pageSize:$pageSize, warehouseNumber:$warehouseNumber) {
+    pageNumber
+    pageSize
+    totalNumberOfRecords
+    bcOrders {
+      orderHeaderId
+      orderPlacedDate: orderedDate
+      orderNumber: sourceOrderNumber
+      orderTotal
+      warehouseNumber
+      status
+      orderLineItems {
+        itemDescription
+        status
+        carrierItemCategory
+        shipment {
+          trackingNumber
+          carrierName
+        }
+      }
+    }
+  }
+}`;
+      async function fetchPage(auth, startDate, endDate, pageNumber) {
+        try {
+          const res = await fetch(GRAPHQL_URL, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json-patch+json",
+              "costco-x-authorization": `Bearer ${auth.token}`,
+              "costco-x-wcs-clientId": auth.clientId,
+              "costco.env": "ecom",
+              "costco.service": "restOrders",
+              "Origin": "https://www.costco.com",
+              "Referer": "https://www.costco.com/"
+            },
+            body: JSON.stringify({
+              query: ORDER_QUERY,
+              variables: { startDate, endDate, pageNumber, pageSize: PAGE_SIZE, warehouseNumber: auth.warehouseNumber }
+            })
+          });
+          if (!res.ok) {
+            console.error("[CST] GraphQL error", res.status, await res.text());
+            return null;
+          }
+          const json = await res.json();
+          const result = json?.data?.getOnlineOrders?.[0];
+          if (!result) {
+            console.error("[CST] unexpected GraphQL response shape", JSON.stringify(json).slice(0, 200));
+            return null;
+          }
+          return { orders: result.bcOrders ?? [], total: result.totalNumberOfRecords ?? 0 };
+        } catch (e) {
+          console.error("[CST] fetchPage failed", e);
+          return null;
+        }
+      }
+      function mapOrder(o) {
+        if (SKIP_STATUSES.has(o.status.toLowerCase())) return null;
+        const activeItems = o.orderLineItems.filter((li) => !SKIP_STATUSES.has(li.status.toLowerCase()));
+        const descriptions = [...new Set(
+          activeItems.map((li) => li.itemDescription?.trim()).filter(Boolean)
+        )];
+        const itemDescription = descriptions.join(", ").slice(0, 200);
+        const tracking = [...new Set(
+          activeItems.flatMap((li) => li.shipment).filter((s) => s.trackingNumber && !DIGITAL_CARRIERS.has(s.carrierName.toLowerCase())).map((s) => s.trackingNumber)
+        )];
+        return {
+          platform: "Costco",
+          orderNumber: o.orderNumber,
+          orderDate: o.orderPlacedDate.split("T")[0],
+          itemDescription,
+          cost: o.orderTotal,
+          shippingCost: 0,
+          shippingAddress: "",
+          trackingNumbers: tracking,
+          sourceUrl: `https://www.costco.com/myaccount/#/app/${o.orderHeaderId}/orderdetails`
+        };
       }
       var syncing = false;
-      async function runSync(state) {
-        const sinceDate = new Date(state.sinceDate);
-        const allOrders = [];
-        const seen = /* @__PURE__ */ new Set();
-        sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: 0, message: "Scraping page 1\u2026" });
-        console.log("[AMZ] waiting for orders on", location.href);
-        await waitForOrders();
-        console.log("[AMZ] scraping page 1, sinceDate:", sinceDate.toISOString().split("T")[0]);
-        const page1 = scrapeDoc(document, sinceDate);
-        console.log("[AMZ] page 1 result:", page1.orders.length, "orders, hasOlder:", page1.hasOlder);
-        if (page1.orders.length) console.log("[AMZ] orders found:", page1.orders.map((o) => `${o.orderDate} #${o.orderNumber} $${o.cost} addr=${o.shippingAddress || "none"}`).join(" | "));
-        for (const o of page1.orders) {
-          if (!seen.has(o.orderNumber)) {
-            seen.add(o.orderNumber);
-            allOrders.push(o);
-          }
-        }
-        if (!page1.hasOlder && allOrders.length < 200) {
-          let nextIndex = getNextStartIndex(document);
-          let pageNum = 2;
-          while (nextIndex !== null && allOrders.length < 200) {
-            sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Scraping page ${pageNum}\u2026` });
-            await new Promise((r) => setTimeout(r, 1500));
-            const doc = await fetchOrdersPage(nextIndex);
-            if (!doc) break;
-            const { orders, hasOlder } = scrapeDoc(doc, sinceDate);
-            for (const o of orders) {
-              if (!seen.has(o.orderNumber)) {
-                seen.add(o.orderNumber);
-                allOrders.push(o);
-              }
-            }
-            if (hasOlder) break;
-            nextIndex = getNextStartIndex(doc);
-            pageNum++;
-          }
-        }
-        clearState();
-        if (allOrders.length > 0) {
-          sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Fetching details for ${allOrders.length} orders\u2026` });
-          for (const order of allOrders) {
-            await new Promise((r) => setTimeout(r, 800));
-            const { tracking, title, address } = await fetchOrderDetails(order.orderNumber);
-            if (tracking.length > 0) order.trackingNumbers = tracking;
-            if (!order.itemDescription && title) order.itemDescription = title;
-            if (!order.shippingAddress && address) order.shippingAddress = address;
-          }
-        }
-        if (allOrders.length === 0) {
-          setBadge("\u2014");
-          sendMessage({ type: "SYNC_DONE", result: { platform: "Amazon", scraped: 0, imported: 0, updated: 0 } });
-          syncing = false;
-          return;
-        }
-        try {
-          const result = await pushOrders(state.trackerUrl, state.apiKey, state.userId, allOrders);
-          await setLastSync("amazon", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
-          setBadge(`+${result.imported}`, "#22c55e");
-          sendMessage({ type: "SYNC_DONE", result: { platform: "Amazon", scraped: allOrders.length, ...result } });
-        } catch (err) {
-          setBadge("!", "#ef4444");
-          sendMessage({ type: "SYNC_ERROR", platform: "Amazon", error: err instanceof Error ? err.message : String(err) });
-        }
-        syncing = false;
-      }
-      async function startSync() {
+      async function runSync() {
         if (syncing) return;
         syncing = true;
         const settings = await getSettings();
         if (!settings.trackerUrl || !settings.userId) {
-          sendMessage({ type: "SYNC_ERROR", platform: "Amazon", error: "Tracker URL or user not configured \u2014 open Settings." });
+          sendMessage({ type: "SYNC_ERROR", platform: "Costco", error: "Tracker URL or user not configured \u2014 open Settings." });
           setBadge("!", "#ef4444");
           syncing = false;
           return;
         }
-        const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1e3);
-        const lastSyncDate = settings.amazonLastSync ? new Date(settings.amazonLastSync) : null;
-        const sinceDate = lastSyncDate && lastSyncDate < sixtyDaysAgo ? lastSyncDate : sixtyDaysAgo;
         setBadge("\u2026");
-        sendMessage({ type: "SYNC_STARTED", platform: "Amazon" });
-        const state = {
-          sinceDate: sinceDate.toISOString(),
-          trackerUrl: settings.trackerUrl,
-          apiKey: settings.apiKey ?? "",
-          userId: settings.userId
-        };
-        const cleanOrdersUrl = "https://www.amazon.com/your-orders/orders";
-        if (location.href.replace(/\/$/, "") === cleanOrdersUrl) {
-          saveState(state);
-          await runSync(state);
-        } else {
-          saveState(state);
-          window.location.href = cleanOrdersUrl;
+        sendMessage({ type: "SYNC_STARTED", platform: "Costco" });
+        sendMessage({ type: "SYNC_PROGRESS", platform: "Costco", scraped: 0, message: "Getting auth\u2026" });
+        const auth = await getAuth();
+        if (!auth) {
+          sendMessage({ type: "SYNC_ERROR", platform: "Costco", error: "Could not get Costco auth token \u2014 make sure you are logged in." });
+          setBadge("!", "#ef4444");
+          syncing = false;
+          return;
         }
+        const sinceDate = settings.costcoLastSync ? new Date(settings.costcoLastSync) : new Date(Date.now() - 90 * 24 * 60 * 60 * 1e3);
+        const now = /* @__PURE__ */ new Date();
+        const startDate = formatDate(sinceDate);
+        const endDate = formatDate(now);
+        console.log("[CST] syncing", startDate, "\u2192", endDate);
+        sendMessage({ type: "SYNC_PROGRESS", platform: "Costco", scraped: 0, message: "Fetching orders\u2026" });
+        const allOrders = [];
+        let pageNumber = 1;
+        let total = Infinity;
+        while ((pageNumber - 1) * PAGE_SIZE < total) {
+          if (pageNumber > 1) await new Promise((r) => setTimeout(r, 600));
+          const page = await fetchPage(auth, startDate, endDate, pageNumber);
+          if (!page) break;
+          total = page.total;
+          for (const o of page.orders) {
+            const mapped = mapOrder(o);
+            if (mapped) allOrders.push(mapped);
+          }
+          sendMessage({ type: "SYNC_PROGRESS", platform: "Costco", scraped: allOrders.length, message: `Fetched ${allOrders.length} of ${total} orders\u2026` });
+          pageNumber++;
+        }
+        if (allOrders.length === 0) {
+          setBadge("\u2014");
+          sendMessage({ type: "SYNC_DONE", result: { platform: "Costco", scraped: 0, imported: 0, updated: 0 } });
+          syncing = false;
+          return;
+        }
+        try {
+          const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? "", settings.userId, allOrders);
+          await setLastSync("costco", now.toISOString().split("T")[0]);
+          setBadge(`+${result.imported}`, "#22c55e");
+          sendMessage({ type: "SYNC_DONE", result: { platform: "Costco", scraped: allOrders.length, ...result } });
+        } catch (err) {
+          setBadge("!", "#ef4444");
+          sendMessage({ type: "SYNC_ERROR", platform: "Costco", error: err instanceof Error ? err.message : String(err) });
+        }
+        syncing = false;
       }
-      (async () => {
-        if (!location.pathname.includes("your-orders") && !location.pathname.includes("order-history")) return;
-        const state = await loadState();
-        if (state) {
-          syncing = true;
-          sendMessage({ type: "SYNC_STARTED", platform: "Amazon" });
-          await runSync(state);
-        }
-      })();
       chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         if (msg.type === "PING") {
           sendResponse("ok");
           return;
         }
-        if (msg.type === "START_SYNC" && msg.platform === "Amazon") startSync();
+        if (msg.type === "START_SYNC" && msg.platform === "Costco") runSync();
       });
     }
   });
-  require_amazon();
+  require_costco();
 })();
