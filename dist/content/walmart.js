@@ -276,7 +276,10 @@
       }
       async function fetchOrderDetail(orderUrl) {
         try {
-          const res = await fetch(orderUrl, { credentials: "include" });
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 5e3);
+          const res = await fetch(orderUrl, { credentials: "include", signal: ctrl.signal });
+          clearTimeout(timer);
           const html = await res.text();
           const doc = new DOMParser().parseFromString(html, "text/html");
           const addrEl = doc.querySelector('[data-automation-id*="shipping-address"], [class*="shipping-address"], [class*="shippingAddress"]');
@@ -386,11 +389,11 @@
             return;
           }
           sendMessage({ type: "SYNC_PROGRESS", platform: "Walmart", scraped: allOrders.length, message: "Fetching order details\u2026" });
-          for (const order of allOrders) {
+          await Promise.all(allOrders.map(async (order) => {
             const detail = await fetchOrderDetail(order.sourceUrl);
             if (detail.address) order.shippingAddress = detail.address;
             if (detail.tracking.length) order.trackingNumbers = detail.tracking;
-          }
+          }));
           const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? "", settings.userId, allOrders);
           await setLastSync("walmart");
           sendMessage({ type: "SYNC_COMPLETE", platform: "Walmart", pushed: result.pushed, skipped: result.skipped });

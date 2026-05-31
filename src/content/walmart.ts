@@ -130,7 +130,10 @@ function getNextPageUrl(): string | null {
 
 async function fetchOrderDetail(orderUrl: string): Promise<{ address: string; tracking: string[] }> {
   try {
-    const res = await fetch(orderUrl, { credentials: 'include' });
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 5000);
+    const res = await fetch(orderUrl, { credentials: 'include', signal: ctrl.signal });
+    clearTimeout(timer);
     const html = await res.text();
     const doc = new DOMParser().parseFromString(html, 'text/html');
 
@@ -255,11 +258,11 @@ async function startSync() {
 
     sendMessage({ type: 'SYNC_PROGRESS', platform: 'Walmart', scraped: allOrders.length, message: 'Fetching order details…' } as never);
 
-    for (const order of allOrders) {
+    await Promise.all(allOrders.map(async order => {
       const detail = await fetchOrderDetail(order.sourceUrl);
       if (detail.address) order.shippingAddress = detail.address;
       if (detail.tracking.length) order.trackingNumbers = detail.tracking;
-    }
+    }));
 
     const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? '', settings.userId, allOrders);
     await setLastSync('walmart');
