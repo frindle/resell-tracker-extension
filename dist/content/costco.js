@@ -450,11 +450,9 @@
         sendMessage({ type: "SYNC_PROGRESS", platform: "Costco", scraped: 0, message: "Fetching orders\u2026" });
         const allOrders = [];
         const captured = await chrome.runtime.sendMessage({ type: "GET_CAPTURED_ORDERS" }).catch(() => null);
-        if (captured?.data) {
-          console.log("[CST] using captured orders response from page load");
-          const result = captured.data?.getOnlineOrders;
-          const pages = Array.isArray(result) ? result : [];
-          for (const page of pages) {
+        if (Array.isArray(captured) && captured.length > 0) {
+          console.log("[CST] using captured orders from", captured.length, "page(s)");
+          for (const page of captured) {
             const p = page;
             for (const o of p.bcOrders ?? []) {
               const mapped = mapOrder(o);

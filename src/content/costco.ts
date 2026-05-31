@@ -306,13 +306,11 @@ async function runSync() {
   const allOrders: ScrapedOrder[] = [];
 
   // Try captured response first (Costco's own page load — bypasses Akamai bot protection)
-  const captured = await chrome.runtime.sendMessage({ type: 'GET_CAPTURED_ORDERS' }).catch(() => null) as { data?: unknown } | null;
-  if (captured?.data) {
-    console.log('[CST] using captured orders response from page load');
-    const result = (captured.data as Record<string, unknown>)?.getOnlineOrders;
-    const pages = Array.isArray(result) ? result : [];
-    for (const page of pages) {
-      const p = page as { bcOrders?: BcOrder[]; totalNumberOfRecords?: number };
+  const captured = await chrome.runtime.sendMessage({ type: 'GET_CAPTURED_ORDERS' }).catch(() => null) as unknown[] | null;
+  if (Array.isArray(captured) && captured.length > 0) {
+    console.log('[CST] using captured orders from', captured.length, 'page(s)');
+    for (const page of captured) {
+      const p = page as { bcOrders?: BcOrder[] };
       for (const o of p.bcOrders ?? []) {
         const mapped = mapOrder(o);
         if (mapped) allOrders.push(mapped);

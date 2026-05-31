@@ -37,7 +37,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.scripting.executeScript({
       target: { tabId },
       world: 'MAIN',
-      func: () => (window as Record<string, unknown>).__costcoOrdersResponse ?? null,
+      func: () => (window as Record<string, unknown>).__costcoAllOrders ?? null,
     }).then(results => sendResponse(results[0]?.result ?? null))
       .catch(() => sendResponse(null));
     return true;

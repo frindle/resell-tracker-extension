@@ -38,7 +38,7 @@
           chrome.scripting.executeScript({
             target: { tabId },
             world: "MAIN",
-            func: () => window.__costcoOrdersResponse ?? null
+            func: () => window.__costcoAllOrders ?? null
           }).then((results) => sendResponse(results[0]?.result ?? null)).catch(() => sendResponse(null));
           return true;
         }

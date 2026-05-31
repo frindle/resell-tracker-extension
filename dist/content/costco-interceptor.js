@@ -75,8 +75,14 @@
               if (this.status < 400 && url.includes("order/v1/orders/graphql")) {
                 try {
                   const data = JSON.parse(this.responseText);
-                  console.log("[CST-INT] captured orders GraphQL response, keys:", Object.keys(data));
-                  window.__costcoOrdersResponse = data;
+                  const pages = data?.data?.getOnlineOrders;
+                  if (Array.isArray(pages)) {
+                    const w = window;
+                    const existing = w.__costcoAllOrders ?? [];
+                    for (const page of pages) existing.push(page);
+                    w.__costcoAllOrders = existing;
+                    console.log("[CST-INT] accumulated orders, total pages:", existing.length);
+                  }
                 } catch {
                 }
               }

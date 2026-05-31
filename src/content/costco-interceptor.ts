@@ -73,8 +73,14 @@ console.log('[CST-INT] interceptor script executing');
         if (this.status < 400 && url.includes('order/v1/orders/graphql')) {
           try {
             const data = JSON.parse(this.responseText);
-            console.log('[CST-INT] captured orders GraphQL response, keys:', Object.keys(data));
-            (window as Record<string, unknown>).__costcoOrdersResponse = data;
+            const pages = data?.data?.getOnlineOrders;
+            if (Array.isArray(pages)) {
+              const w = window as Record<string, unknown>;
+              const existing = (w.__costcoAllOrders as unknown[]) ?? [];
+              for (const page of pages) existing.push(page);
+              w.__costcoAllOrders = existing;
+              console.log('[CST-INT] accumulated orders, total pages:', existing.length);
+            }
           } catch { /* skip */ }
         }
       });
