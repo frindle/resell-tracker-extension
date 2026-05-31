@@ -45,7 +45,11 @@
         window.fetch = async function(input, init) {
           const url = typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
           tryCapture(url, headersToPlain(init?.headers));
-          return origFetch(input, init);
+          const res = await origFetch(input, init);
+          if (url.includes("ecom-api.costco.com")) {
+            console.log("[CST-INT] response \u2190", url, res.status, res.ok ? "OK" : "FAIL");
+          }
+          return res;
         };
         const origOpen = XMLHttpRequest.prototype.open;
         const origSetHeader = XMLHttpRequest.prototype.setRequestHeader;
