@@ -442,78 +442,83 @@
       var syncing = false;
       var cancelRequested = false;
       async function runSync(state) {
-        const sinceDate = new Date(state.sinceDate);
-        const allOrders = [];
-        const seen = /* @__PURE__ */ new Set();
-        sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: 0, message: "Scraping page 1\u2026" });
-        console.log("[AMZ] waiting for orders on", location.href);
-        await waitForOrders();
-        console.log("[AMZ] scraping page 1, sinceDate:", sinceDate.toISOString().split("T")[0]);
-        const page1 = scrapeDoc(document, sinceDate);
-        console.log("[AMZ] page 1 result:", page1.orders.length, "orders, hasOlder:", page1.hasOlder);
-        if (page1.orders.length) console.log("[AMZ] orders found:", page1.orders.map((o) => `${o.orderDate} #${o.orderNumber} $${o.cost} addr=${o.shippingAddress || "none"}`).join(" | "));
-        for (const o of page1.orders) {
-          if (!seen.has(o.orderNumber)) {
-            seen.add(o.orderNumber);
-            allOrders.push(o);
-          }
-        }
-        if (!page1.hasOlder && allOrders.length < 200) {
-          let nextIndex = getNextStartIndex(document);
-          let pageNum = 2;
-          while (nextIndex !== null && allOrders.length < 200) {
-            sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Scraping page ${pageNum}\u2026` });
-            await new Promise((r) => setTimeout(r, 1500));
-            const doc = await fetchOrdersPage(nextIndex);
-            if (!doc) break;
-            const { orders, hasOlder } = scrapeDoc(doc, sinceDate);
-            for (const o of orders) {
-              if (!seen.has(o.orderNumber)) {
-                seen.add(o.orderNumber);
-                allOrders.push(o);
-              }
-            }
-            if (hasOlder) break;
-            nextIndex = getNextStartIndex(doc);
-            pageNum++;
-          }
-        }
-        clearState();
-        if (allOrders.length > 0) {
-          cancelRequested = false;
-          for (let i = 0; i < allOrders.length; i++) {
-            if (cancelRequested) {
-              console.log("[AMZ] sync cancelled during detail fetch");
-              break;
-            }
-            const order = allOrders[i];
-            sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Fetching details for order ${i + 1} of ${allOrders.length}\u2026` });
-            await new Promise((r) => setTimeout(r, 800));
-            const timeout = new Promise(
-              (r) => setTimeout(() => r({ tracking: [], title: "", address: "" }), 12e3)
-            );
-            const { tracking, title, address } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
-            if (tracking.length > 0) order.trackingNumbers = tracking;
-            if (!order.itemDescription && title) order.itemDescription = title;
-            if (!order.shippingAddress && address) order.shippingAddress = address;
-          }
-        }
-        if (allOrders.length === 0) {
-          setBadge("\u2014");
-          sendMessage({ type: "SYNC_DONE", result: { platform: "Amazon", scraped: 0, imported: 0, updated: 0 } });
-          syncing = false;
-          return;
-        }
         try {
-          const result = await pushOrders(state.trackerUrl, state.apiKey, state.userId, allOrders);
-          await setLastSync("amazon", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
-          setBadge(`+${result.imported}`, "#22c55e");
-          sendMessage({ type: "SYNC_DONE", result: { platform: "Amazon", scraped: allOrders.length, ...result } });
+          const sinceDate = new Date(state.sinceDate);
+          const allOrders = [];
+          const seen = /* @__PURE__ */ new Set();
+          sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: 0, message: "Scraping page 1\u2026" });
+          console.log("[AMZ] waiting for orders on", location.href);
+          await waitForOrders();
+          console.log("[AMZ] scraping page 1, sinceDate:", sinceDate.toISOString().split("T")[0]);
+          const page1 = scrapeDoc(document, sinceDate);
+          console.log("[AMZ] page 1 result:", page1.orders.length, "orders, hasOlder:", page1.hasOlder);
+          if (page1.orders.length) console.log("[AMZ] orders found:", page1.orders.map((o) => `${o.orderDate} #${o.orderNumber} $${o.cost} addr=${o.shippingAddress || "none"}`).join(" | "));
+          for (const o of page1.orders) {
+            if (!seen.has(o.orderNumber)) {
+              seen.add(o.orderNumber);
+              allOrders.push(o);
+            }
+          }
+          if (!page1.hasOlder && allOrders.length < 200) {
+            let nextIndex = getNextStartIndex(document);
+            let pageNum = 2;
+            while (nextIndex !== null && allOrders.length < 200) {
+              sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Scraping page ${pageNum}\u2026` });
+              await new Promise((r) => setTimeout(r, 1500));
+              const doc = await fetchOrdersPage(nextIndex);
+              if (!doc) break;
+              const { orders, hasOlder } = scrapeDoc(doc, sinceDate);
+              for (const o of orders) {
+                if (!seen.has(o.orderNumber)) {
+                  seen.add(o.orderNumber);
+                  allOrders.push(o);
+                }
+              }
+              if (hasOlder) break;
+              nextIndex = getNextStartIndex(doc);
+              pageNum++;
+            }
+          }
+          clearState();
+          if (allOrders.length > 0) {
+            cancelRequested = false;
+            for (let i = 0; i < allOrders.length; i++) {
+              if (cancelRequested) {
+                console.log("[AMZ] sync cancelled during detail fetch");
+                break;
+              }
+              const order = allOrders[i];
+              sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Fetching details for order ${i + 1} of ${allOrders.length}\u2026` });
+              await new Promise((r) => setTimeout(r, 800));
+              const timeout = new Promise(
+                (r) => setTimeout(() => r({ tracking: [], title: "", address: "" }), 12e3)
+              );
+              const { tracking, title, address } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
+              if (tracking.length > 0) order.trackingNumbers = tracking;
+              if (!order.itemDescription && title) order.itemDescription = title;
+              if (!order.shippingAddress && address) order.shippingAddress = address;
+            }
+          }
+          if (allOrders.length === 0) {
+            setBadge("\u2014");
+            sendMessage({ type: "SYNC_DONE", result: { platform: "Amazon", scraped: 0, imported: 0, updated: 0 } });
+            return;
+          }
+          try {
+            const result = await pushOrders(state.trackerUrl, state.apiKey, state.userId, allOrders);
+            await setLastSync("amazon", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
+            setBadge(`+${result.imported}`, "#22c55e");
+            sendMessage({ type: "SYNC_DONE", result: { platform: "Amazon", scraped: allOrders.length, ...result } });
+          } catch (err) {
+            setBadge("!", "#ef4444");
+            sendMessage({ type: "SYNC_ERROR", platform: "Amazon", error: err instanceof Error ? err.message : String(err) });
+          }
         } catch (err) {
           setBadge("!", "#ef4444");
           sendMessage({ type: "SYNC_ERROR", platform: "Amazon", error: err instanceof Error ? err.message : String(err) });
+        } finally {
+          syncing = false;
         }
-        syncing = false;
       }
       async function startSync() {
         if (syncing) return;

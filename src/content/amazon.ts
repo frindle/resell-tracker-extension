@@ -326,6 +326,7 @@ let syncing = false;
 let cancelRequested = false;
 
 async function runSync(state: SyncState) {
+  try {
   const sinceDate = new Date(state.sinceDate);
   const allOrders: ScrapedOrder[] = [];
   const seen = new Set<string>();
@@ -394,7 +395,6 @@ async function runSync(state: SyncState) {
   if (allOrders.length === 0) {
     setBadge('—');
     sendMessage({ type: 'SYNC_DONE', result: { platform: 'Amazon', scraped: 0, imported: 0, updated: 0 } });
-    syncing = false;
     return;
   }
 
@@ -408,7 +408,12 @@ async function runSync(state: SyncState) {
     sendMessage({ type: 'SYNC_ERROR', platform: 'Amazon', error: err instanceof Error ? err.message : String(err) });
   }
 
-  syncing = false;
+  } catch (err) {
+    setBadge('!', '#ef4444');
+    sendMessage({ type: 'SYNC_ERROR', platform: 'Amazon', error: err instanceof Error ? err.message : String(err) });
+  } finally {
+    syncing = false;
+  }
 }
 
 async function startSync() {
