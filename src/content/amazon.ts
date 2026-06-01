@@ -349,7 +349,7 @@ async function runSync(state: SyncState) {
     let nextIndex = getNextStartIndex(document);
     let pageNum = 2;
 
-    while (nextIndex !== null && allOrders.length < 200) {
+    while (nextIndex !== null && allOrders.length < 200 && !cancelRequested) {
       sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Scraping page ${pageNum}…` });
 
       // Small delay to be polite to Amazon's servers
@@ -373,7 +373,6 @@ async function runSync(state: SyncState) {
 
   // Fetch tracking + fill missing titles from order detail pages
   if (allOrders.length > 0) {
-    cancelRequested = false;
     for (let i = 0; i < allOrders.length; i++) {
       if (cancelRequested) {
         console.log('[AMZ] sync cancelled during detail fetch');
@@ -419,6 +418,7 @@ async function runSync(state: SyncState) {
 async function startSync() {
   if (syncing) return;
   syncing = true;
+  cancelRequested = false;
 
   const settings = await getSettings();
   if (!settings.trackerUrl || !settings.userId) {

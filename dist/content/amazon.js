@@ -462,7 +462,7 @@
           if (!page1.hasOlder && allOrders.length < 200) {
             let nextIndex = getNextStartIndex(document);
             let pageNum = 2;
-            while (nextIndex !== null && allOrders.length < 200) {
+            while (nextIndex !== null && allOrders.length < 200 && !cancelRequested) {
               sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Scraping page ${pageNum}\u2026` });
               await new Promise((r) => setTimeout(r, 1500));
               const doc = await fetchOrdersPage(nextIndex);
@@ -481,7 +481,6 @@
           }
           clearState();
           if (allOrders.length > 0) {
-            cancelRequested = false;
             for (let i = 0; i < allOrders.length; i++) {
               if (cancelRequested) {
                 console.log("[AMZ] sync cancelled during detail fetch");
@@ -523,6 +522,7 @@
       async function startSync() {
         if (syncing) return;
         syncing = true;
+        cancelRequested = false;
         const settings = await getSettings();
         if (!settings.trackerUrl || !settings.userId) {
           sendMessage({ type: "SYNC_ERROR", platform: "Amazon", error: "Tracker URL or user not configured \u2014 open Settings." });
