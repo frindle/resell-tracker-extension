@@ -407,7 +407,7 @@
         )];
         const itemDescription = descriptions.join(", ").slice(0, 200);
         const tracking = [...new Set(
-          activeItems.flatMap((li) => li.shipment).filter((s) => s.trackingNumber && !DIGITAL_CARRIERS.has(s.carrierName.toLowerCase())).map((s) => s.trackingNumber)
+          activeItems.flatMap((li) => li.shipment ?? []).filter((s) => s.trackingNumber && !DIGITAL_CARRIERS.has(s.carrierName.toLowerCase())).map((s) => s.trackingNumber)
         )];
         return {
           platform: "Costco",

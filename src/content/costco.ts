@@ -248,7 +248,7 @@ function mapOrder(o: BcOrder): ScrapedOrder | null {
 
   const tracking = [...new Set(
     activeItems
-      .flatMap(li => li.shipment)
+      .flatMap(li => li.shipment ?? [])
       .filter(s => s.trackingNumber && !DIGITAL_CARRIERS.has(s.carrierName.toLowerCase()))
       .map(s => s.trackingNumber),
   )];
