@@ -295,7 +295,7 @@
           if (s2) {
             if (s2.type === "SYNC_STARTED" || s2.type === "SYNC_PROGRESS") {
               setStatus("Amazon", s2.message ?? "syncing\u2026", "syncing");
-              setSyncBtn("Amazon", true);
+              setSyncBtn("Amazon", true, true);
             } else if (s2.type === "SYNC_DONE" && s2.result) {
               const text = s2.result.scraped === 0 ? "no new orders" : `+${s2.result.imported} new, ${s2.result.updated} updated`;
               setStatus("Amazon", text, "ok");

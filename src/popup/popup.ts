@@ -135,7 +135,7 @@ async function init() {
     if (s) {
       if (s.type === 'SYNC_STARTED' || s.type === 'SYNC_PROGRESS') {
         setStatus('Amazon', s.message ?? 'syncing…', 'syncing');
-        setSyncBtn('Amazon', true);
+        setSyncBtn('Amazon', true, true);
       } else if (s.type === 'SYNC_DONE' && s.result) {
         const text = s.result.scraped === 0 ? 'no new orders' : `+${s.result.imported} new, ${s.result.updated} updated`;
         setStatus('Amazon', text, 'ok');
