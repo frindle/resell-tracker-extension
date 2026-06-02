@@ -102,8 +102,8 @@ async function init() {
   // Restore in-progress or recent sync status if popup was closed during sync
   const stored = await chrome.storage.local.get(['amazonSyncStatus', 'walmartSyncStatus', 'costcoSyncStatus', 'bigskyStatus']);
   const s = stored.amazonSyncStatus as { type: string; message?: string; result?: { scraped: number; imported: number; updated: number; platform: string }; error?: string; ts: number } | undefined;
-  if (s && Date.now() - s.ts < 5 * 60 * 1000) {
-    if (s.type === 'SYNC_STARTED' || s.type === 'SYNC_PROGRESS') {
+  if (s) {
+    if ((s.type === 'SYNC_STARTED' || s.type === 'SYNC_PROGRESS') && Date.now() - s.ts < 5 * 60 * 1000) {
       setStatus('Amazon', s.message ?? 'syncing…', 'syncing');
       setSyncBtn('Amazon', true, true);
     } else if (s.type === 'SYNC_DONE' && s.result) {
@@ -115,8 +115,8 @@ async function init() {
   }
 
   const ws = stored.walmartSyncStatus as { type: string; message?: string; result?: { scraped: number; imported: number; updated: number; platform: string }; error?: string; ts: number } | undefined;
-  if (ws && Date.now() - ws.ts < 5 * 60 * 1000) {
-    if (ws.type === 'SYNC_STARTED' || ws.type === 'SYNC_PROGRESS') {
+  if (ws) {
+    if ((ws.type === 'SYNC_STARTED' || ws.type === 'SYNC_PROGRESS') && Date.now() - ws.ts < 5 * 60 * 1000) {
       setStatus('Walmart', ws.message ?? 'syncing…', 'syncing');
       setSyncBtn('Walmart', true);
     } else if (ws.type === 'SYNC_DONE' && ws.result) {
@@ -128,8 +128,8 @@ async function init() {
   }
 
   const cs = stored.costcoSyncStatus as { type: string; message?: string; result?: { scraped: number; imported: number; updated: number; platform: string }; error?: string; ts: number } | undefined;
-  if (cs && Date.now() - cs.ts < 5 * 60 * 1000) {
-    if (cs.type === 'SYNC_STARTED' || cs.type === 'SYNC_PROGRESS') {
+  if (cs) {
+    if ((cs.type === 'SYNC_STARTED' || cs.type === 'SYNC_PROGRESS') && Date.now() - cs.ts < 5 * 60 * 1000) {
       setStatus('Costco', cs.message ?? 'syncing…', 'syncing');
       setSyncBtn('Costco', true);
     } else if (cs.type === 'SYNC_DONE' && cs.result) {
@@ -141,8 +141,8 @@ async function init() {
   }
 
   const bs = stored.bigskyStatus as { type: string; message?: string; result?: { scraped: number; imported: number; updated: number; platform: string }; error?: string; ts: number } | undefined;
-  if (bs && Date.now() - bs.ts < 5 * 60 * 1000) {
-    if (bs.type === 'SYNC_STARTED' || bs.type === 'SYNC_PROGRESS') {
+  if (bs) {
+    if ((bs.type === 'SYNC_STARTED' || bs.type === 'SYNC_PROGRESS') && Date.now() - bs.ts < 5 * 60 * 1000) {
       setStatus('BigSkyBuyers', bs.message ?? 'syncing…', 'syncing');
       setSyncBtn('BigSkyBuyers', true);
     } else if (bs.type === 'SYNC_DONE' && bs.result) {

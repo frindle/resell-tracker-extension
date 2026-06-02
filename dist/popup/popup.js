@@ -264,8 +264,8 @@
         if (settings.bigskyLastSync) setMeta("BigSkyBuyers", `Last sync: ${settings.bigskyLastSync}`);
         const stored = await chrome.storage.local.get(["amazonSyncStatus", "walmartSyncStatus", "costcoSyncStatus", "bigskyStatus"]);
         const s = stored.amazonSyncStatus;
-        if (s && Date.now() - s.ts < 5 * 60 * 1e3) {
-          if (s.type === "SYNC_STARTED" || s.type === "SYNC_PROGRESS") {
+        if (s) {
+          if ((s.type === "SYNC_STARTED" || s.type === "SYNC_PROGRESS") && Date.now() - s.ts < 5 * 60 * 1e3) {
             setStatus("Amazon", s.message ?? "syncing\u2026", "syncing");
             setSyncBtn("Amazon", true, true);
           } else if (s.type === "SYNC_DONE" && s.result) {
@@ -276,8 +276,8 @@
           }
         }
         const ws = stored.walmartSyncStatus;
-        if (ws && Date.now() - ws.ts < 5 * 60 * 1e3) {
-          if (ws.type === "SYNC_STARTED" || ws.type === "SYNC_PROGRESS") {
+        if (ws) {
+          if ((ws.type === "SYNC_STARTED" || ws.type === "SYNC_PROGRESS") && Date.now() - ws.ts < 5 * 60 * 1e3) {
             setStatus("Walmart", ws.message ?? "syncing\u2026", "syncing");
             setSyncBtn("Walmart", true);
           } else if (ws.type === "SYNC_DONE" && ws.result) {
@@ -288,8 +288,8 @@
           }
         }
         const cs = stored.costcoSyncStatus;
-        if (cs && Date.now() - cs.ts < 5 * 60 * 1e3) {
-          if (cs.type === "SYNC_STARTED" || cs.type === "SYNC_PROGRESS") {
+        if (cs) {
+          if ((cs.type === "SYNC_STARTED" || cs.type === "SYNC_PROGRESS") && Date.now() - cs.ts < 5 * 60 * 1e3) {
             setStatus("Costco", cs.message ?? "syncing\u2026", "syncing");
             setSyncBtn("Costco", true);
           } else if (cs.type === "SYNC_DONE" && cs.result) {
@@ -300,8 +300,8 @@
           }
         }
         const bs = stored.bigskyStatus;
-        if (bs && Date.now() - bs.ts < 5 * 60 * 1e3) {
-          if (bs.type === "SYNC_STARTED" || bs.type === "SYNC_PROGRESS") {
+        if (bs) {
+          if ((bs.type === "SYNC_STARTED" || bs.type === "SYNC_PROGRESS") && Date.now() - bs.ts < 5 * 60 * 1e3) {
             setStatus("BigSkyBuyers", bs.message ?? "syncing\u2026", "syncing");
             setSyncBtn("BigSkyBuyers", true);
           } else if (bs.type === "SYNC_DONE" && bs.result) {
