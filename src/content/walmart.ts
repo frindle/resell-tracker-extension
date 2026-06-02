@@ -9,6 +9,12 @@ function parseMoney(text: string): number {
 }
 
 function sendMessage(msg: SyncMessage) {
+  const m = msg as Record<string, unknown>;
+  if (m.type === 'SYNC_STARTED' || m.type === 'SYNC_PROGRESS') {
+    chrome.storage.local.set({ walmartSyncStatus: { type: m.type, message: (m.message as string) ?? 'syncing…', ts: Date.now() } });
+  } else {
+    chrome.storage.local.set({ walmartSyncStatus: { type: m.type, result: m.result, error: m.error, ts: Date.now() } });
+  }
   chrome.runtime.sendMessage(msg).catch(() => {});
 }
 

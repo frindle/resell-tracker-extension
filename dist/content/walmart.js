@@ -202,6 +202,12 @@
         return parseFloat(text.replace(/[^0-9.-]/g, "")) || 0;
       }
       function sendMessage(msg) {
+        const m = msg;
+        if (m.type === "SYNC_STARTED" || m.type === "SYNC_PROGRESS") {
+          chrome.storage.local.set({ walmartSyncStatus: { type: m.type, message: m.message ?? "syncing\u2026", ts: Date.now() } });
+        } else {
+          chrome.storage.local.set({ walmartSyncStatus: { type: m.type, result: m.result, error: m.error, ts: Date.now() } });
+        }
         chrome.runtime.sendMessage(msg).catch(() => {
         });
       }

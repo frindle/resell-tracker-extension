@@ -100,7 +100,7 @@ async function init() {
   if (settings.bigskyLastSync) setMeta('BigSkyBuyers', `Last sync: ${settings.bigskyLastSync}`);
 
   // Restore in-progress or recent sync status if popup was closed during sync
-  const stored = await chrome.storage.local.get(['amazonSyncStatus', 'bigskyStatus']);
+  const stored = await chrome.storage.local.get(['amazonSyncStatus', 'walmartSyncStatus', 'costcoSyncStatus', 'bigskyStatus']);
   const s = stored.amazonSyncStatus as { type: string; message?: string; result?: { scraped: number; imported: number; updated: number; platform: string }; error?: string; ts: number } | undefined;
   if (s && Date.now() - s.ts < 5 * 60 * 1000) {
     if (s.type === 'SYNC_STARTED' || s.type === 'SYNC_PROGRESS') {
@@ -111,6 +111,32 @@ async function init() {
       setStatus('Amazon', text, 'ok');
     } else if (s.type === 'SYNC_ERROR') {
       setStatus('Amazon', `Error: ${s.error}`, 'fail');
+    }
+  }
+
+  const ws = stored.walmartSyncStatus as { type: string; message?: string; result?: { scraped: number; imported: number; updated: number; platform: string }; error?: string; ts: number } | undefined;
+  if (ws && Date.now() - ws.ts < 5 * 60 * 1000) {
+    if (ws.type === 'SYNC_STARTED' || ws.type === 'SYNC_PROGRESS') {
+      setStatus('Walmart', ws.message ?? 'syncing…', 'syncing');
+      setSyncBtn('Walmart', true);
+    } else if (ws.type === 'SYNC_DONE' && ws.result) {
+      const text = ws.result.scraped === 0 ? 'no new orders' : `+${ws.result.imported} new, ${ws.result.updated} updated`;
+      setStatus('Walmart', text, 'ok');
+    } else if (ws.type === 'SYNC_ERROR') {
+      setStatus('Walmart', `Error: ${ws.error}`, 'fail');
+    }
+  }
+
+  const cs = stored.costcoSyncStatus as { type: string; message?: string; result?: { scraped: number; imported: number; updated: number; platform: string }; error?: string; ts: number } | undefined;
+  if (cs && Date.now() - cs.ts < 5 * 60 * 1000) {
+    if (cs.type === 'SYNC_STARTED' || cs.type === 'SYNC_PROGRESS') {
+      setStatus('Costco', cs.message ?? 'syncing…', 'syncing');
+      setSyncBtn('Costco', true);
+    } else if (cs.type === 'SYNC_DONE' && cs.result) {
+      const text = cs.result.scraped === 0 ? 'no new orders' : `+${cs.result.imported} new, ${cs.result.updated} updated`;
+      setStatus('Costco', text, 'ok');
+    } else if (cs.type === 'SYNC_ERROR') {
+      setStatus('Costco', `Error: ${cs.error}`, 'fail');
     }
   }
 

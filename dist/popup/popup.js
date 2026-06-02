@@ -262,7 +262,7 @@
         if (settings.walmartLastSync) setMeta("Walmart", `Last sync: ${settings.walmartLastSync}`);
         if (settings.costcoLastSync) setMeta("Costco", `Last sync: ${settings.costcoLastSync}`);
         if (settings.bigskyLastSync) setMeta("BigSkyBuyers", `Last sync: ${settings.bigskyLastSync}`);
-        const stored = await chrome.storage.local.get(["amazonSyncStatus", "bigskyStatus"]);
+        const stored = await chrome.storage.local.get(["amazonSyncStatus", "walmartSyncStatus", "costcoSyncStatus", "bigskyStatus"]);
         const s = stored.amazonSyncStatus;
         if (s && Date.now() - s.ts < 5 * 60 * 1e3) {
           if (s.type === "SYNC_STARTED" || s.type === "SYNC_PROGRESS") {
@@ -273,6 +273,30 @@
             setStatus("Amazon", text, "ok");
           } else if (s.type === "SYNC_ERROR") {
             setStatus("Amazon", `Error: ${s.error}`, "fail");
+          }
+        }
+        const ws = stored.walmartSyncStatus;
+        if (ws && Date.now() - ws.ts < 5 * 60 * 1e3) {
+          if (ws.type === "SYNC_STARTED" || ws.type === "SYNC_PROGRESS") {
+            setStatus("Walmart", ws.message ?? "syncing\u2026", "syncing");
+            setSyncBtn("Walmart", true);
+          } else if (ws.type === "SYNC_DONE" && ws.result) {
+            const text = ws.result.scraped === 0 ? "no new orders" : `+${ws.result.imported} new, ${ws.result.updated} updated`;
+            setStatus("Walmart", text, "ok");
+          } else if (ws.type === "SYNC_ERROR") {
+            setStatus("Walmart", `Error: ${ws.error}`, "fail");
+          }
+        }
+        const cs = stored.costcoSyncStatus;
+        if (cs && Date.now() - cs.ts < 5 * 60 * 1e3) {
+          if (cs.type === "SYNC_STARTED" || cs.type === "SYNC_PROGRESS") {
+            setStatus("Costco", cs.message ?? "syncing\u2026", "syncing");
+            setSyncBtn("Costco", true);
+          } else if (cs.type === "SYNC_DONE" && cs.result) {
+            const text = cs.result.scraped === 0 ? "no new orders" : `+${cs.result.imported} new, ${cs.result.updated} updated`;
+            setStatus("Costco", text, "ok");
+          } else if (cs.type === "SYNC_ERROR") {
+            setStatus("Costco", `Error: ${cs.error}`, "fail");
           }
         }
         const bs = stored.bigskyStatus;
@@ -306,17 +330,17 @@
               setSyncBtn("BigSkyBuyers", false);
             }
           }
-          const cs = changes.costcoSyncStatus?.newValue;
-          if (cs) {
-            if (cs.type === "SYNC_STARTED" || cs.type === "SYNC_PROGRESS") {
-              setStatus("Costco", cs.message ?? "syncing\u2026", "syncing");
+          const cs2 = changes.costcoSyncStatus?.newValue;
+          if (cs2) {
+            if (cs2.type === "SYNC_STARTED" || cs2.type === "SYNC_PROGRESS") {
+              setStatus("Costco", cs2.message ?? "syncing\u2026", "syncing");
               setSyncBtn("Costco", true);
-            } else if (cs.type === "SYNC_DONE" && cs.result) {
-              const text = cs.result.scraped === 0 ? "no new orders" : `+${cs.result.imported} new, ${cs.result.updated} updated`;
+            } else if (cs2.type === "SYNC_DONE" && cs2.result) {
+              const text = cs2.result.scraped === 0 ? "no new orders" : `+${cs2.result.imported} new, ${cs2.result.updated} updated`;
               setStatus("Costco", text, "ok");
               setSyncBtn("Costco", false);
-            } else if (cs.type === "SYNC_ERROR") {
-              setStatus("Costco", `Error: ${cs.error}`, "fail");
+            } else if (cs2.type === "SYNC_ERROR") {
+              setStatus("Costco", `Error: ${cs2.error}`, "fail");
               setSyncBtn("Costco", false);
             }
           }
