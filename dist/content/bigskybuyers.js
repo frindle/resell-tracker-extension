@@ -177,345 +177,98 @@
     }
   });
 
-  // src/lib/api.ts
-  async function pushOrders(trackerUrl, apiKey, userId, orders) {
-    const res = await chrome.runtime.sendMessage({ type: "PUSH_ORDERS", trackerUrl, apiKey, userId, orders });
-    if (res?.error) throw new Error(res.error);
-    return res;
-  }
-  var import_browser_polyfill_min2;
-  var init_api = __esm({
-    "src/lib/api.ts"() {
-      "use strict";
-      import_browser_polyfill_min2 = __toESM(require_browser_polyfill_min());
-    }
-  });
-
-  // src/content/costco.ts
-  var require_costco = __commonJS({
-    "src/content/costco.ts"() {
-      var import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min());
+  // src/content/bigskybuyers.ts
+  var require_bigskybuyers = __commonJS({
+    "src/content/bigskybuyers.ts"() {
+      var import_browser_polyfill_min2 = __toESM(require_browser_polyfill_min());
       init_storage();
-      init_api();
-      var PAGE_SIZE = 16;
-      var SKIP_STATUSES = /* @__PURE__ */ new Set(["cancelled", "canceled"]);
-      var DIGITAL_CARRIERS = /* @__PURE__ */ new Set(["electronic delivery service", "email delivery", "email"]);
-      console.log("[CST] content script loaded", location.href);
-      function sendMessage(msg) {
-        chrome.runtime.sendMessage(msg).catch(() => {
-        });
-        if (msg.type === "SYNC_PROGRESS" || msg.type === "SYNC_STARTED") {
-          chrome.storage.local.set({ costcoSyncStatus: { type: msg.type, message: msg.message ?? "syncing\u2026", ts: Date.now() } });
-        } else if (msg.type === "SYNC_DONE" || msg.type === "SYNC_ERROR") {
-          chrome.storage.local.set({ costcoSyncStatus: { type: msg.type, result: msg.result, error: msg.error, ts: Date.now() } });
-        }
+      function normalize(n) {
+        return n.replace(/\D/g, "");
       }
-      function setBadge(text, color = "#3b82f6") {
-        chrome.runtime.sendMessage({ type: "SET_BADGE", text, color }).catch(() => {
-        });
+      async function fetchScanItems() {
+        const input = encodeURIComponent(JSON.stringify({ "0": { json: null, meta: { values: ["undefined"] } } }));
+        const url = `https://www.bigskybuyers.com/api/trpc/scan.getScanByUser?batch=1&input=${input}`;
+        const res = await fetch(url, { credentials: "include" });
+        if (!res.ok) throw new Error(`BigSky tRPC error ${res.status}`);
+        const json = await res.json();
+        return json[0].result.data.json;
       }
-      function formatDate(d) {
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-      }
-      function getMsalRefreshToken() {
-        for (const storage of [sessionStorage, localStorage]) {
-          for (const key of Object.keys(storage)) {
-            if (!key.toLowerCase().includes("refreshtoken")) continue;
-            if (!key.includes("a3a5186b")) continue;
-            try {
-              const item = JSON.parse(storage.getItem(key) ?? "{}");
-              if (item.secret) return item.secret;
-            } catch {
-            }
+      function groupByTracking(items) {
+        const map = /* @__PURE__ */ new Map();
+        for (const item of items) {
+          const key = normalize(item.trackingNumber) || item.trackingNumber;
+          if (!map.has(key)) {
+            map.set(key, {
+              trackingNumber: item.trackingNumber,
+              itemDescription: item.itemName,
+              salePrice: 0,
+              scanDate: item.scanDate,
+              paymentDate: item.paymentDate
+            });
           }
+          const g = map.get(key);
+          g.salePrice += parseFloat(item.lineTotal) || 0;
+          if (item.paymentDate && !g.paymentDate) g.paymentDate = item.paymentDate;
         }
-        return "";
-      }
-      async function getMsalToken() {
-        const refreshToken = getMsalRefreshToken();
-        if (!refreshToken) {
-          console.log("[CST] no refresh token found");
-          return "";
-        }
-        console.log("[CST] exchanging refresh token for fresh id_token\u2026");
-        try {
-          const res = await fetch(
-            "https://signin.costco.com/e0714dd4-784d-46d6-a278-3e29553483eb/B2C_1A_SSO_WCS_signup_signin_209/oauth2/v2.0/token",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/x-www-form-urlencoded" },
-              body: new URLSearchParams({
-                grant_type: "refresh_token",
-                refresh_token: refreshToken,
-                client_id: "a3a5186b-7c89-4b4c-93a8-dd604e930757",
-                scope: "openid profile offline_access"
-              }).toString()
-            }
-          );
-          if (!res.ok) {
-            console.error("[CST] token refresh failed", res.status, await res.text());
-            return "";
-          }
-          const data = await res.json();
-          console.log("[CST] token refresh ok, keys:", Object.keys(data));
-          return data.id_token ?? data.access_token ?? "";
-        } catch (e) {
-          console.error("[CST] token refresh error", e);
-          return "";
-        }
-      }
-      async function getAuth() {
-        try {
-          const intercepted = await chrome.runtime.sendMessage({ type: "GET_COSTCO_AUTH" }).catch(() => null);
-          if (intercepted?.token && intercepted?.clientId) {
-            console.log("[CST] using intercepted auth token");
-            return { token: intercepted.token, clientId: intercepted.clientId, warehouseNumber: getWarehouseNumber() || "0" };
-          }
-          console.log("[CST] no intercepted token \u2014 trying live MSAL instance\u2026");
-          try {
-            const gtRes = await fetch("/gettoken", { credentials: "include" });
-            console.log("[CST] /gettoken status:", gtRes.status);
-            if (gtRes.ok) {
-              const gtData = await gtRes.json();
-              console.log("[CST] /gettoken keys:", Object.keys(gtData));
-              const gtToken = gtData.id_token ?? gtData.access_token ?? gtData.token ?? "";
-              if (gtToken) {
-                try {
-                  const p = JSON.parse(atob(gtToken.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-                  console.log("[CST] /gettoken token aud:", p.aud, "iss:", p.iss, "exp:", new Date(p.exp * 1e3).toISOString());
-                } catch {
-                }
-                const clientId2 = location.href.match(/\/app\/([0-9a-f-]{36})\//i)?.[1] ?? "";
-                console.log("[CST] using /gettoken token, clientId:", clientId2);
-                return { token: gtToken, clientId: clientId2, warehouseNumber: getWarehouseNumber() || "0" };
-              }
-            }
-          } catch (e) {
-            console.error("[CST] /gettoken failed", e);
-          }
-          let token = await getMsalToken();
-          console.log("[CST] msal token found:", !!token);
-          if (token) {
-            try {
-              const p = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-              console.log("[CST] msal token aud:", p.aud, "exp:", new Date(p.exp * 1e3).toISOString());
-            } catch {
-            }
-          }
-          if (!token) {
-            const res = await fetch("/gettoken", { credentials: "include" });
-            if (!res.ok) {
-              console.error("[CST] gettoken returned", res.status);
-              return null;
-            }
-            const data = await res.json();
-            token = data.id_token ?? data.access_token ?? data.token ?? "";
-            if (!token) {
-              console.error("[CST] no token in gettoken response", Object.keys(data));
-              return null;
-            }
-          }
-          let clientId = location.href.match(/\/app\/([0-9a-f-]{36})\//i)?.[1] ?? "";
-          if (!clientId) {
-            try {
-              const res2 = await fetch("/gettoken", { credentials: "include" });
-              if (res2.ok) {
-                const data2 = await res2.json();
-                const tok2 = data2.id_token ?? data2.access_token ?? "";
-                const payload2 = JSON.parse(atob(tok2.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-                clientId = payload2.clientId ?? "";
-              }
-            } catch {
-            }
-          }
-          const warehouseNumber = getWarehouseNumber();
-          console.log("[CST] auth ok, clientId:", clientId, "warehouse:", warehouseNumber || "(not found, using 0)");
-          return { token, clientId, warehouseNumber: warehouseNumber || "0" };
-        } catch (e) {
-          console.error("[CST] getAuth failed", e);
-          return null;
-        }
-      }
-      function getWarehouseNumber() {
-        for (const cookie of document.cookie.split(";")) {
-          const [k, v] = cookie.trim().split("=");
-          if (/store|warehouse|wh/i.test(k) && v && /^\d{3,4}$/.test(v.trim())) return v.trim();
-        }
-        for (const key of Object.keys(localStorage)) {
-          if (/store|warehouse|wh/i.test(key)) {
-            const v = localStorage.getItem(key) ?? "";
-            if (/^\d{3,4}$/.test(v.trim())) return v.trim();
-          }
-        }
-        return "";
-      }
-      var ORDER_QUERY = `query getOnlineOrders($startDate:String!, $endDate:String!, $pageNumber:Int, $pageSize:Int, $warehouseNumber:String!) {
-  getOnlineOrders(startDate:$startDate, endDate:$endDate, pageNumber:$pageNumber, pageSize:$pageSize, warehouseNumber:$warehouseNumber) {
-    pageNumber
-    pageSize
-    totalNumberOfRecords
-    bcOrders {
-      orderHeaderId
-      orderPlacedDate: orderedDate
-      orderNumber: sourceOrderNumber
-      orderTotal
-      warehouseNumber
-      status
-      orderLineItems {
-        itemDescription
-        status
-        carrierItemCategory
-        shipment {
-          trackingNumber
-          carrierName
-        }
-      }
-    }
-  }
-}`;
-      async function fetchPage(auth, startDate, endDate, pageNumber) {
-        try {
-          const body = JSON.stringify({
-            query: ORDER_QUERY,
-            variables: { startDate, endDate, pageNumber, pageSize: PAGE_SIZE, warehouseNumber: auth.warehouseNumber }
-          });
-          const resp = await chrome.runtime.sendMessage({ type: "COSTCO_GRAPHQL", token: auth.token, clientId: auth.clientId, body });
-          if (resp?.error) {
-            console.error("[CST] GraphQL background error", resp.error);
-            return null;
-          }
-          if (!resp?.ok) {
-            console.error("[CST] GraphQL error", resp?.status, resp?.text);
-            return null;
-          }
-          const json = JSON.parse(resp.text);
-          const result = json?.data?.getOnlineOrders?.[0];
-          if (!result) {
-            console.error("[CST] unexpected GraphQL response shape", JSON.stringify(json).slice(0, 200));
-            return null;
-          }
-          return { orders: result.bcOrders ?? [], total: result.totalNumberOfRecords ?? 0 };
-        } catch (e) {
-          console.error("[CST] fetchPage failed", e);
-          return null;
-        }
-      }
-      function mapOrder(o) {
-        if (SKIP_STATUSES.has(o.status.toLowerCase())) return null;
-        const activeItems = o.orderLineItems.filter((li) => !SKIP_STATUSES.has(li.status.toLowerCase()));
-        const descriptions = [...new Set(
-          activeItems.map((li) => li.itemDescription?.trim()).filter(Boolean)
-        )];
-        const itemDescription = descriptions.join(", ").slice(0, 200);
-        const tracking = [...new Set(
-          activeItems.flatMap((li) => li.shipment ?? []).filter((s) => s.trackingNumber && !DIGITAL_CARRIERS.has(s.carrierName.toLowerCase())).map((s) => s.trackingNumber)
-        )];
-        return {
-          platform: "Costco",
-          orderNumber: o.orderNumber,
-          orderDate: o.orderPlacedDate.split("T")[0],
-          itemDescription,
-          cost: o.orderTotal,
-          shippingCost: 0,
-          shippingAddress: "",
-          trackingNumbers: tracking,
-          sourceUrl: `https://www.costco.com/myaccount/#/app/${o.orderHeaderId}/orderdetails`
-        };
+        return Array.from(map.values());
       }
       var syncing = false;
-      async function runSync() {
-        if (syncing) return;
-        syncing = true;
-        const settings = await getSettings();
-        if (!settings.trackerUrl || !settings.userId) {
-          sendMessage({ type: "SYNC_ERROR", platform: "Costco", error: "Tracker URL or user not configured \u2014 open Settings." });
-          setBadge("!", "#ef4444");
-          syncing = false;
-          return;
-        }
-        setBadge("\u2026");
-        sendMessage({ type: "SYNC_STARTED", platform: "Costco" });
-        sendMessage({ type: "SYNC_PROGRESS", platform: "Costco", scraped: 0, message: "Getting auth\u2026" });
-        const auth = await getAuth();
-        if (!auth) {
-          sendMessage({ type: "SYNC_ERROR", platform: "Costco", error: "Could not get Costco auth token \u2014 make sure you are logged in." });
-          setBadge("!", "#ef4444");
-          syncing = false;
-          return;
-        }
-        const sinceDate = settings.costcoLastSync ? new Date(settings.costcoLastSync) : new Date(Date.now() - 90 * 24 * 60 * 60 * 1e3);
-        const now = /* @__PURE__ */ new Date();
-        const startDate = formatDate(sinceDate);
-        const endDate = formatDate(now);
-        console.log("[CST] syncing", startDate, "\u2192", endDate);
-        sendMessage({ type: "SYNC_PROGRESS", platform: "Costco", scraped: 0, message: "Fetching orders\u2026" });
-        await chrome.runtime.sendMessage({ type: "CYCLE_DATE_FILTER", sinceDate: startDate }).catch(() => {
-        });
-        const allOrders = [];
-        const captured = await chrome.runtime.sendMessage({ type: "GET_CAPTURED_ORDERS" }).catch(() => null);
-        if (Array.isArray(captured) && captured.length > 0) {
-          console.log("[CST] using captured orders from", captured.length, "page(s)");
-          for (const page of captured) {
-            const p = page;
-            for (const o of p.bcOrders ?? []) {
-              const mapped = mapOrder(o);
-              if (mapped) allOrders.push(mapped);
-            }
-          }
-          console.log("[CST] captured orders:", allOrders.length);
-        } else {
-          let pageNumber = 1;
-          let total = Infinity;
-          let fetchFailed = false;
-          while ((pageNumber - 1) * PAGE_SIZE < total) {
-            if (pageNumber > 1) await new Promise((r) => setTimeout(r, 600));
-            const page = await fetchPage(auth, startDate, endDate, pageNumber);
-            if (!page) {
-              fetchFailed = true;
-              break;
-            }
-            total = page.total;
-            for (const o of page.orders) {
-              const mapped = mapOrder(o);
-              if (mapped) allOrders.push(mapped);
-            }
-            sendMessage({ type: "SYNC_PROGRESS", platform: "Costco", scraped: allOrders.length, message: `Fetched ${allOrders.length} of ${total} orders\u2026` });
-            pageNumber++;
-          }
-          if (fetchFailed && allOrders.length === 0) {
-            setBadge("!", "#ef4444");
-            sendMessage({ type: "SYNC_ERROR", platform: "Costco", error: "GraphQL request failed \u2014 navigate to your Costco Orders & Purchases page first, then sync." });
-            syncing = false;
-            return;
-          }
-        }
-        const filteredOrders = allOrders.filter((o) => new Date(o.orderDate) >= sinceDate);
-        console.log("[CST] filtered to", filteredOrders.length, "orders on/after", startDate, "(dropped", allOrders.length - filteredOrders.length, "older)");
-        if (filteredOrders.length === 0) {
-          setBadge("\u2014");
-          sendMessage({ type: "SYNC_DONE", result: { platform: "Costco", scraped: 0, imported: 0, updated: 0 } });
-          syncing = false;
-          return;
-        }
-        try {
-          const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? "", settings.userId, filteredOrders);
-          await setLastSync("costco", now.toISOString().split("T")[0]);
-          setBadge(`+${result.imported}`, "#22c55e");
-          sendMessage({ type: "SYNC_DONE", result: { platform: "Costco", scraped: filteredOrders.length, ...result } });
-        } catch (err) {
-          setBadge("!", "#ef4444");
-          sendMessage({ type: "SYNC_ERROR", platform: "Costco", error: err instanceof Error ? err.message : String(err) });
-        }
-        syncing = false;
-      }
       chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         if (msg.type === "PING") {
-          sendResponse("ok");
+          sendResponse({ ok: true });
           return;
         }
-        if (msg.type === "START_SYNC" && msg.platform === "Costco") runSync();
+        if (msg.type === "START_SYNC" && msg.platform === "BigSkyBuyers") {
+          if (syncing) {
+            sendResponse({ ok: false });
+            return;
+          }
+          runSync().then(() => sendResponse({ ok: true })).catch((e) => sendResponse({ error: String(e) }));
+          return true;
+        }
       });
+      async function runSync() {
+        syncing = true;
+        try {
+          const settings = await getSettings();
+          if (!settings.trackerUrl || !settings.userId) {
+            chrome.runtime.sendMessage({ type: "SYNC_ERROR", platform: "BigSkyBuyers", error: "Not configured" });
+            return;
+          }
+          chrome.runtime.sendMessage({ type: "SYNC_STARTED", platform: "BigSkyBuyers" });
+          const items = await fetchScanItems();
+          const groups = groupByTracking(items);
+          chrome.runtime.sendMessage({
+            type: "SYNC_PROGRESS",
+            platform: "BigSkyBuyers",
+            scraped: groups.length,
+            message: `Syncing ${groups.length} tracking entries\u2026`
+          });
+          const result = await chrome.runtime.sendMessage({
+            type: "PUSH_BIGSKY_ORDERS",
+            trackerUrl: settings.trackerUrl,
+            apiKey: settings.apiKey,
+            userId: settings.userId,
+            groups
+          });
+          if (result?.error) throw new Error(result.error);
+          await setLastSync("bigsky", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
+          chrome.runtime.sendMessage({
+            type: "SYNC_DONE",
+            result: {
+              platform: "BigSkyBuyers",
+              scraped: groups.length,
+              imported: 0,
+              updated: result?.updated ?? 0
+            }
+          });
+        } catch (e) {
+          chrome.runtime.sendMessage({ type: "SYNC_ERROR", platform: "BigSkyBuyers", error: String(e) });
+        } finally {
+          syncing = false;
+        }
+      }
     }
   });
-  require_costco();
+  require_bigskybuyers();
 })();

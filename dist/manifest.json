@@ -57,6 +57,15 @@
         "content/costco.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.bigskybuyers.com/*"
+      ],
+      "js": [
+        "content/bigskybuyers.js"
+      ],
+      "run_at": "document_idle"
     }
   ],
   "action": {

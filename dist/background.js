@@ -106,6 +106,10 @@
           handlePushOrders(message.trackerUrl, message.apiKey, message.userId, message.orders).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
           return true;
         }
+        if (message.type === "PUSH_BIGSKY_ORDERS") {
+          handlePushBigskyOrders(message.trackerUrl, message.apiKey, message.userId, message.groups).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+          return true;
+        }
       });
       async function inPageGetMsalToken() {
         const w = window;
@@ -233,6 +237,23 @@
           xhr.onerror = () => resolve({ ok: false, status: 0, text: "network error" });
           xhr.send(body);
         });
+      }
+      async function handlePushBigskyOrders(trackerUrl, apiKey, userId, groups) {
+        const url = `${upgradeUrl(trackerUrl)}/api/bigsky/sync-orders`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...userId ? { "X-Extension-User-Id": userId } : {},
+            ...apiKey ? { "X-API-Key": apiKey } : {}
+          },
+          body: JSON.stringify({ groups })
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => res.statusText);
+          throw new Error(`Tracker API error ${res.status} (${url}): ${text}`);
+        }
+        return res.json();
       }
       function upgradeUrl(trackerUrl) {
         return trackerUrl.replace(/\/$/, "").replace(/^http:\/\/([^0-9])/i, "https://$1");

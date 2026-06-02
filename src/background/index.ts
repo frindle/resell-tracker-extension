@@ -99,6 +99,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(e => sendResponse({ error: String(e) }));
     return true;
   }
+
+  if (message.type === 'PUSH_BIGSKY_ORDERS') {
+    handlePushBigskyOrders(message.trackerUrl, message.apiKey, message.userId, message.groups)
+      .then(sendResponse)
+      .catch(e => sendResponse({ error: String(e) }));
+    return true;
+  }
 });
 
 // Runs in MAIN world — finds Costco's MSAL instance and calls acquireTokenSilent
@@ -230,6 +237,29 @@ function inPageCostcoGraphql(token: string, clientId: string, body: string): Pro
     xhr.onerror = () => resolve({ ok: false, status: 0, text: 'network error' });
     xhr.send(body);
   });
+}
+
+async function handlePushBigskyOrders(
+  trackerUrl: string,
+  apiKey: string,
+  userId: string,
+  groups: Array<{ trackingNumber: string; itemDescription: string; salePrice: number; scanDate: string; paymentDate: string | null }>,
+) {
+  const url = `${upgradeUrl(trackerUrl)}/api/bigsky/sync-orders`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(userId ? { 'X-Extension-User-Id': userId } : {}),
+      ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+    },
+    body: JSON.stringify({ groups }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`Tracker API error ${res.status} (${url}): ${text}`);
+  }
+  return res.json();
 }
 
 function upgradeUrl(trackerUrl: string): string {

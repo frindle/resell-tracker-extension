@@ -2,20 +2,20 @@ import { getSettings } from '../lib/storage';
 import type { SyncMessage, Platform } from '../lib/types';
 
 function setStatus(platform: Platform, text: string, cls: string) {
-  const id = platform === 'Amazon' ? 'amazonStatus' : platform === 'Walmart' ? 'walmartStatus' : 'costcoStatus';
+  const id = platform === 'Amazon' ? 'amazonStatus' : platform === 'Walmart' ? 'walmartStatus' : platform === 'Costco' ? 'costcoStatus' : 'bigskyStatus';
   const el = document.getElementById(id)!;
   el.textContent = text;
   el.className = `status ${cls}`;
 }
 
 function setMeta(platform: Platform, text: string) {
-  const id = platform === 'Amazon' ? 'amazonMeta' : platform === 'Walmart' ? 'walmartMeta' : 'costcoMeta';
+  const id = platform === 'Amazon' ? 'amazonMeta' : platform === 'Walmart' ? 'walmartMeta' : platform === 'Costco' ? 'costcoMeta' : 'bigskyMeta';
   const el = document.getElementById(id)!;
   el.textContent = text;
 }
 
 function setSyncBtn(platform: Platform, disabled: boolean, cancel = false) {
-  const id = platform === 'Amazon' ? 'syncAmazon' : platform === 'Walmart' ? 'syncWalmart' : 'syncCostco';
+  const id = platform === 'Amazon' ? 'syncAmazon' : platform === 'Walmart' ? 'syncWalmart' : platform === 'Costco' ? 'syncCostco' : 'syncBigsky';
   const btn = document.getElementById(id) as HTMLButtonElement;
   btn.disabled = disabled && !cancel;
   btn.textContent = cancel ? 'Cancel' : 'Sync';
@@ -37,13 +37,15 @@ async function triggerSync(platform: Platform) {
     return;
   }
 
-  const expectedHost = platform === 'Amazon' ? 'www.amazon.com' : platform === 'Walmart' ? 'www.walmart.com' : 'www.costco.com';
+  const expectedHost = platform === 'Amazon' ? 'www.amazon.com' : platform === 'Walmart' ? 'www.walmart.com' : platform === 'Costco' ? 'www.costco.com' : 'www.bigskybuyers.com';
   const ordersUrl = platform === 'Amazon'
     ? 'https://www.amazon.com/your-orders/orders'
     : platform === 'Walmart'
     ? 'https://www.walmart.com/orders'
-    : 'https://www.costco.com/myaccount/';
-  const scriptFile = platform === 'Amazon' ? 'content/amazon.js' : platform === 'Walmart' ? 'content/walmart.js' : 'content/costco.js';
+    : platform === 'Costco'
+    ? 'https://www.costco.com/myaccount/'
+    : 'https://www.bigskybuyers.com/main';
+  const scriptFile = platform === 'Amazon' ? 'content/amazon.js' : platform === 'Walmart' ? 'content/walmart.js' : platform === 'Costco' ? 'content/costco.js' : 'content/bigskybuyers.js';
 
   setSyncBtn(platform, true, platform === 'Amazon');
   setStatus(platform, 'syncing…', 'syncing');
@@ -95,6 +97,7 @@ async function init() {
   if (settings.amazonLastSync) setMeta('Amazon', `Last sync: ${settings.amazonLastSync}`);
   if (settings.walmartLastSync) setMeta('Walmart', `Last sync: ${settings.walmartLastSync}`);
   if (settings.costcoLastSync) setMeta('Costco', `Last sync: ${settings.costcoLastSync}`);
+  if (settings.bigskyLastSync) setMeta('BigSkyBuyers', `Last sync: ${settings.bigskyLastSync}`);
 
   // Restore in-progress or recent sync status if popup was closed during sync
   const stored = await chrome.storage.local.get('amazonSyncStatus');
@@ -116,6 +119,21 @@ async function init() {
     if (changes.amazonLastSync?.newValue) setMeta('Amazon', `Last sync: ${changes.amazonLastSync.newValue}`);
     if (changes.walmartLastSync?.newValue) setMeta('Walmart', `Last sync: ${changes.walmartLastSync.newValue}`);
     if (changes.costcoLastSync?.newValue) setMeta('Costco', `Last sync: ${changes.costcoLastSync.newValue}`);
+    if (changes.bigskyLastSync?.newValue) setMeta('BigSkyBuyers', `Last sync: ${changes.bigskyLastSync.newValue}`);
+    const bs = changes.bigskyStatus?.newValue as { type: string; message?: string; result?: { scraped: number; imported: number; updated: number; platform: string }; error?: string } | undefined;
+    if (bs) {
+      if (bs.type === 'SYNC_STARTED' || bs.type === 'SYNC_PROGRESS') {
+        setStatus('BigSkyBuyers', bs.message ?? 'syncing…', 'syncing');
+        setSyncBtn('BigSkyBuyers', true);
+      } else if (bs.type === 'SYNC_DONE' && bs.result) {
+        const text = bs.result.scraped === 0 ? 'no new orders' : `+${bs.result.imported} new, ${bs.result.updated} updated`;
+        setStatus('BigSkyBuyers', text, 'ok');
+        setSyncBtn('BigSkyBuyers', false);
+      } else if (bs.type === 'SYNC_ERROR') {
+        setStatus('BigSkyBuyers', `Error: ${bs.error}`, 'fail');
+        setSyncBtn('BigSkyBuyers', false);
+      }
+    }
     const cs = changes.costcoSyncStatus?.newValue as { type: string; message?: string; result?: { scraped: number; imported: number; updated: number; platform: string }; error?: string } | undefined;
     if (cs) {
       if (cs.type === 'SYNC_STARTED' || cs.type === 'SYNC_PROGRESS') {
@@ -153,6 +171,7 @@ async function init() {
   });
   document.getElementById('syncWalmart')!.addEventListener('click', () => triggerSync('Walmart'));
   document.getElementById('syncCostco')!.addEventListener('click', () => triggerSync('Costco'));
+  document.getElementById('syncBigsky')!.addEventListener('click', () => triggerSync('BigSkyBuyers'));
 
   document.getElementById('openSettings')!.addEventListener('click', e => {
     e.preventDefault();

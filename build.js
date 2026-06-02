@@ -11,6 +11,7 @@ const contentEntries = {
   'content/amazon': 'src/content/amazon.ts',
   'content/walmart': 'src/content/walmart.ts',
   'content/costco': 'src/content/costco.ts',
+  'content/bigskybuyers': 'src/content/bigskybuyers.ts',
   'options/options': 'src/options/options.ts',
   'popup/popup': 'src/popup/popup.ts',
 };

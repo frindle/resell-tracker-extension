@@ -170,7 +170,8 @@
         userName: "",
         amazonLastSync: "",
         walmartLastSync: "",
-        costcoLastSync: ""
+        costcoLastSync: "",
+        bigskyLastSync: ""
       };
     }
   });
