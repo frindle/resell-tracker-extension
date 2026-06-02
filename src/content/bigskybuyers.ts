@@ -61,21 +61,30 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 });
 
+function persistStatus(msg: Record<string, unknown>) {
+  chrome.storage.local.set({ bigskyStatus: { ...msg, ts: Date.now() } });
+}
+
+function broadcast(msg: Record<string, unknown>) {
+  persistStatus(msg);
+  chrome.runtime.sendMessage(msg).catch(() => {});
+}
+
 async function runSync() {
   syncing = true;
   try {
     const settings = await getSettings();
     if (!settings.trackerUrl || !settings.userId) {
-      chrome.runtime.sendMessage({ type: 'SYNC_ERROR', platform: 'BigSkyBuyers', error: 'Not configured' });
+      broadcast({ type: 'SYNC_ERROR', platform: 'BigSkyBuyers', error: 'Not configured' });
       return;
     }
 
-    chrome.runtime.sendMessage({ type: 'SYNC_STARTED', platform: 'BigSkyBuyers' });
+    broadcast({ type: 'SYNC_STARTED', platform: 'BigSkyBuyers' });
 
     const items = await fetchScanItems();
     const groups = groupByTracking(items);
 
-    chrome.runtime.sendMessage({
+    broadcast({
       type: 'SYNC_PROGRESS', platform: 'BigSkyBuyers', scraped: groups.length,
       message: `Syncing ${groups.length} tracking entries…`,
     });
@@ -92,7 +101,7 @@ async function runSync() {
 
     await setLastSync('bigsky', new Date().toISOString().split('T')[0]);
 
-    chrome.runtime.sendMessage({
+    broadcast({
       type: 'SYNC_DONE',
       result: {
         platform: 'BigSkyBuyers',
@@ -102,7 +111,7 @@ async function runSync() {
       },
     });
   } catch (e) {
-    chrome.runtime.sendMessage({ type: 'SYNC_ERROR', platform: 'BigSkyBuyers', error: String(e) });
+    broadcast({ type: 'SYNC_ERROR', platform: 'BigSkyBuyers', error: String(e) });
   } finally {
     syncing = false;
   }

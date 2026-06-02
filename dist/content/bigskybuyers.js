@@ -227,18 +227,26 @@
           return true;
         }
       });
+      function persistStatus(msg) {
+        chrome.storage.local.set({ bigskyStatus: { ...msg, ts: Date.now() } });
+      }
+      function broadcast(msg) {
+        persistStatus(msg);
+        chrome.runtime.sendMessage(msg).catch(() => {
+        });
+      }
       async function runSync() {
         syncing = true;
         try {
           const settings = await getSettings();
           if (!settings.trackerUrl || !settings.userId) {
-            chrome.runtime.sendMessage({ type: "SYNC_ERROR", platform: "BigSkyBuyers", error: "Not configured" });
+            broadcast({ type: "SYNC_ERROR", platform: "BigSkyBuyers", error: "Not configured" });
             return;
           }
-          chrome.runtime.sendMessage({ type: "SYNC_STARTED", platform: "BigSkyBuyers" });
+          broadcast({ type: "SYNC_STARTED", platform: "BigSkyBuyers" });
           const items = await fetchScanItems();
           const groups = groupByTracking(items);
-          chrome.runtime.sendMessage({
+          broadcast({
             type: "SYNC_PROGRESS",
             platform: "BigSkyBuyers",
             scraped: groups.length,
@@ -253,7 +261,7 @@
           });
           if (result?.error) throw new Error(result.error);
           await setLastSync("bigsky", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
-          chrome.runtime.sendMessage({
+          broadcast({
             type: "SYNC_DONE",
             result: {
               platform: "BigSkyBuyers",
@@ -263,7 +271,7 @@
             }
           });
         } catch (e) {
-          chrome.runtime.sendMessage({ type: "SYNC_ERROR", platform: "BigSkyBuyers", error: String(e) });
+          broadcast({ type: "SYNC_ERROR", platform: "BigSkyBuyers", error: String(e) });
         } finally {
           syncing = false;
         }

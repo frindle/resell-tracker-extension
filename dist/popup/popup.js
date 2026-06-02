@@ -262,7 +262,7 @@
         if (settings.walmartLastSync) setMeta("Walmart", `Last sync: ${settings.walmartLastSync}`);
         if (settings.costcoLastSync) setMeta("Costco", `Last sync: ${settings.costcoLastSync}`);
         if (settings.bigskyLastSync) setMeta("BigSkyBuyers", `Last sync: ${settings.bigskyLastSync}`);
-        const stored = await chrome.storage.local.get("amazonSyncStatus");
+        const stored = await chrome.storage.local.get(["amazonSyncStatus", "bigskyStatus"]);
         const s = stored.amazonSyncStatus;
         if (s && Date.now() - s.ts < 5 * 60 * 1e3) {
           if (s.type === "SYNC_STARTED" || s.type === "SYNC_PROGRESS") {
@@ -275,22 +275,34 @@
             setStatus("Amazon", `Error: ${s.error}`, "fail");
           }
         }
+        const bs = stored.bigskyStatus;
+        if (bs && Date.now() - bs.ts < 5 * 60 * 1e3) {
+          if (bs.type === "SYNC_STARTED" || bs.type === "SYNC_PROGRESS") {
+            setStatus("BigSkyBuyers", bs.message ?? "syncing\u2026", "syncing");
+            setSyncBtn("BigSkyBuyers", true);
+          } else if (bs.type === "SYNC_DONE" && bs.result) {
+            const text = bs.result.scraped === 0 ? "no new orders" : `${bs.result.updated} updated`;
+            setStatus("BigSkyBuyers", text, "ok");
+          } else if (bs.type === "SYNC_ERROR") {
+            setStatus("BigSkyBuyers", `Error: ${bs.error}`, "fail");
+          }
+        }
         chrome.storage.onChanged.addListener((changes) => {
           if (changes.amazonLastSync?.newValue) setMeta("Amazon", `Last sync: ${changes.amazonLastSync.newValue}`);
           if (changes.walmartLastSync?.newValue) setMeta("Walmart", `Last sync: ${changes.walmartLastSync.newValue}`);
           if (changes.costcoLastSync?.newValue) setMeta("Costco", `Last sync: ${changes.costcoLastSync.newValue}`);
           if (changes.bigskyLastSync?.newValue) setMeta("BigSkyBuyers", `Last sync: ${changes.bigskyLastSync.newValue}`);
-          const bs = changes.bigskyStatus?.newValue;
-          if (bs) {
-            if (bs.type === "SYNC_STARTED" || bs.type === "SYNC_PROGRESS") {
-              setStatus("BigSkyBuyers", bs.message ?? "syncing\u2026", "syncing");
+          const bs2 = changes.bigskyStatus?.newValue;
+          if (bs2) {
+            if (bs2.type === "SYNC_STARTED" || bs2.type === "SYNC_PROGRESS") {
+              setStatus("BigSkyBuyers", bs2.message ?? "syncing\u2026", "syncing");
               setSyncBtn("BigSkyBuyers", true);
-            } else if (bs.type === "SYNC_DONE" && bs.result) {
-              const text = bs.result.scraped === 0 ? "no new orders" : `+${bs.result.imported} new, ${bs.result.updated} updated`;
+            } else if (bs2.type === "SYNC_DONE" && bs2.result) {
+              const text = bs2.result.scraped === 0 ? "no new orders" : `+${bs2.result.imported} new, ${bs2.result.updated} updated`;
               setStatus("BigSkyBuyers", text, "ok");
               setSyncBtn("BigSkyBuyers", false);
-            } else if (bs.type === "SYNC_ERROR") {
-              setStatus("BigSkyBuyers", `Error: ${bs.error}`, "fail");
+            } else if (bs2.type === "SYNC_ERROR") {
+              setStatus("BigSkyBuyers", `Error: ${bs2.error}`, "fail");
               setSyncBtn("BigSkyBuyers", false);
             }
           }

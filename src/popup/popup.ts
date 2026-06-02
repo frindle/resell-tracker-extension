@@ -100,7 +100,7 @@ async function init() {
   if (settings.bigskyLastSync) setMeta('BigSkyBuyers', `Last sync: ${settings.bigskyLastSync}`);
 
   // Restore in-progress or recent sync status if popup was closed during sync
-  const stored = await chrome.storage.local.get('amazonSyncStatus');
+  const stored = await chrome.storage.local.get(['amazonSyncStatus', 'bigskyStatus']);
   const s = stored.amazonSyncStatus as { type: string; message?: string; result?: { scraped: number; imported: number; updated: number; platform: string }; error?: string; ts: number } | undefined;
   if (s && Date.now() - s.ts < 5 * 60 * 1000) {
     if (s.type === 'SYNC_STARTED' || s.type === 'SYNC_PROGRESS') {
@@ -111,6 +111,19 @@ async function init() {
       setStatus('Amazon', text, 'ok');
     } else if (s.type === 'SYNC_ERROR') {
       setStatus('Amazon', `Error: ${s.error}`, 'fail');
+    }
+  }
+
+  const bs = stored.bigskyStatus as { type: string; message?: string; result?: { scraped: number; imported: number; updated: number; platform: string }; error?: string; ts: number } | undefined;
+  if (bs && Date.now() - bs.ts < 5 * 60 * 1000) {
+    if (bs.type === 'SYNC_STARTED' || bs.type === 'SYNC_PROGRESS') {
+      setStatus('BigSkyBuyers', bs.message ?? 'syncing…', 'syncing');
+      setSyncBtn('BigSkyBuyers', true);
+    } else if (bs.type === 'SYNC_DONE' && bs.result) {
+      const text = bs.result.scraped === 0 ? 'no new orders' : `${bs.result.updated} updated`;
+      setStatus('BigSkyBuyers', text, 'ok');
+    } else if (bs.type === 'SYNC_ERROR') {
+      setStatus('BigSkyBuyers', `Error: ${bs.error}`, 'fail');
     }
   }
 
