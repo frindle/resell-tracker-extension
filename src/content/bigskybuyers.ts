@@ -44,8 +44,8 @@ function groupByTracking(items: ScanItem[]): SyncGroup[] {
     }
     const g = map.get(key)!;
     g.salePrice += parseFloat(item.lineTotal) || 0;
-    // Use latest paymentDate (prefer paid over null)
-    if (item.paymentDate && !g.paymentDate) g.paymentDate = item.paymentDate;
+    // Use latest paymentDate
+    if (item.paymentDate && (!g.paymentDate || item.paymentDate > g.paymentDate)) g.paymentDate = item.paymentDate;
   }
   return Array.from(map.values());
 }

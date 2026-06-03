@@ -374,19 +374,22 @@ async function startSync() {
 
     sendMessage({ type: 'SYNC_PROGRESS', platform: 'Walmart', scraped: allOrders.length, message: 'Fetching order details…' } as never);
 
-    await Promise.all(allOrders.map(async order => {
-      console.log('[WM] fetching detail:', order.orderNumber, order.sourceUrl);
-      const detail = await fetchOrderDetail(order.orderNumber, order.sourceUrl);
-      console.log('[WM] detail done:', order.orderNumber, 'address:', detail.address.slice(0, 40) || '(none)', 'tracking:', detail.tracking, 'orderDate:', detail.orderDate);
-      if (detail.address) order.shippingAddress = detail.address;
-      if (detail.tracking.length) order.trackingNumbers = detail.tracking;
-      if (detail.cost != null && detail.cost > 0 && order.cost === 0) order.cost = detail.cost;
-      if (detail.itemDescription && !order.itemDescription) order.itemDescription = detail.itemDescription;
-      if (!order.orderDate) {
-        order.orderDate = detail.orderDate ?? new Date().toISOString().split('T')[0];
-        console.log('[WM] resolved order date:', order.orderNumber, order.orderDate);
-      }
-    }));
+    const CONCURRENCY = 3;
+    for (let i = 0; i < allOrders.length; i += CONCURRENCY) {
+      await Promise.all(allOrders.slice(i, i + CONCURRENCY).map(async order => {
+        console.log('[WM] fetching detail:', order.orderNumber, order.sourceUrl);
+        const detail = await fetchOrderDetail(order.orderNumber, order.sourceUrl);
+        console.log('[WM] detail done:', order.orderNumber, 'address:', detail.address.slice(0, 40) || '(none)', 'tracking:', detail.tracking, 'orderDate:', detail.orderDate);
+        if (detail.address) order.shippingAddress = detail.address;
+        if (detail.tracking.length) order.trackingNumbers = detail.tracking;
+        if (detail.cost != null && detail.cost > 0 && order.cost === 0) order.cost = detail.cost;
+        if (detail.itemDescription && !order.itemDescription) order.itemDescription = detail.itemDescription;
+        if (!order.orderDate) {
+          order.orderDate = detail.orderDate ?? new Date().toISOString().split('T')[0];
+          console.log('[WM] resolved order date:', order.orderNumber, order.orderDate);
+        }
+      }));
+    }
 
     // Drop orders that turned out to be older than sinceDate after detail fetch
     const todayStr = sinceDate.toISOString().split('T')[0];

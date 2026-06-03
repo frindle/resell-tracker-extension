@@ -367,9 +367,9 @@ async function runSync() {
   } catch (err) {
     setBadge('!', '#ef4444');
     sendMessage({ type: 'SYNC_ERROR', platform: 'Costco', error: err instanceof Error ? err.message : String(err) });
+  } finally {
+    syncing = false;
   }
-
-  syncing = false;
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
