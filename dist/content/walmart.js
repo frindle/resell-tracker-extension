@@ -258,7 +258,7 @@
             }
           } else {
             console.log("[WM] no date found for order", orderNumber, "\u2014 will fetch detail for real date");
-            if (/\b(cancelled|canceled|returned|refunded)\b/i.test(blockText)) continue;
+            if (/\b(cancelled|canceled|cancellation|returned|refunded|order canceled|we've canceled)\b/i.test(blockText)) continue;
             const totalMatch2 = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
             const itemEl2 = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
             orders.push({
@@ -279,7 +279,7 @@
             hasOlder = true;
             continue;
           }
-          if (/\b(cancelled|canceled|returned|refunded)\b/i.test(blockText)) continue;
+          if (/\b(cancelled|canceled|cancellation|returned|refunded|order canceled|we've canceled)\b/i.test(blockText)) continue;
           const totalMatch = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
           const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
           const itemEl = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
