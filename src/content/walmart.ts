@@ -82,11 +82,10 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
         console.log('[WM] skipping order', orderNumber, '- bad date:', dateMatch[1]);
         continue;
       }
-    } else if (/\btoday\b/i.test(blockText) || /PlacedCurrent|Placed\s*Current/i.test(blockText)) {
-      // No explicit date — Walmart omits it for very recent orders; fetch detail page for real date.
-      // Use empty string as sentinel; main loop will resolve via fetchOrderDetail.
+    } else {
+      // No date found — fetch the detail page to get the real placement date.
+      // Walmart omits dates for very recently placed orders (shows progress steps instead).
       console.log('[WM] no date found for order', orderNumber, '— will fetch detail for real date');
-      // Skip cancelled check early
       if (/\b(cancelled|canceled|returned|refunded)\b/i.test(blockText)) continue;
       const totalMatch2 = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
       const itemEl2 = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
@@ -101,9 +100,6 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
         trackingNumbers: [],
         sourceUrl: `https://www.walmart.com/orders/${orderNumber}`,
       });
-      continue;
-    } else {
-      console.log('[WM] skipping order', orderNumber, '- no date found in:', blockText.slice(0, 200));
       continue;
     }
     if (orderDate.toISOString().split('T')[0] < sinceDate.toISOString().split('T')[0]) {
