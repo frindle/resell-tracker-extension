@@ -208,7 +208,7 @@
           }
           const g = map.get(key);
           g.salePrice += parseFloat(item.lineTotal) || 0;
-          if (item.paymentDate && !g.paymentDate) g.paymentDate = item.paymentDate;
+          if (item.paymentDate && (!g.paymentDate || item.paymentDate > g.paymentDate)) g.paymentDate = item.paymentDate;
         }
         return Array.from(map.values());
       }
