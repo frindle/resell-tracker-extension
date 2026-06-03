@@ -17,26 +17,36 @@
         Costco: { host: "www.costco.com", url: "https://www.costco.com/myaccount/", script: "content/costco.js" },
         BigSkyBuyers: { host: "www.bigskybuyers.com", url: "https://www.bigskybuyers.com/main", script: "content/bigskybuyers.js" }
       };
-      async function triggerSyncInBackground(platform) {
+      async function triggerSyncInBackground(platform, activeTabId, activeTabUrl) {
         const config = PLATFORM_CONFIG[platform];
         if (!config) return;
-        const existingTabs = await chrome.tabs.query({ url: `https://${config.host}/*` });
         let targetTabId;
-        if (existingTabs.length > 0 && existingTabs[0].id) {
-          targetTabId = existingTabs[0].id;
-          await chrome.tabs.update(targetTabId, { active: true });
-        } else {
-          const newTab = await chrome.tabs.create({ url: config.url });
-          if (!newTab.id) return;
-          targetTabId = newTab.id;
-          await new Promise((resolve) => {
-            chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
-              if (tabId === targetTabId && info.status === "complete") {
-                chrome.tabs.onUpdated.removeListener(listener);
-                resolve();
-              }
+        if (activeTabId && activeTabUrl) {
+          try {
+            if (new URL(activeTabUrl).hostname === config.host) {
+              targetTabId = activeTabId;
+            }
+          } catch {
+          }
+        }
+        if (!targetTabId) {
+          const existingTabs = await chrome.tabs.query({ url: `https://${config.host}/*` });
+          if (existingTabs.length > 0 && existingTabs[0].id) {
+            targetTabId = existingTabs[0].id;
+            await chrome.tabs.update(targetTabId, { active: true });
+          } else {
+            const newTab = await chrome.tabs.create({ url: config.url });
+            if (!newTab.id) return;
+            targetTabId = newTab.id;
+            await new Promise((resolve) => {
+              chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
+                if (tabId === targetTabId && info.status === "complete") {
+                  chrome.tabs.onUpdated.removeListener(listener);
+                  resolve();
+                }
+              });
             });
-          });
+          }
         }
         const alive = await chrome.tabs.sendMessage(targetTabId, { type: "PING" }).catch(() => null);
         if (!alive) {
@@ -53,7 +63,7 @@
       }
       chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.type === "TRIGGER_SYNC") {
-          triggerSyncInBackground(message.platform).catch(
+          triggerSyncInBackground(message.platform, message.activeTabId, message.activeTabUrl).catch(
             (e) => console.error("[BG] triggerSyncInBackground error", e)
           );
           sendResponse({ ok: true });

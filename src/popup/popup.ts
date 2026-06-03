@@ -33,8 +33,9 @@ async function cancelSync(platform: Platform) {
 async function triggerSync(platform: Platform) {
   setSyncBtn(platform, true, platform === 'Amazon');
   setStatus(platform, 'syncing…', 'syncing');
-  // Delegate tab management to background so it survives popup closing
-  chrome.runtime.sendMessage({ type: 'TRIGGER_SYNC', platform }).catch(() => {});
+  // Pass the active tab so background can use it directly if it's already on the right host
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  chrome.runtime.sendMessage({ type: 'TRIGGER_SYNC', platform, activeTabId: tab?.id, activeTabUrl: tab?.url }).catch(() => {});
 }
 
 async function init() {

@@ -11,30 +11,41 @@ const PLATFORM_CONFIG: Record<string, { host: string; url: string; script: strin
   BigSkyBuyers: { host: 'www.bigskybuyers.com', url: 'https://www.bigskybuyers.com/main', script: 'content/bigskybuyers.js' },
 };
 
-async function triggerSyncInBackground(platform: string) {
+async function triggerSyncInBackground(platform: string, activeTabId?: number, activeTabUrl?: string) {
   const config = PLATFORM_CONFIG[platform];
   if (!config) return;
 
-  // Find existing tab on the right host, or open a new one
-  const existingTabs = await chrome.tabs.query({ url: `https://${config.host}/*` });
   let targetTabId: number | undefined;
 
-  if (existingTabs.length > 0 && existingTabs[0].id) {
-    targetTabId = existingTabs[0].id;
-    await chrome.tabs.update(targetTabId, { active: true });
-  } else {
-    const newTab = await chrome.tabs.create({ url: config.url });
-    if (!newTab.id) return;
-    targetTabId = newTab.id;
-    // Wait for the tab to finish loading
-    await new Promise<void>(resolve => {
-      chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
-        if (tabId === targetTabId && info.status === 'complete') {
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve();
-        }
+  // If the active tab is already on the right host, use it directly
+  if (activeTabId && activeTabUrl) {
+    try {
+      if (new URL(activeTabUrl).hostname === config.host) {
+        targetTabId = activeTabId;
+      }
+    } catch { /* invalid url */ }
+  }
+
+  if (!targetTabId) {
+    // Look for an existing tab on the right host
+    const existingTabs = await chrome.tabs.query({ url: `https://${config.host}/*` });
+    if (existingTabs.length > 0 && existingTabs[0].id) {
+      targetTabId = existingTabs[0].id;
+      await chrome.tabs.update(targetTabId, { active: true });
+    } else {
+      // Open a new tab and wait for it to load
+      const newTab = await chrome.tabs.create({ url: config.url });
+      if (!newTab.id) return;
+      targetTabId = newTab.id;
+      await new Promise<void>(resolve => {
+        chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
+          if (tabId === targetTabId && info.status === 'complete') {
+            chrome.tabs.onUpdated.removeListener(listener);
+            resolve();
+          }
+        });
       });
-    });
+    }
   }
 
   // Ping to check if content script is already loaded
@@ -55,7 +66,7 @@ async function triggerSyncInBackground(platform: string) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'TRIGGER_SYNC') {
-    triggerSyncInBackground(message.platform as string).catch(e =>
+    triggerSyncInBackground(message.platform as string, message.activeTabId as number | undefined, message.activeTabUrl as string | undefined).catch(e =>
       console.error('[BG] triggerSyncInBackground error', e)
     );
     sendResponse({ ok: true });

@@ -207,7 +207,8 @@
       async function triggerSync(platform) {
         setSyncBtn(platform, true, platform === "Amazon");
         setStatus(platform, "syncing\u2026", "syncing");
-        chrome.runtime.sendMessage({ type: "TRIGGER_SYNC", platform }).catch(() => {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        chrome.runtime.sendMessage({ type: "TRIGGER_SYNC", platform, activeTabId: tab?.id, activeTabUrl: tab?.url }).catch(() => {
         });
       }
       async function init() {
