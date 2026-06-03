@@ -62,25 +62,33 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
     // Date — "on May 22" (no year), "May 22, 2026", "Placed Jan 3, 2026"
     // Parse date BEFORE the cancelled check so older cancelled orders still set hasOlder.
     const currentYear = new Date().getFullYear();
-    const dateMatch =
-      blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ??
-      blockText.match(/\b((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ??
-      blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})(?!\d)/i);
-    if (!dateMatch) {
-      console.log('[WM] skipping order', orderNumber, '- no date found in:', blockText.slice(0, 200));
-      continue;
-    }
-    // Append current year if missing; if result is more than a day in the future, use prior year
-    let rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear}`;
-    let orderDate = new Date(rawDateStr);
-    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
-    if (!isNaN(orderDate.getTime()) && orderDate > tomorrow) {
-      rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear - 1}`;
+
+    // Check for relative date "Today" first
+    let orderDate: Date;
+    if (/\btoday\b/i.test(blockText)) {
+      orderDate = new Date();
+      orderDate.setHours(0, 0, 0, 0);
+    } else {
+      const dateMatch =
+        blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ??
+        blockText.match(/\b((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ??
+        blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})(?!\d)/i);
+      if (!dateMatch) {
+        console.log('[WM] skipping order', orderNumber, '- no date found in:', blockText.slice(0, 200));
+        continue;
+      }
+      // Append current year if missing; if result is more than a day in the future, use prior year
+      let rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear}`;
       orderDate = new Date(rawDateStr);
-    }
-    if (isNaN(orderDate.getTime())) {
-      console.log('[WM] skipping order', orderNumber, '- bad date:', dateMatch[1]);
-      continue;
+      const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+      if (!isNaN(orderDate.getTime()) && orderDate > tomorrow) {
+        rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear - 1}`;
+        orderDate = new Date(rawDateStr);
+      }
+      if (isNaN(orderDate.getTime())) {
+        console.log('[WM] skipping order', orderNumber, '- bad date:', dateMatch[1]);
+        continue;
+      }
     }
     if (orderDate.toISOString().split('T')[0] < sinceDate.toISOString().split('T')[0]) {
       console.log('[WM] order too old:', orderNumber, orderDate.toISOString().split('T')[0], '< sinceDate', sinceDate.toISOString().split('T')[0]);
