@@ -38,12 +38,38 @@ async function triggerSync(platform: Platform) {
   chrome.runtime.sendMessage({ type: 'TRIGGER_SYNC', platform, activeTabId: tab?.id, activeTabUrl: tab?.url }).catch(() => {});
 }
 
+async function checkVersions(trackerUrl: string | undefined) {
+  const manifest = chrome.runtime.getManifest();
+  const extVersion = manifest.version;
+  document.getElementById('versionLabel')!.textContent = `Extension v${extVersion}`;
+
+  try {
+    const [extTags, appVersion] = await Promise.all([
+      fetch('https://api.github.com/repos/frindle/resell-tracker-extension/tags', { headers: { 'User-Agent': 'resell-tracker-extension' } }).then(r => r.json()).catch(() => []),
+      trackerUrl ? fetch(`${trackerUrl.replace(/\/$/, '')}/api/version`).then(r => r.json()).catch(() => null) : Promise.resolve(null),
+    ]);
+    const latestExt = (extTags as { name: string }[]).find(t => /^v?\d/.test(t.name))?.name.replace(/^v/, '');
+    const extOutdated = latestExt && latestExt !== extVersion;
+    const appOutdated = appVersion?.outdated;
+
+    if (extOutdated || appOutdated) {
+      document.getElementById('versionUpdate')!.style.display = 'inline';
+      const parts = [];
+      if (extOutdated) parts.push(`ext v${latestExt}`);
+      if (appOutdated) parts.push(`app v${appVersion.latest}`);
+      document.getElementById('versionUpdate')!.textContent = `update available: ${parts.join(', ')}`;
+    }
+  } catch { /* ignore */ }
+}
+
 async function init() {
   const settings = await getSettings();
 
   if (!settings.trackerUrl || !settings.userId) {
     document.getElementById('notConfigured')!.style.display = 'block';
   }
+
+  checkVersions(settings.trackerUrl).catch(() => {});
 
   if (settings.amazonLastSync) setMeta('Amazon', `Last sync: ${settings.amazonLastSync}`);
   if (settings.walmartLastSync) setMeta('Walmart', `Last sync: ${settings.walmartLastSync}`);
