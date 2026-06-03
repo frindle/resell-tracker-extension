@@ -219,9 +219,9 @@
         const orders = [];
         let hasOlder = false;
         const seen = /* @__PURE__ */ new Set();
-        const blocks = Array.from(document.querySelectorAll('[data-testid*="orderGroup"]'));
+        const blocks = Array.from(document.querySelectorAll('[data-testid*="orderGroup"], [data-testid*="order-card"], [data-testid*="orderCard"]'));
         console.log("[WM] DOM blocks found:", blocks.length, "url:", location.href);
-        if (blocks[0]) console.log("[WM] first block text:", (blocks[0].textContent ?? "").replace(/\s+/g, " ").slice(0, 600));
+        blocks.slice(0, 3).forEach((b, i) => console.log(`[WM] block[${i}] testid:`, b.getAttribute("data-testid"), "text:", (b.textContent ?? "").replace(/\s+/g, " ").slice(0, 300)));
         for (const block of blocks) {
           const blockText = (block.textContent ?? "").replace(/\s+/g, " ");
           let orderNumber = "";
@@ -339,7 +339,7 @@
       }
       var syncing = false;
       function getFirstBlockFingerprint() {
-        const block = document.querySelector('[data-testid*="orderGroup"]');
+        const block = document.querySelector('[data-testid*="orderGroup"], [data-testid*="order-card"], [data-testid*="orderCard"]');
         if (!block) return "";
         const caption = block.querySelector('[id^="caption-"]');
         if (caption?.id) return caption.id;
@@ -349,7 +349,7 @@
         return new Promise((resolve) => {
           const start = Date.now();
           function check() {
-            const blocks = document.querySelectorAll('[data-testid*="orderGroup"]');
+            const blocks = document.querySelectorAll('[data-testid*="orderGroup"], [data-testid*="order-card"], [data-testid*="orderCard"]');
             if (blocks.length > 0 && (blocks[0].textContent ?? "").length > 100) {
               const fp = getFirstBlockFingerprint();
               if (!previousFingerprint || fp !== previousFingerprint) {
@@ -387,7 +387,8 @@
           syncing = false;
           return;
         }
-        const sinceDate = settings.walmartLastSync ? new Date(new Date(settings.walmartLastSync).getTime() - 24 * 60 * 60 * 1e3) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1e3);
+        const sinceDate = settings.walmartLastSync ? new Date(new Date(settings.walmartLastSync).getTime() - 48 * 60 * 60 * 1e3) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1e3);
+        console.log("[WM] sinceDate:", sinceDate.toISOString(), "walmartLastSync:", settings.walmartLastSync);
         setBadge("\u2026");
         sendMessage({ type: "SYNC_STARTED", platform: "Walmart" });
         const isOrdersPage = location.pathname.includes("/orders") || location.pathname.includes("/account/mypurchases");

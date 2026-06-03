@@ -34,9 +34,9 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
 
   // __NEXT_DATA__ on walmart.com is a static shell — orders are client-rendered.
   // Read the live DOM directly.
-  const blocks = Array.from(document.querySelectorAll('[data-testid*="orderGroup"]'));
+  const blocks = Array.from(document.querySelectorAll('[data-testid*="orderGroup"], [data-testid*="order-card"], [data-testid*="orderCard"]'));
   console.log('[WM] DOM blocks found:', blocks.length, 'url:', location.href);
-  if (blocks[0]) console.log('[WM] first block text:', (blocks[0].textContent ?? '').replace(/\s+/g, ' ').slice(0, 600));
+  blocks.slice(0, 3).forEach((b, i) => console.log(`[WM] block[${i}] testid:`, b.getAttribute('data-testid'), 'text:', (b.textContent ?? '').replace(/\s+/g, ' ').slice(0, 300)));
 
   for (const block of blocks) {
     const blockText = (block.textContent ?? '').replace(/\s+/g, ' ');
@@ -207,7 +207,7 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
 let syncing = false;
 
 function getFirstBlockFingerprint(): string {
-  const block = document.querySelector('[data-testid*="orderGroup"]');
+  const block = document.querySelector('[data-testid*="orderGroup"], [data-testid*="order-card"], [data-testid*="orderCard"]');
   if (!block) return '';
   // Use caption element id (contains actual order number) as the stable fingerprint
   const caption = block.querySelector('[id^="caption-"]');
@@ -220,7 +220,7 @@ function waitForOrdersToLoad(previousFingerprint = '', timeoutMs = 12000): Promi
   return new Promise(resolve => {
     const start = Date.now();
     function check() {
-      const blocks = document.querySelectorAll('[data-testid*="orderGroup"]');
+      const blocks = document.querySelectorAll('[data-testid*="orderGroup"], [data-testid*="order-card"], [data-testid*="orderCard"]');
       if (blocks.length > 0 && (blocks[0].textContent ?? '').length > 100) {
         const fp = getFirstBlockFingerprint();
         if (!previousFingerprint || fp !== previousFingerprint) { resolve(); return; }
@@ -254,8 +254,9 @@ async function startSync() {
   }
 
   const sinceDate = settings.walmartLastSync
-    ? new Date(new Date(settings.walmartLastSync).getTime() - 24 * 60 * 60 * 1000)
+    ? new Date(new Date(settings.walmartLastSync).getTime() - 48 * 60 * 60 * 1000)
     : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  console.log('[WM] sinceDate:', sinceDate.toISOString(), 'walmartLastSync:', settings.walmartLastSync);
 
   setBadge('…');
   sendMessage({ type: 'SYNC_STARTED', platform: 'Walmart' });
