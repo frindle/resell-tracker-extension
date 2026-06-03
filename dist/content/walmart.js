@@ -242,15 +242,8 @@
           seen.add(orderNumber);
           const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
           let orderDate;
-          if (/\btoday\b/i.test(blockText)) {
-            orderDate = /* @__PURE__ */ new Date();
-            orderDate.setHours(0, 0, 0, 0);
-          } else {
-            const dateMatch = blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ?? blockText.match(/\b((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ?? blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})(?!\d)/i);
-            if (!dateMatch) {
-              console.log("[WM] skipping order", orderNumber, "- no date found in:", blockText.slice(0, 200));
-              continue;
-            }
+          const dateMatch = blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ?? blockText.match(/\b((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ?? blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})(?!\d)/i);
+          if (dateMatch) {
             let rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear}`;
             orderDate = new Date(rawDateStr);
             const tomorrow = /* @__PURE__ */ new Date();
@@ -263,6 +256,13 @@
               console.log("[WM] skipping order", orderNumber, "- bad date:", dateMatch[1]);
               continue;
             }
+          } else if (/\btoday\b/i.test(blockText) || /PlacedCurrent|Placed\s*Current/i.test(blockText)) {
+            orderDate = /* @__PURE__ */ new Date();
+            orderDate.setHours(0, 0, 0, 0);
+            console.log("[WM] no date found for order", orderNumber, "\u2014 treating as today (recent order)");
+          } else {
+            console.log("[WM] skipping order", orderNumber, "- no date found in:", blockText.slice(0, 200));
+            continue;
           }
           if (orderDate.toISOString().split("T")[0] < sinceDate.toISOString().split("T")[0]) {
             console.log("[WM] order too old:", orderNumber, orderDate.toISOString().split("T")[0], "< sinceDate", sinceDate.toISOString().split("T")[0]);

@@ -63,20 +63,13 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
     // Parse date BEFORE the cancelled check so older cancelled orders still set hasOlder.
     const currentYear = new Date().getFullYear();
 
-    // Check for relative date "Today" first
     let orderDate: Date;
-    if (/\btoday\b/i.test(blockText)) {
-      orderDate = new Date();
-      orderDate.setHours(0, 0, 0, 0);
-    } else {
-      const dateMatch =
-        blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ??
-        blockText.match(/\b((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ??
-        blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})(?!\d)/i);
-      if (!dateMatch) {
-        console.log('[WM] skipping order', orderNumber, '- no date found in:', blockText.slice(0, 200));
-        continue;
-      }
+    const dateMatch =
+      blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ??
+      blockText.match(/\b((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ??
+      blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})(?!\d)/i);
+
+    if (dateMatch) {
       // Append current year if missing; if result is more than a day in the future, use prior year
       let rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear}`;
       orderDate = new Date(rawDateStr);
@@ -89,6 +82,14 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
         console.log('[WM] skipping order', orderNumber, '- bad date:', dateMatch[1]);
         continue;
       }
+    } else if (/\btoday\b/i.test(blockText) || /PlacedCurrent|Placed\s*Current/i.test(blockText)) {
+      // No explicit date — Walmart omits it for very recent orders; treat as today
+      orderDate = new Date();
+      orderDate.setHours(0, 0, 0, 0);
+      console.log('[WM] no date found for order', orderNumber, '— treating as today (recent order)');
+    } else {
+      console.log('[WM] skipping order', orderNumber, '- no date found in:', blockText.slice(0, 200));
+      continue;
     }
     if (orderDate.toISOString().split('T')[0] < sinceDate.toISOString().split('T')[0]) {
       console.log('[WM] order too old:', orderNumber, orderDate.toISOString().split('T')[0], '< sinceDate', sinceDate.toISOString().split('T')[0]);
