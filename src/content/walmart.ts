@@ -95,8 +95,8 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
       hasOlder = true; continue;
     }
 
-    // Skip cancelled/returned orders (after date check so older ones still stop pagination)
-    if (/\b(cancel\w*|return\w*|refund\w*)\b/i.test(blockText)) continue;
+    // Skip cancelled/returned orders — match status words only, not "returnable", "return policy" etc.
+    if (/\b(cancelled|canceled|returned|refunded)\b/i.test(blockText)) continue;
 
     // Total — "Total $XX.XX"
     const totalMatch = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);

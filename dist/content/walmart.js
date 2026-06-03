@@ -269,7 +269,7 @@
             hasOlder = true;
             continue;
           }
-          if (/\b(cancel\w*|return\w*|refund\w*)\b/i.test(blockText)) continue;
+          if (/\b(cancelled|canceled|returned|refunded)\b/i.test(blockText)) continue;
           const totalMatch = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
           const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
           const itemEl = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
