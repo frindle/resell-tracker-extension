@@ -256,12 +256,22 @@
               console.log("[WM] skipping order", orderNumber, "- bad date:", dateMatch[1]);
               continue;
             }
-          } else if (/\btoday\b/i.test(blockText) || /PlacedCurrent|Placed\s*Current/i.test(blockText)) {
-            orderDate = /* @__PURE__ */ new Date();
-            orderDate.setHours(0, 0, 0, 0);
-            console.log("[WM] no date found for order", orderNumber, "\u2014 treating as today (recent order)");
           } else {
-            console.log("[WM] skipping order", orderNumber, "- no date found in:", blockText.slice(0, 200));
+            console.log("[WM] no date found for order", orderNumber, "\u2014 will fetch detail for real date");
+            if (/\b(cancelled|canceled|returned|refunded)\b/i.test(blockText)) continue;
+            const totalMatch2 = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
+            const itemEl2 = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
+            orders.push({
+              platform: "Walmart",
+              orderNumber,
+              orderDate: "",
+              itemDescription: (itemEl2?.textContent ?? "").trim().slice(0, 120),
+              cost: totalMatch2 ? parseMoney(totalMatch2[1]) : 0,
+              shippingCost: 0,
+              shippingAddress: "",
+              trackingNumbers: [],
+              sourceUrl: `https://www.walmart.com/orders/${orderNumber}`
+            });
             continue;
           }
           if (orderDate.toISOString().split("T")[0] < sinceDate.toISOString().split("T")[0]) {
@@ -331,10 +341,67 @@
             let m;
             while ((m = pat.exec(html)) !== null) numbers.add(m[1]);
           }
-          return { address, tracking: [...numbers] };
+          let orderDate = null;
+          let cost = null;
+          let itemDescription = null;
+          const scriptMatches = html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g);
+          for (const sm of scriptMatches) {
+            const s = sm[1];
+            if (!s.includes("orderDate") && !s.includes("placedDate") && !s.includes("totalAmount") && !s.includes("financeTotal")) continue;
+            try {
+              const parsed = JSON.parse(s);
+              const str = JSON.stringify(parsed);
+              if (!orderDate) {
+                for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
+                  const m = str.match(pat);
+                  if (m) {
+                    orderDate = m[1].split("T")[0];
+                    break;
+                  }
+                }
+              }
+              if (cost == null) {
+                const m = str.match(/"(?:totalAmount|financeTotal|orderTotal|grandTotal)"\s*:\s*([\d.]+)/);
+                if (m) cost = parseFloat(m[1]);
+              }
+              if (!itemDescription) {
+                const m = str.match(/"(?:productName|itemDescription|name)"\s*:\s*"([^"]{5,120})"/);
+                if (m) itemDescription = m[1];
+              }
+            } catch {
+            }
+          }
+          if (!orderDate && nextDataEl?.textContent) {
+            try {
+              const nd = JSON.parse(nextDataEl.textContent);
+              const str = JSON.stringify(nd);
+              for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
+                const m = str.match(pat);
+                if (m) {
+                  orderDate = m[1].split("T")[0];
+                  break;
+                }
+              }
+            } catch {
+            }
+          }
+          if (!orderDate) {
+            const m = html.match(/[Pp]laced[^<]{0,80}?(\d{4}-\d{2}-\d{2})/);
+            if (m) orderDate = m[1];
+          }
+          if (cost == null) {
+            const totalEl = doc.querySelector('[data-automation-id*="order-total"], [class*="orderTotal"], [class*="order-total"]');
+            if (totalEl) cost = parseMoney(totalEl.textContent ?? "");
+          }
+          if (!itemDescription) {
+            const itemEl = doc.querySelector('[data-automation-id*="product-title"], [class*="product-title"], h2[class*="item"]');
+            if (itemEl) itemDescription = (itemEl.textContent ?? "").trim().slice(0, 120) || null;
+          }
+          console.log("[WM] detail:", orderNumber, "date:", orderDate, "cost:", cost, "item:", itemDescription?.slice(0, 40));
+          return { address, tracking: [...numbers], orderDate, cost, itemDescription };
         } catch (e) {
           console.log("[WM] detail fetch failed:", orderNumber, String(e));
-          return { address: "", tracking: [] };
+          return { address: "", tracking: [], orderDate: null, cost: null, itemDescription: null };
         }
       }
       var syncing = false;
@@ -434,15 +501,24 @@
           await Promise.all(allOrders.map(async (order) => {
             console.log("[WM] fetching detail:", order.orderNumber, order.sourceUrl);
             const detail = await fetchOrderDetail(order.orderNumber, order.sourceUrl);
-            console.log("[WM] detail done:", order.orderNumber, "address:", detail.address.slice(0, 40) || "(none)", "tracking:", detail.tracking);
+            console.log("[WM] detail done:", order.orderNumber, "address:", detail.address.slice(0, 40) || "(none)", "tracking:", detail.tracking, "orderDate:", detail.orderDate);
             if (detail.address) order.shippingAddress = detail.address;
             if (detail.tracking.length) order.trackingNumbers = detail.tracking;
+            if (detail.cost != null && detail.cost > 0 && order.cost === 0) order.cost = detail.cost;
+            if (detail.itemDescription && !order.itemDescription) order.itemDescription = detail.itemDescription;
+            if (!order.orderDate) {
+              order.orderDate = detail.orderDate ?? (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+              console.log("[WM] resolved order date:", order.orderNumber, order.orderDate);
+            }
           }));
-          const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? "", settings.userId, allOrders);
+          const todayStr = sinceDate.toISOString().split("T")[0];
+          const filteredOrders = allOrders.filter((o) => o.orderDate >= todayStr);
+          console.log("[WM] after date filter:", filteredOrders.length, "/", allOrders.length);
+          const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? "", settings.userId, filteredOrders);
           console.log("[WM] push result:", JSON.stringify(result));
           await setLastSync("walmart", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
           setBadge(`+${result.imported ?? 0}`, "#22c55e");
-          sendMessage({ type: "SYNC_DONE", result: { platform: "Walmart", scraped: allOrders.length, imported: result.imported ?? 0, updated: result.updated ?? 0 } });
+          sendMessage({ type: "SYNC_DONE", result: { platform: "Walmart", scraped: filteredOrders.length, imported: result.imported ?? 0, updated: result.updated ?? 0 } });
         } catch (err) {
           console.error("[WM] sync error:", err);
           sendMessage({ type: "SYNC_ERROR", platform: "Walmart", error: String(err) });

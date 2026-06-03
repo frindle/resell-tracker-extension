@@ -157,7 +157,7 @@ function getNextPageUrl(): string | null {
 // Enrich order detail pages for tracking + address
 // ---------------------------------------------------------------------------
 
-async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<{ address: string; tracking: string[]; orderDate: string | null }> {
+async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<{ address: string; tracking: string[]; orderDate: string | null; cost: number | null; itemDescription: string | null }> {
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 5000);
@@ -205,29 +205,66 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
       while ((m = pat.exec(html)) !== null) numbers.add(m[1]);
     }
 
-    // Extract order placement date from __NEXT_DATA__ JSON
+    // Extract order date, cost, and item description from the detail page HTML
     let orderDate: string | null = null;
-    if (nextDataEl?.textContent) {
+    let cost: number | null = null;
+    let itemDescription: string | null = null;
+
+    // Scan raw HTML for JSON data embedded in script tags (Walmart embeds order data this way)
+    const scriptMatches = html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g);
+    for (const sm of scriptMatches) {
+      const s = sm[1];
+      if (!s.includes('orderDate') && !s.includes('placedDate') && !s.includes('totalAmount') && !s.includes('financeTotal')) continue;
+      try {
+        const parsed = JSON.parse(s);
+        const str = JSON.stringify(parsed);
+        if (!orderDate) {
+          for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
+            const m = str.match(pat); if (m) { orderDate = m[1].split('T')[0]; break; }
+          }
+        }
+        if (cost == null) {
+          const m = str.match(/"(?:totalAmount|financeTotal|orderTotal|grandTotal)"\s*:\s*([\d.]+)/);
+          if (m) cost = parseFloat(m[1]);
+        }
+        if (!itemDescription) {
+          const m = str.match(/"(?:productName|itemDescription|name)"\s*:\s*"([^"]{5,120})"/);
+          if (m) itemDescription = m[1];
+        }
+      } catch { /* not JSON */ }
+    }
+
+    // __NEXT_DATA__ fallback for date
+    if (!orderDate && nextDataEl?.textContent) {
       try {
         const nd = JSON.parse(nextDataEl.textContent);
         const str = JSON.stringify(nd);
         for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
-          const m = str.match(pat);
-          if (m) { orderDate = m[1].split('T')[0]; break; }
+          const m = str.match(pat); if (m) { orderDate = m[1].split('T')[0]; break; }
         }
       } catch { /* ignore */ }
     }
     if (!orderDate) {
-      // Fallback: look for ISO date string near "placed" in raw HTML
       const m = html.match(/[Pp]laced[^<]{0,80}?(\d{4}-\d{2}-\d{2})/);
       if (m) orderDate = m[1];
     }
-    console.log('[WM] detail orderDate:', orderNumber, orderDate);
 
-    return { address, tracking: [...numbers], orderDate };
+    // HTML DOM fallback for cost / item
+    if (cost == null) {
+      const totalEl = doc.querySelector('[data-automation-id*="order-total"], [class*="orderTotal"], [class*="order-total"]');
+      if (totalEl) cost = parseMoney(totalEl.textContent ?? '');
+    }
+    if (!itemDescription) {
+      const itemEl = doc.querySelector('[data-automation-id*="product-title"], [class*="product-title"], h2[class*="item"]');
+      if (itemEl) itemDescription = (itemEl.textContent ?? '').trim().slice(0, 120) || null;
+    }
+
+    console.log('[WM] detail:', orderNumber, 'date:', orderDate, 'cost:', cost, 'item:', itemDescription?.slice(0, 40));
+
+    return { address, tracking: [...numbers], orderDate, cost, itemDescription };
   } catch (e) {
     console.log('[WM] detail fetch failed:', orderNumber, String(e));
-    return { address: '', tracking: [], orderDate: null };
+    return { address: '', tracking: [], orderDate: null, cost: null, itemDescription: null };
   }
 }
 
@@ -343,8 +380,9 @@ async function startSync() {
       console.log('[WM] detail done:', order.orderNumber, 'address:', detail.address.slice(0, 40) || '(none)', 'tracking:', detail.tracking, 'orderDate:', detail.orderDate);
       if (detail.address) order.shippingAddress = detail.address;
       if (detail.tracking.length) order.trackingNumbers = detail.tracking;
+      if (detail.cost != null && detail.cost > 0 && order.cost === 0) order.cost = detail.cost;
+      if (detail.itemDescription && !order.itemDescription) order.itemDescription = detail.itemDescription;
       if (!order.orderDate) {
-        // Resolve sentinel — use date from detail page, or fall back to today
         order.orderDate = detail.orderDate ?? new Date().toISOString().split('T')[0];
         console.log('[WM] resolved order date:', order.orderNumber, order.orderDate);
       }
