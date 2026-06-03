@@ -83,10 +83,25 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
         continue;
       }
     } else if (/\btoday\b/i.test(blockText) || /PlacedCurrent|Placed\s*Current/i.test(blockText)) {
-      // No explicit date — Walmart omits it for very recent orders; treat as today
-      orderDate = new Date();
-      orderDate.setHours(0, 0, 0, 0);
-      console.log('[WM] no date found for order', orderNumber, '— treating as today (recent order)');
+      // No explicit date — Walmart omits it for very recent orders; fetch detail page for real date.
+      // Use empty string as sentinel; main loop will resolve via fetchOrderDetail.
+      console.log('[WM] no date found for order', orderNumber, '— will fetch detail for real date');
+      // Skip cancelled check early
+      if (/\b(cancelled|canceled|returned|refunded)\b/i.test(blockText)) continue;
+      const totalMatch2 = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
+      const itemEl2 = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
+      orders.push({
+        platform: 'Walmart',
+        orderNumber,
+        orderDate: '',
+        itemDescription: (itemEl2?.textContent ?? '').trim().slice(0, 120),
+        cost: totalMatch2 ? parseMoney(totalMatch2[1]) : 0,
+        shippingCost: 0,
+        shippingAddress: '',
+        trackingNumbers: [],
+        sourceUrl: `https://www.walmart.com/orders/${orderNumber}`,
+      });
+      continue;
     } else {
       console.log('[WM] skipping order', orderNumber, '- no date found in:', blockText.slice(0, 200));
       continue;
@@ -146,7 +161,7 @@ function getNextPageUrl(): string | null {
 // Enrich order detail pages for tracking + address
 // ---------------------------------------------------------------------------
 
-async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<{ address: string; tracking: string[] }> {
+async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<{ address: string; tracking: string[]; orderDate: string | null }> {
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 5000);
@@ -194,10 +209,29 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
       while ((m = pat.exec(html)) !== null) numbers.add(m[1]);
     }
 
-    return { address, tracking: [...numbers] };
+    // Extract order placement date from __NEXT_DATA__ JSON
+    let orderDate: string | null = null;
+    if (nextDataEl?.textContent) {
+      try {
+        const nd = JSON.parse(nextDataEl.textContent);
+        const str = JSON.stringify(nd);
+        for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
+          const m = str.match(pat);
+          if (m) { orderDate = m[1].split('T')[0]; break; }
+        }
+      } catch { /* ignore */ }
+    }
+    if (!orderDate) {
+      // Fallback: look for ISO date string near "placed" in raw HTML
+      const m = html.match(/[Pp]laced[^<]{0,80}?(\d{4}-\d{2}-\d{2})/);
+      if (m) orderDate = m[1];
+    }
+    console.log('[WM] detail orderDate:', orderNumber, orderDate);
+
+    return { address, tracking: [...numbers], orderDate };
   } catch (e) {
     console.log('[WM] detail fetch failed:', orderNumber, String(e));
-    return { address: '', tracking: [] };
+    return { address: '', tracking: [], orderDate: null };
   }
 }
 
@@ -310,16 +344,26 @@ async function startSync() {
     await Promise.all(allOrders.map(async order => {
       console.log('[WM] fetching detail:', order.orderNumber, order.sourceUrl);
       const detail = await fetchOrderDetail(order.orderNumber, order.sourceUrl);
-      console.log('[WM] detail done:', order.orderNumber, 'address:', detail.address.slice(0, 40) || '(none)', 'tracking:', detail.tracking);
+      console.log('[WM] detail done:', order.orderNumber, 'address:', detail.address.slice(0, 40) || '(none)', 'tracking:', detail.tracking, 'orderDate:', detail.orderDate);
       if (detail.address) order.shippingAddress = detail.address;
       if (detail.tracking.length) order.trackingNumbers = detail.tracking;
+      if (!order.orderDate) {
+        // Resolve sentinel — use date from detail page, or fall back to today
+        order.orderDate = detail.orderDate ?? new Date().toISOString().split('T')[0];
+        console.log('[WM] resolved order date:', order.orderNumber, order.orderDate);
+      }
     }));
 
-    const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? '', settings.userId, allOrders);
+    // Drop orders that turned out to be older than sinceDate after detail fetch
+    const todayStr = sinceDate.toISOString().split('T')[0];
+    const filteredOrders = allOrders.filter(o => o.orderDate >= todayStr);
+    console.log('[WM] after date filter:', filteredOrders.length, '/', allOrders.length);
+
+    const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? '', settings.userId, filteredOrders);
     console.log('[WM] push result:', JSON.stringify(result));
     await setLastSync('walmart', new Date().toISOString().split('T')[0]);
     setBadge(`+${result.imported ?? 0}`, '#22c55e');
-    sendMessage({ type: 'SYNC_DONE', result: { platform: 'Walmart', scraped: allOrders.length, imported: result.imported ?? 0, updated: result.updated ?? 0 } });
+    sendMessage({ type: 'SYNC_DONE', result: { platform: 'Walmart', scraped: filteredOrders.length, imported: result.imported ?? 0, updated: result.updated ?? 0 } });
   } catch (err) {
     console.error('[WM] sync error:', err);
     sendMessage({ type: 'SYNC_ERROR', platform: 'Walmart', error: String(err) });
