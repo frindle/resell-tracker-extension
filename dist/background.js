@@ -11,7 +11,54 @@
       chrome.runtime.onInstalled.addListener(() => {
         console.log("[Reselling Tracker] Extension installed.");
       });
+      var PLATFORM_CONFIG = {
+        Amazon: { host: "www.amazon.com", url: "https://www.amazon.com/your-orders/orders", script: "content/amazon.js" },
+        Walmart: { host: "www.walmart.com", url: "https://www.walmart.com/orders", script: "content/walmart.js" },
+        Costco: { host: "www.costco.com", url: "https://www.costco.com/myaccount/", script: "content/costco.js" },
+        BigSkyBuyers: { host: "www.bigskybuyers.com", url: "https://www.bigskybuyers.com/main", script: "content/bigskybuyers.js" }
+      };
+      async function triggerSyncInBackground(platform) {
+        const config = PLATFORM_CONFIG[platform];
+        if (!config) return;
+        const existingTabs = await chrome.tabs.query({ url: `https://${config.host}/*` });
+        let targetTabId;
+        if (existingTabs.length > 0 && existingTabs[0].id) {
+          targetTabId = existingTabs[0].id;
+          await chrome.tabs.update(targetTabId, { active: true });
+        } else {
+          const newTab = await chrome.tabs.create({ url: config.url });
+          if (!newTab.id) return;
+          targetTabId = newTab.id;
+          await new Promise((resolve) => {
+            chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
+              if (tabId === targetTabId && info.status === "complete") {
+                chrome.tabs.onUpdated.removeListener(listener);
+                resolve();
+              }
+            });
+          });
+        }
+        const alive = await chrome.tabs.sendMessage(targetTabId, { type: "PING" }).catch(() => null);
+        if (!alive) {
+          try {
+            await chrome.scripting.executeScript({ target: { tabId: targetTabId }, files: [config.script] });
+          } catch (e) {
+            console.error("[BG] injection failed", e);
+            return;
+          }
+        }
+        chrome.tabs.sendMessage(targetTabId, { type: "START_SYNC", platform }).catch(
+          (e) => console.error("[BG] START_SYNC failed", e)
+        );
+      }
       chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message.type === "TRIGGER_SYNC") {
+          triggerSyncInBackground(message.platform).catch(
+            (e) => console.error("[BG] triggerSyncInBackground error", e)
+          );
+          sendResponse({ ok: true });
+          return;
+        }
         if (message.type === "SET_BADGE") {
           const tabId = sender.tab?.id;
           if (tabId) {

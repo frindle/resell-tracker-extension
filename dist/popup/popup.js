@@ -205,52 +205,9 @@
         setStatus(platform, "cancelled", "idle");
       }
       async function triggerSync(platform) {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!tab?.id || !tab.url) {
-          setStatus(platform, "No active tab", "fail");
-          return;
-        }
-        const expectedHost = platform === "Amazon" ? "www.amazon.com" : platform === "Walmart" ? "www.walmart.com" : platform === "Costco" ? "www.costco.com" : "www.bigskybuyers.com";
-        const ordersUrl = platform === "Amazon" ? "https://www.amazon.com/your-orders/orders" : platform === "Walmart" ? "https://www.walmart.com/orders" : platform === "Costco" ? "https://www.costco.com/myaccount/" : "https://www.bigskybuyers.com/main";
-        const scriptFile = platform === "Amazon" ? "content/amazon.js" : platform === "Walmart" ? "content/walmart.js" : platform === "Costco" ? "content/costco.js" : "content/bigskybuyers.js";
         setSyncBtn(platform, true, platform === "Amazon");
         setStatus(platform, "syncing\u2026", "syncing");
-        let targetTabId = tab.id;
-        let isCorrectHost = false;
-        try {
-          isCorrectHost = new URL(tab.url ?? "").hostname === expectedHost;
-        } catch {
-        }
-        if (!isCorrectHost) {
-          const newTab = await chrome.tabs.create({ url: ordersUrl });
-          if (!newTab.id) {
-            setStatus(platform, "Could not open tab", "fail");
-            setSyncBtn(platform, false);
-            return;
-          }
-          targetTabId = newTab.id;
-          await new Promise((resolve) => {
-            chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
-              if (tabId === targetTabId && info.status === "complete") {
-                chrome.tabs.onUpdated.removeListener(listener);
-                resolve();
-              }
-            });
-          });
-        }
-        const alive = await chrome.tabs.sendMessage(targetTabId, { type: "PING" }).catch(() => null);
-        if (!alive) {
-          try {
-            await chrome.scripting.executeScript({ target: { tabId: targetTabId }, files: [scriptFile] });
-          } catch {
-            setStatus(platform, "Injection failed \u2014 refresh the tab", "fail");
-            setSyncBtn(platform, false);
-            return;
-          }
-        }
-        chrome.tabs.sendMessage(targetTabId, { type: "START_SYNC", platform }).catch(() => {
-          setStatus(platform, "Injection failed \u2014 refresh the tab", "fail");
-          setSyncBtn(platform, false);
+        chrome.runtime.sendMessage({ type: "TRIGGER_SYNC", platform }).catch(() => {
         });
       }
       async function init() {
