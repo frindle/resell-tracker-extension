@@ -46,7 +46,7 @@ function buildManifest(target) {
     base.browser_specific_settings = {
       gecko: {
         id: 'resell-tracker-sync@penndalton',
-        strict_min_version: '109.0',
+        strict_min_version: '128.0',
       },
     };
   }

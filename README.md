@@ -51,6 +51,10 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.0
+- Add Firefox support with AMO-signed XPI (requires Firefox 128+)
+- Bump minimum Firefox version to 128 for MAIN world content script support
+
 ### 1.0.2
 - Add Costco online order scraping via GraphQL API
 - Bulk backfill button for existing Amazon orders missing item descriptions or shipping addresses
