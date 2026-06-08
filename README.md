@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.5
+- Try XHR instead of fetch in background for Firefox local network compatibility
+
 ### 1.1.4
 - Fix Firefox network error: route user fetch through background to bypass local network access restrictions
 
