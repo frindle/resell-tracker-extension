@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.6
+- Fix Firefox blocking HTTP requests to local IPs — override default CSP that adds upgrade-insecure-requests
+
 ### 1.1.5
 - Try XHR instead of fetch in background for Firefox local network compatibility
 

@@ -49,6 +49,11 @@ function buildManifest(target) {
         strict_min_version: '128.0',
       },
     };
+    // Firefox MV3 default CSP includes upgrade-insecure-requests which breaks
+    // fetches to HTTP local IPs. Override to remove it.
+    base.content_security_policy = {
+      extension_pages: "script-src 'self'; object-src 'self';",
+    };
   }
   return JSON.stringify(base, null, 2);
 }
