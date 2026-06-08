@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.1
+- Fix missing toolbar icon in Firefox
+
 ### 1.1.0
 - Add Firefox support with AMO-signed XPI (requires Firefox 128+)
 - Bump minimum Firefox version to 128 for MAIN world content script support
