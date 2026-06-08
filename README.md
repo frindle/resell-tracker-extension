@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.2
+- Fix "Could not load users" error in Firefox options page — fetch users directly instead of routing through background
+
 ### 1.1.1
 - Fix missing toolbar icon in Firefox
 
