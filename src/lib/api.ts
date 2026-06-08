@@ -10,7 +10,7 @@ export async function fetchUsers(trackerUrl: string): Promise<TrackerUser[]> {
   // Fetch directly from the options page context — it has host permissions and
   // avoids waking the background event page (which may be asleep in Firefox).
   const url = `${trackerUrl.replace(/\/$/, '')}/api/users`;
-  const res = await fetch(url, { headers: { 'Content-Type': 'application/json' } });
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => res.statusText)}`);
   const data = await res.json();
   return data.map((u: { id: number; name: string }) => ({ id: u.id, name: u.name }));

@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.3
+- Fix Firefox options page user fetch (remove Content-Type header that triggered CORS preflight)
+
 ### 1.1.2
 - Fix "Could not load users" error in Firefox options page — fetch users directly instead of routing through background
 
