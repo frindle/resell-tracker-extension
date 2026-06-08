@@ -65,6 +65,11 @@ async function triggerSyncInBackground(platform: string, activeTabId?: number, a
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'PING') {
+    sendResponse({ ok: true });
+    return;
+  }
+
   if (message.type === 'TRIGGER_SYNC') {
     triggerSyncInBackground(message.platform as string, message.activeTabId as number | undefined, message.activeTabUrl as string | undefined).catch(e =>
       console.error('[BG] triggerSyncInBackground error', e)

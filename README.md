@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.4
+- Fix Firefox network error: route user fetch through background to bypass local network access restrictions
+
 ### 1.1.3
 - Fix Firefox options page user fetch (remove Content-Type header that triggered CORS preflight)
 
