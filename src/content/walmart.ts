@@ -167,27 +167,32 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
     const html = await res.text();
     const doc = new DOMParser().parseFromString(html, 'text/html');
 
-    // Try parsing __NEXT_DATA__ JSON for the shipping address
+    // Parse __NEXT_DATA__ JSON — Walmart SSR-embeds the full order in this script tag.
+    // Structure: props.pageProps.initialData.data.order
+    //   cost:    order.priceDetails.grandTotal.value  (number)
+    //   groups:  order[groups_XXXX][0].items[0].productInfo.name
+    //   address: order[groups_XXXX][0].deliveryAddress.address.addressString
     let address = '';
     const nextDataEl = doc.querySelector('#__NEXT_DATA__');
+    let ndOrder: Record<string, unknown> | null = null;
     if (nextDataEl?.textContent) {
       try {
         const nd = JSON.parse(nextDataEl.textContent);
-        const str = JSON.stringify(nd);
-        // Look for shippingAddress object in the JSON
-        const addrMatch = str.match(/"shippingAddress"\s*:\s*\{([^}]{0,500})\}/);
-        if (addrMatch) {
-          const addrObj = JSON.parse(`{${addrMatch[1]}}`);
-          const parts = [addrObj.addressLineOne, addrObj.addressLineTwo, addrObj.city, addrObj.state, addrObj.postalCode]
-            .filter(Boolean);
-          address = parts.join(' ').trim();
-        }
-        if (!address) {
-          // Fallback: look for address1/address2/city/state/zip pattern
-          const m = str.match(/"address1":"([^"]+)".*?"city":"([^"]+)".*?"state":"([^"]+)".*?"zip(?:Code)?":"([^"]+)"/);
-          if (m) address = `${m[1]} ${m[2]} ${m[3]} ${m[4]}`.trim();
+        ndOrder = (nd?.props?.pageProps?.initialData?.data?.order as Record<string, unknown>) ?? null;
+        if (ndOrder) {
+          // Find the versioned groups key (e.g. groups_2101)
+          const groupsKey = Object.keys(ndOrder).find(k => k.startsWith('groups_'));
+          const firstGroup = groupsKey ? (ndOrder[groupsKey] as unknown[])?.[0] as Record<string, unknown> : null;
+          // Address
+          const addrStr = (firstGroup?.deliveryAddress as Record<string, unknown>)?.address as Record<string, unknown>;
+          if (addrStr?.addressString) address = String(addrStr.addressString);
         }
       } catch { /* ignore */ }
+    }
+    if (!address) {
+      // DOM fallback for address
+      const addrEl = doc.querySelector('[data-automation-id*="shipping-address"], [class*="shipping-address"], [class*="shippingAddress"]');
+      address = (addrEl?.textContent ?? '').replace(/\s+/g, ' ').trim();
     }
     if (!address) {
       const addrEl = doc.querySelector('[data-automation-id*="shipping-address"], [class*="shipping-address"], [class*="shippingAddress"]');
@@ -234,21 +239,28 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
       } catch { /* not JSON */ }
     }
 
-    // __NEXT_DATA__ fallback for date and cost
-    if ((!orderDate || cost == null) && nextDataEl?.textContent) {
-      try {
-        const nd = JSON.parse(nextDataEl.textContent);
-        const str = JSON.stringify(nd);
-        if (!orderDate) {
-          for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
-            const m = str.match(pat); if (m) { orderDate = m[1].split('T')[0]; break; }
-          }
+    // Use ndOrder (already parsed above) to extract cost, item, and date via direct navigation
+    if (ndOrder) {
+      // Cost: order.priceDetails.grandTotal.value
+      if (cost == null) {
+        const gt = ((ndOrder.priceDetails as Record<string, unknown>)?.grandTotal as Record<string, unknown>);
+        if (gt?.value != null) cost = Number(gt.value);
+      }
+      // Item: first group → first item → productInfo.name
+      if (!itemDescription) {
+        const groupsKey = Object.keys(ndOrder).find(k => k.startsWith('groups_'));
+        const firstGroup = groupsKey ? (ndOrder[groupsKey] as unknown[])?.[0] as Record<string, unknown> : null;
+        const firstItem = (firstGroup?.items as unknown[])?.[0] as Record<string, unknown>;
+        const name = (firstItem?.productInfo as Record<string, unknown>)?.name as string | undefined;
+        if (name) itemDescription = name.slice(0, 120);
+      }
+      // Date
+      if (!orderDate) {
+        const str = JSON.stringify(ndOrder);
+        for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
+          const m = str.match(pat); if (m) { orderDate = m[1].split('T')[0]; break; }
         }
-        if (cost == null) {
-          const m = str.match(/"(?:totalAmount|financeTotal|orderTotal|grandTotal|chargeTotal|estimatedTotal|totalCharges|orderTotalAmount|total)"\s*:\s*([\d.]+)/);
-          if (m) cost = parseFloat(m[1]);
-        }
-      } catch { /* ignore */ }
+      }
     }
     // Raw HTML regex fallback for cost — matches "Total $XX.XX" or "Order total $XX.XX"
     if (cost == null) {

@@ -310,22 +310,23 @@
           const doc = new DOMParser().parseFromString(html, "text/html");
           let address = "";
           const nextDataEl = doc.querySelector("#__NEXT_DATA__");
+          let ndOrder = null;
           if (nextDataEl?.textContent) {
             try {
               const nd = JSON.parse(nextDataEl.textContent);
-              const str = JSON.stringify(nd);
-              const addrMatch = str.match(/"shippingAddress"\s*:\s*\{([^}]{0,500})\}/);
-              if (addrMatch) {
-                const addrObj = JSON.parse(`{${addrMatch[1]}}`);
-                const parts = [addrObj.addressLineOne, addrObj.addressLineTwo, addrObj.city, addrObj.state, addrObj.postalCode].filter(Boolean);
-                address = parts.join(" ").trim();
-              }
-              if (!address) {
-                const m = str.match(/"address1":"([^"]+)".*?"city":"([^"]+)".*?"state":"([^"]+)".*?"zip(?:Code)?":"([^"]+)"/);
-                if (m) address = `${m[1]} ${m[2]} ${m[3]} ${m[4]}`.trim();
+              ndOrder = nd?.props?.pageProps?.initialData?.data?.order ?? null;
+              if (ndOrder) {
+                const groupsKey = Object.keys(ndOrder).find((k) => k.startsWith("groups_"));
+                const firstGroup = groupsKey ? ndOrder[groupsKey]?.[0] : null;
+                const addrStr = firstGroup?.deliveryAddress?.address;
+                if (addrStr?.addressString) address = String(addrStr.addressString);
               }
             } catch {
             }
+          }
+          if (!address) {
+            const addrEl = doc.querySelector('[data-automation-id*="shipping-address"], [class*="shipping-address"], [class*="shippingAddress"]');
+            address = (addrEl?.textContent ?? "").replace(/\s+/g, " ").trim();
           }
           if (!address) {
             const addrEl = doc.querySelector('[data-automation-id*="shipping-address"], [class*="shipping-address"], [class*="shippingAddress"]');
@@ -371,24 +372,27 @@
             } catch {
             }
           }
-          if ((!orderDate || cost == null) && nextDataEl?.textContent) {
-            try {
-              const nd = JSON.parse(nextDataEl.textContent);
-              const str = JSON.stringify(nd);
-              if (!orderDate) {
-                for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
-                  const m = str.match(pat);
-                  if (m) {
-                    orderDate = m[1].split("T")[0];
-                    break;
-                  }
+          if (ndOrder) {
+            if (cost == null) {
+              const gt = ndOrder.priceDetails?.grandTotal;
+              if (gt?.value != null) cost = Number(gt.value);
+            }
+            if (!itemDescription) {
+              const groupsKey = Object.keys(ndOrder).find((k) => k.startsWith("groups_"));
+              const firstGroup = groupsKey ? ndOrder[groupsKey]?.[0] : null;
+              const firstItem = firstGroup?.items?.[0];
+              const name = firstItem?.productInfo?.name;
+              if (name) itemDescription = name.slice(0, 120);
+            }
+            if (!orderDate) {
+              const str = JSON.stringify(ndOrder);
+              for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
+                const m = str.match(pat);
+                if (m) {
+                  orderDate = m[1].split("T")[0];
+                  break;
                 }
               }
-              if (cost == null) {
-                const m = str.match(/"(?:totalAmount|financeTotal|orderTotal|grandTotal|chargeTotal|estimatedTotal|totalCharges|orderTotalAmount|total)"\s*:\s*([\d.]+)/);
-                if (m) cost = parseFloat(m[1]);
-              }
-            } catch {
             }
           }
           if (cost == null) {
