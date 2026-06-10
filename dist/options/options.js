@@ -178,6 +178,8 @@
 
   // src/lib/api.ts
   async function fetchUsers(trackerUrl) {
+    await chrome.runtime.sendMessage({ type: "PING" }).catch(() => {
+    });
     const res = await chrome.runtime.sendMessage({ type: "FETCH_USERS", trackerUrl });
     if (res?.error) throw new Error(res.error);
     return res.map((u) => ({ id: u.id, name: u.name }));

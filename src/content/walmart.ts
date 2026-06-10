@@ -224,7 +224,7 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
           }
         }
         if (cost == null) {
-          const m = str.match(/"(?:totalAmount|financeTotal|orderTotal|grandTotal)"\s*:\s*([\d.]+)/);
+          const m = str.match(/"(?:totalAmount|financeTotal|orderTotal|grandTotal|chargeTotal|estimatedTotal|totalCharges|orderTotalAmount|total)"\s*:\s*([\d.]+)/);
           if (m) cost = parseFloat(m[1]);
         }
         if (!itemDescription) {
@@ -234,15 +234,26 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
       } catch { /* not JSON */ }
     }
 
-    // __NEXT_DATA__ fallback for date
-    if (!orderDate && nextDataEl?.textContent) {
+    // __NEXT_DATA__ fallback for date and cost
+    if ((!orderDate || cost == null) && nextDataEl?.textContent) {
       try {
         const nd = JSON.parse(nextDataEl.textContent);
         const str = JSON.stringify(nd);
-        for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
-          const m = str.match(pat); if (m) { orderDate = m[1].split('T')[0]; break; }
+        if (!orderDate) {
+          for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
+            const m = str.match(pat); if (m) { orderDate = m[1].split('T')[0]; break; }
+          }
+        }
+        if (cost == null) {
+          const m = str.match(/"(?:totalAmount|financeTotal|orderTotal|grandTotal|chargeTotal|estimatedTotal|totalCharges|orderTotalAmount|total)"\s*:\s*([\d.]+)/);
+          if (m) cost = parseFloat(m[1]);
         }
       } catch { /* ignore */ }
+    }
+    // Raw HTML regex fallback for cost — matches "Total $XX.XX" or "Order total $XX.XX"
+    if (cost == null) {
+      const m = html.match(/(?:order\s+)?total[^$\d]{0,30}\$\s*([\d,]+\.?\d*)/i);
+      if (m) cost = parseMoney(m[1]);
     }
     if (!orderDate) {
       const m = html.match(/[Pp]laced[^<]{0,80}?(\d{4}-\d{2}-\d{2})/);

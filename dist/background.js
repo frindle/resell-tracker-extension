@@ -62,6 +62,10 @@
         );
       }
       chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message.type === "PING") {
+          sendResponse({ ok: true });
+          return;
+        }
         if (message.type === "TRIGGER_SYNC") {
           triggerSyncInBackground(message.platform, message.activeTabId, message.activeTabUrl).catch(
             (e) => console.error("[BG] triggerSyncInBackground error", e)
@@ -317,9 +321,23 @@
       }
       async function handleFetchUsers(trackerUrl) {
         const url = `${upgradeUrl(trackerUrl)}/api/users`;
-        const res = await fetch(url, { headers: { "Content-Type": "application/json" } });
-        if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => res.statusText)}`);
-        return res.json();
+        return new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("GET", url);
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try {
+                resolve(JSON.parse(xhr.responseText));
+              } catch {
+                reject(new Error("Invalid JSON"));
+              }
+            } else {
+              reject(new Error(`${xhr.status}: ${xhr.statusText}`));
+            }
+          };
+          xhr.onerror = () => reject(new Error(`NetworkError: ${url}`));
+          xhr.send();
+        });
       }
       async function handlePushOrders(trackerUrl, apiKey, userId, orders) {
         const url = `${upgradeUrl(trackerUrl)}/api/import`;
