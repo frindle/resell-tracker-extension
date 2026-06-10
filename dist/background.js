@@ -30,18 +30,32 @@
           }
         }
         if (!targetTabId) {
-          const existingTabs = await chrome.tabs.query({ url: `https://${config.host}/*` });
+          let existingTabs = [];
+          try {
+            existingTabs = await chrome.tabs.query({ url: `https://${config.host}/*` });
+          } catch {
+          }
           if (existingTabs.length > 0 && existingTabs[0].id) {
             targetTabId = existingTabs[0].id;
             await chrome.tabs.update(targetTabId, { active: true });
+            try {
+              if (existingTabs[0].windowId) await chrome.windows.update(existingTabs[0].windowId, { focused: true });
+            } catch {
+            }
           } else {
-            const newTab = await chrome.tabs.create({ url: config.url });
+            const newTab = await chrome.tabs.create({ url: config.url, active: true });
             if (!newTab.id) return;
             targetTabId = newTab.id;
+            try {
+              if (newTab.windowId) await chrome.windows.update(newTab.windowId, { focused: true });
+            } catch {
+            }
             await new Promise((resolve) => {
+              const timeout = setTimeout(resolve, 1e4);
               chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
                 if (tabId === targetTabId && info.status === "complete") {
                   chrome.tabs.onUpdated.removeListener(listener);
+                  clearTimeout(timeout);
                   resolve();
                 }
               });

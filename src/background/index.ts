@@ -28,19 +28,24 @@ async function triggerSyncInBackground(platform: string, activeTabId?: number, a
 
   if (!targetTabId) {
     // Look for an existing tab on the right host
-    const existingTabs = await chrome.tabs.query({ url: `https://${config.host}/*` });
+    let existingTabs: chrome.tabs.Tab[] = [];
+    try { existingTabs = await chrome.tabs.query({ url: `https://${config.host}/*` }); } catch { /* Firefox may not support url filter */ }
     if (existingTabs.length > 0 && existingTabs[0].id) {
       targetTabId = existingTabs[0].id;
       await chrome.tabs.update(targetTabId, { active: true });
+      try { if (existingTabs[0].windowId) await chrome.windows.update(existingTabs[0].windowId, { focused: true }); } catch { /* ignore */ }
     } else {
       // Open a new tab and wait for it to load
-      const newTab = await chrome.tabs.create({ url: config.url });
+      const newTab = await chrome.tabs.create({ url: config.url, active: true });
       if (!newTab.id) return;
       targetTabId = newTab.id;
+      try { if (newTab.windowId) await chrome.windows.update(newTab.windowId, { focused: true }); } catch { /* ignore */ }
       await new Promise<void>(resolve => {
+        const timeout = setTimeout(resolve, 10000); // fallback: proceed after 10s regardless
         chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
           if (tabId === targetTabId && info.status === 'complete') {
             chrome.tabs.onUpdated.removeListener(listener);
+            clearTimeout(timeout);
             resolve();
           }
         });
