@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.8
+- Fix blank toolbar icon in Firefox: PNG files declared RGB in header but contained RGBA data; Firefox is strict about this while Chrome is not
+
 ### 1.1.7
 - Fix Walmart order detail scraping: cost, item name, and shipping address now correctly extracted from `__NEXT_DATA__` JSON (versioned groups key, `priceDetails.grandTotal.value` for cost)
 
