@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.7
+- Fix Walmart order detail scraping: cost, item name, and shipping address now correctly extracted from `__NEXT_DATA__` JSON (versioned groups key, `priceDetails.grandTotal.value` for cost)
+
 ### 1.1.6
 - Fix Firefox blocking HTTP requests to local IPs — override default CSP that adds upgrade-insecure-requests
 
