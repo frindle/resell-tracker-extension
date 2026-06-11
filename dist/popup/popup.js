@@ -372,6 +372,112 @@
         });
       }
       init();
+      initDevMode();
+      function renderLogs(logs) {
+        const el = document.getElementById("devLog");
+        const count = document.getElementById("devLogCount");
+        count.textContent = `${logs.length} request${logs.length === 1 ? "" : "s"}`;
+        if (!logs.length) {
+          el.innerHTML = '<div style="padding:6px 8px;color:#4b5563;">No requests captured yet.</div>';
+          return;
+        }
+        el.innerHTML = logs.slice().reverse().map((e) => {
+          const statusColor = !e.status ? "#6b7280" : e.status < 300 ? "#4ade80" : e.status < 400 ? "#fbbf24" : "#f87171";
+          const path = (() => {
+            try {
+              return new URL(e.url).pathname;
+            } catch {
+              return e.url;
+            }
+          })();
+          return `<div style="padding:4px 8px;border-bottom:1px solid #1f2937;cursor:pointer;" data-id="${e.id}" class="dev-log-row">
+      <div style="display:flex;justify-content:space-between;">
+        <span style="color:#60a5fa;font-weight:bold;">${e.method}</span>
+        <span style="color:${statusColor}">${e.status ?? (e.error ? "ERR" : "\u2014")}</span>
+      </div>
+      <div style="color:#9ca3af;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${e.url}">${path}</div>
+      ${e.error ? `<div style="color:#f87171;">${e.error}</div>` : ""}
+    </div>`;
+        }).join("");
+        el.querySelectorAll(".dev-log-row").forEach((row) => {
+          row.addEventListener("click", () => {
+            const id = parseInt(row.dataset.id ?? "");
+            const entry = logs.find((l) => l.id === id);
+            if (!entry) return;
+            const existing = row.querySelector(".dev-detail");
+            if (existing) {
+              existing.remove();
+              return;
+            }
+            const detail = document.createElement("div");
+            detail.className = "dev-detail";
+            detail.style.cssText = "margin-top:4px;color:#d1d5db;word-break:break-all;white-space:pre-wrap;";
+            const parts = [];
+            if (entry.duration != null) parts.push(`\u23F1 ${entry.duration}ms`);
+            if (entry.reqBody) parts.push(`REQ: ${entry.reqBody}`);
+            if (entry.resBody) parts.push(`RES: ${entry.resBody}`);
+            detail.textContent = parts.join("\n") || "(no body)";
+            row.appendChild(detail);
+          });
+        });
+      }
+      async function initDevMode() {
+        const toggle = document.getElementById("devToggle");
+        const label = document.getElementById("devToggleLabel");
+        const controls = document.getElementById("devControls");
+        const urlInput = document.getElementById("devUrl");
+        const spyNowBtn = document.getElementById("devSpyNow");
+        const copyBtn = document.getElementById("devCopyJson");
+        const clearBtn = document.getElementById("devClear");
+        const stored = await chrome.storage.local.get(["devMode", "devModeUrl", "apiLogs"]);
+        const isOn = !!stored.devMode;
+        const savedUrl = stored.devModeUrl ?? "";
+        const logs = stored.apiLogs ?? [];
+        toggle.checked = isOn;
+        label.textContent = isOn ? "on" : "off";
+        controls.style.display = isOn ? "block" : "none";
+        urlInput.value = savedUrl;
+        renderLogs(logs);
+        toggle.addEventListener("change", async () => {
+          const on = toggle.checked;
+          label.textContent = on ? "on" : "off";
+          controls.style.display = on ? "block" : "none";
+          await chrome.storage.local.set({ devMode: on });
+        });
+        urlInput.addEventListener("change", async () => {
+          await chrome.storage.local.set({ devModeUrl: urlInput.value.trim() });
+        });
+        spyNowBtn.addEventListener("click", async () => {
+          await chrome.storage.local.set({ devModeUrl: urlInput.value.trim() });
+          const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (!tab?.id) return;
+          spyNowBtn.textContent = "Injecting\u2026";
+          chrome.runtime.sendMessage({ type: "DEV_SPY_NOW", tabId: tab.id }, () => {
+            spyNowBtn.textContent = "Injected \u2713";
+            setTimeout(() => {
+              spyNowBtn.textContent = "Spy Now";
+            }, 2e3);
+          });
+        });
+        copyBtn.addEventListener("click", async () => {
+          const s = await chrome.storage.local.get("apiLogs");
+          const text = JSON.stringify(s.apiLogs ?? [], null, 2);
+          await navigator.clipboard.writeText(text).catch(() => {
+          });
+          copyBtn.textContent = "Copied!";
+          setTimeout(() => {
+            copyBtn.textContent = "Copy JSON";
+          }, 1500);
+        });
+        clearBtn.addEventListener("click", () => {
+          chrome.runtime.sendMessage({ type: "DEV_LOGS_CLEAR" }, () => {
+            renderLogs([]);
+          });
+        });
+        chrome.storage.onChanged.addListener((changes) => {
+          if (changes.apiLogs?.newValue) renderLogs(changes.apiLogs.newValue);
+        });
+      }
     }
   });
   require_popup();

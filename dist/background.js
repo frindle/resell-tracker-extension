@@ -8,7 +8,7 @@
   // src/background/index.ts
   var require_background = __commonJS({
     "src/background/index.ts"() {
-      var ICON_PATHS = { 16: "icons/icon16.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
+      var ICON_PATHS = { 16: "icons/icon16.png", 32: "icons/icon32.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
       var extAction = (globalThis.browser ?? chrome).action;
       function setToolbarIcon() {
         extAction?.setIcon({ path: ICON_PATHS });
@@ -193,6 +193,50 @@
           handlePushBigskyOrders(message.trackerUrl, message.apiKey, message.userId, message.groups).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
           return true;
         }
+        if (message.type === "API_LOG") {
+          appendApiLog(message.entry).catch(() => {
+          });
+          return;
+        }
+        if (message.type === "DEV_LOGS_CLEAR") {
+          chrome.storage.local.set({ apiLogs: [], apiLogNextId: 0 }).then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
+          return true;
+        }
+        if (message.type === "DEV_SPY_NOW") {
+          injectSpy(message.tabId).then(() => sendResponse({ ok: true })).catch((e) => sendResponse({ error: String(e) }));
+          return true;
+        }
+      });
+      async function appendApiLog(entry) {
+        const stored = await chrome.storage.local.get(["apiLogs", "apiLogNextId"]);
+        const logs = stored.apiLogs ?? [];
+        const nextId = stored.apiLogNextId ?? 0;
+        logs.push({ ...entry, id: nextId });
+        if (logs.length > 200) logs.splice(0, logs.length - 200);
+        await chrome.storage.local.set({ apiLogs: logs, apiLogNextId: nextId + 1 });
+      }
+      async function injectSpy(tabId) {
+        await chrome.scripting.executeScript({ target: { tabId }, files: ["content/api-spy-bridge.js"] });
+        await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["content/api-spy-main.js"] });
+      }
+      function urlMatchesPattern(tabUrl, pattern) {
+        if (!pattern) return false;
+        try {
+          const tabHost = new URL(tabUrl).hostname;
+          const pat = pattern.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+          return tabHost === pat || tabHost.endsWith(`.${pat}`);
+        } catch {
+          return false;
+        }
+      }
+      chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
+        if (info.status !== "complete" || !tab.url) return;
+        const stored = await chrome.storage.local.get(["devMode", "devModeUrl"]);
+        if (!stored.devMode) return;
+        const pattern = stored.devModeUrl ?? "";
+        if (!urlMatchesPattern(tab.url, pattern)) return;
+        injectSpy(tabId).catch(() => {
+        });
       });
       async function inPageGetMsalToken() {
         const w = window;

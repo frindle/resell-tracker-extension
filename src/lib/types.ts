@@ -36,6 +36,18 @@ export interface SyncResult {
   error?: string;
 }
 
+export interface ApiLogEntry {
+  id: number;
+  ts: number;
+  method: string;
+  url: string;
+  status?: number;
+  reqBody?: string;
+  resBody?: string;
+  error?: string;
+  duration?: number;
+}
+
 export type SyncMessage =
   | { type: 'SYNC_STARTED'; platform: Platform }
   | { type: 'SYNC_PROGRESS'; platform: Platform; scraped: number; message: string }

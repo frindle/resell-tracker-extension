@@ -195,6 +195,53 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(e => sendResponse({ error: String(e) }));
     return true;
   }
+
+  if (message.type === 'API_LOG') {
+    appendApiLog(message.entry as Record<string, unknown>).catch(() => {});
+    return;
+  }
+
+  if (message.type === 'DEV_LOGS_CLEAR') {
+    chrome.storage.local.set({ apiLogs: [], apiLogNextId: 0 }).then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (message.type === 'DEV_SPY_NOW') {
+    injectSpy(message.tabId as number).then(() => sendResponse({ ok: true })).catch(e => sendResponse({ error: String(e) }));
+    return true;
+  }
+});
+
+async function appendApiLog(entry: Record<string, unknown>) {
+  const stored = await chrome.storage.local.get(['apiLogs', 'apiLogNextId']);
+  const logs = (stored.apiLogs as Record<string, unknown>[] | undefined) ?? [];
+  const nextId = (stored.apiLogNextId as number | undefined) ?? 0;
+  logs.push({ ...entry, id: nextId });
+  if (logs.length > 200) logs.splice(0, logs.length - 200);
+  await chrome.storage.local.set({ apiLogs: logs, apiLogNextId: nextId + 1 });
+}
+
+async function injectSpy(tabId: number) {
+  await chrome.scripting.executeScript({ target: { tabId }, files: ['content/api-spy-bridge.js'] });
+  await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', files: ['content/api-spy-main.js'] });
+}
+
+function urlMatchesPattern(tabUrl: string, pattern: string): boolean {
+  if (!pattern) return false;
+  try {
+    const tabHost = new URL(tabUrl).hostname;
+    const pat = pattern.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    return tabHost === pat || tabHost.endsWith(`.${pat}`);
+  } catch { return false; }
+}
+
+chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
+  if (info.status !== 'complete' || !tab.url) return;
+  const stored = await chrome.storage.local.get(['devMode', 'devModeUrl']);
+  if (!stored.devMode) return;
+  const pattern = (stored.devModeUrl as string | undefined) ?? '';
+  if (!urlMatchesPattern(tab.url, pattern)) return;
+  injectSpy(tabId).catch(() => {});
 });
 
 // Runs in MAIN world — finds Costco's MSAL instance and calls acquireTokenSilent

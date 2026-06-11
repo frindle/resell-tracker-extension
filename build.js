@@ -12,12 +12,14 @@ const contentEntries = {
   'content/walmart': 'src/content/walmart.ts',
   'content/costco': 'src/content/costco.ts',
   'content/bigskybuyers': 'src/content/bigskybuyers.ts',
+  'content/api-spy-bridge': 'src/content/api-spy-bridge.ts',
   'options/options': 'src/options/options.ts',
   'popup/popup': 'src/popup/popup.ts',
 };
 // MAIN world scripts must NOT include the polyfill — they run as page scripts
 const mainWorldEntries = {
   'content/costco-interceptor': 'src/content/costco-interceptor.ts',
+  'content/api-spy-main': 'src/content/api-spy-main.ts',
 };
 
 const polyfillPath = path.resolve('node_modules/webextension-polyfill/dist/browser-polyfill.min.js');
