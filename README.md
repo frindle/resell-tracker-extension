@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.12
+- Fix pinned toolbar icon missing on HiDPI/Retina displays: add 32px icon variant Firefox uses for high-DPI toolbar
+
 ### 1.1.11
 - Fix blank toolbar icon: source PNG files were empty/transparent; replaced with dark gray background and white $ symbol matching app theme
 

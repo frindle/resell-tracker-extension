@@ -1,6 +1,6 @@
 import type { ScrapedOrder } from '../lib/types';
 
-const ICON_PATHS = { 16: 'icons/icon16.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' };
+const ICON_PATHS = { 16: 'icons/icon16.png', 32: 'icons/icon32.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' };
 
 // Firefox background pages expose browser.action natively; chrome.action is a Chrome/compat API.
 // Use whichever is available so the icon is set correctly in both browsers.

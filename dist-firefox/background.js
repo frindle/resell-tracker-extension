@@ -8,7 +8,7 @@
   // src/background/index.ts
   var require_background = __commonJS({
     "src/background/index.ts"() {
-      var ICON_PATHS = { 16: "icons/icon16.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
+      var ICON_PATHS = { 16: "icons/icon16.png", 32: "icons/icon32.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
       var extAction = (globalThis.browser ?? chrome).action;
       function setToolbarIcon() {
         extAction?.setIcon({ path: ICON_PATHS });
