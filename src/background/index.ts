@@ -1,7 +1,13 @@
 import type { ScrapedOrder } from '../lib/types';
 
+const ICON_PATHS = { 16: 'icons/icon16.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' };
+
+// Firefox MV3 often ignores default_icon from the manifest — set it explicitly at startup.
+chrome.action.setIcon({ path: ICON_PATHS });
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[Reselling Tracker] Extension installed.');
+  chrome.action.setIcon({ path: ICON_PATHS });
 });
 
 const PLATFORM_CONFIG: Record<string, { host: string; url: string; script: string }> = {

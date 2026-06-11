@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Reselling Tracker Sync",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "description": "Auto-syncs Amazon and Walmart orders to your Resell Tracker instance",
   "permissions": [
     "storage",
@@ -25,21 +25,27 @@
       "matches": [
         "https://www.amazon.com/*"
       ],
-      "js": ["content/amazon.js"],
+      "js": [
+        "content/amazon.js"
+      ],
       "run_at": "document_idle"
     },
     {
       "matches": [
         "https://www.walmart.com/*"
       ],
-      "js": ["content/walmart.js"],
+      "js": [
+        "content/walmart.js"
+      ],
       "run_at": "document_idle"
     },
     {
       "matches": [
         "https://www.costco.com/myaccount*"
       ],
-      "js": ["content/costco-interceptor.js"],
+      "js": [
+        "content/costco-interceptor.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN"
     },
@@ -47,14 +53,18 @@
       "matches": [
         "https://www.costco.com/myaccount*"
       ],
-      "js": ["content/costco.js"],
+      "js": [
+        "content/costco.js"
+      ],
       "run_at": "document_idle"
     },
     {
       "matches": [
         "https://www.bigskybuyers.com/*"
       ],
-      "js": ["content/bigskybuyers.js"],
+      "js": [
+        "content/bigskybuyers.js"
+      ],
       "run_at": "document_idle"
     }
   ],
