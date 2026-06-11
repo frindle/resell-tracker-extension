@@ -8,10 +8,17 @@
   // src/background/index.ts
   var require_background = __commonJS({
     "src/background/index.ts"() {
-      var ICON_PATHS = { 16: "icons/icon16.png", 32: "icons/icon32.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
-      var extAction = (globalThis.browser ?? chrome).action;
+      var ICON_PATHS_CHROME = { 16: "icons/icon16.png", 32: "icons/icon32.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
+      var ICON_PATH_FIREFOX = "icons/icon.svg";
+      var _browser = globalThis.browser;
+      var extAction = (_browser ?? chrome).action;
+      var isFirefox = typeof _browser !== "undefined";
       function setToolbarIcon() {
-        extAction?.setIcon({ path: ICON_PATHS });
+        if (isFirefox) {
+          extAction?.setIcon({ path: ICON_PATH_FIREFOX });
+        } else {
+          extAction?.setIcon({ path: ICON_PATHS_CHROME });
+        }
       }
       setToolbarIcon();
       chrome.runtime.onInstalled.addListener(() => {

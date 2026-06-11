@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.14
+- Fix Firefox pinned toolbar icon: use SVG instead of PNG for action icon (Firefox supports SVG; PNG toolbar rendering was silently failing)
+
 ### 1.1.13
 - Add dev mode API spy: toggle in popup, enter any hostname, click "Spy Now" to intercept all fetch/XHR on that tab; logs show live in popup with click-to-expand request/response bodies and Copy JSON export
 

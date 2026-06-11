@@ -56,6 +56,8 @@ function buildManifest(target) {
     base.content_security_policy = {
       extension_pages: "script-src 'self'; object-src 'self';",
     };
+    // Firefox supports SVG for action icons; use it to avoid PNG toolbar rendering issues
+    base.action.default_icon = 'icons/icon.svg';
   }
   return JSON.stringify(base, null, 2);
 }

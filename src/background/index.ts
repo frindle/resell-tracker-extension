@@ -1,12 +1,19 @@
 import type { ScrapedOrder } from '../lib/types';
 
-const ICON_PATHS = { 16: 'icons/icon16.png', 32: 'icons/icon32.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' };
+const ICON_PATHS_CHROME = { 16: 'icons/icon16.png', 32: 'icons/icon32.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' };
+const ICON_PATH_FIREFOX = 'icons/icon.svg';
 
-// Firefox background pages expose browser.action natively; chrome.action is a Chrome/compat API.
-// Use whichever is available so the icon is set correctly in both browsers.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const extAction = ((globalThis as any).browser ?? chrome).action as typeof chrome.action;
-function setToolbarIcon() { extAction?.setIcon({ path: ICON_PATHS }); }
+const _browser = (globalThis as any).browser;
+const extAction = (_browser ?? chrome).action as typeof chrome.action;
+const isFirefox = typeof _browser !== 'undefined';
+function setToolbarIcon() {
+  if (isFirefox) {
+    extAction?.setIcon({ path: ICON_PATH_FIREFOX } as Parameters<typeof chrome.action.setIcon>[0]);
+  } else {
+    extAction?.setIcon({ path: ICON_PATHS_CHROME });
+  }
+}
 
 setToolbarIcon();
 chrome.runtime.onInstalled.addListener(() => {

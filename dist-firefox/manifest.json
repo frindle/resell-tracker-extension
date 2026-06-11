@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Reselling Tracker Sync",
-  "version": "1.1.13",
+  "version": "1.1.14",
   "description": "Auto-syncs Amazon and Walmart orders to your Resell Tracker instance",
   "permissions": [
     "storage",
@@ -73,12 +73,7 @@
   "action": {
     "default_popup": "popup/popup.html",
     "default_title": "Reselling Tracker Sync",
-    "default_icon": {
-      "16": "icons/icon16.png",
-      "32": "icons/icon32.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
-    }
+    "default_icon": "icons/icon.svg"
   },
   "options_ui": {
     "page": "options/options.html",
