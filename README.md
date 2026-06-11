@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.11
+- Fix blank toolbar icon: source PNG files were empty/transparent; replaced with dark gray background and white $ symbol matching app theme
+
 ### 1.1.10
 - Fix blank toolbar icon in Firefox: use `browser.action.setIcon()` (Firefox native API) instead of `chrome.action.setIcon()` which is not available in Firefox background pages
 

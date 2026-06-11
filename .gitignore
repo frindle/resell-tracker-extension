@@ -1,6 +1,5 @@
 node_modules/
 *.zip
 .memsearch/
-dist-firefox/
 .env
 amo_sign.py
