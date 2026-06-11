@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.10
+- Fix blank toolbar icon in Firefox: use `browser.action.setIcon()` (Firefox native API) instead of `chrome.action.setIcon()` which is not available in Firefox background pages
+
 ### 1.1.9
 - Fix blank toolbar icon in Firefox MV3: call `chrome.action.setIcon()` explicitly at startup since Firefox often ignores `default_icon` in the manifest
 

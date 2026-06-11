@@ -2,13 +2,18 @@ import type { ScrapedOrder } from '../lib/types';
 
 const ICON_PATHS = { 16: 'icons/icon16.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' };
 
-// Firefox MV3 often ignores default_icon from the manifest — set it explicitly at startup.
-chrome.action.setIcon({ path: ICON_PATHS });
+// Firefox background pages expose browser.action natively; chrome.action is a Chrome/compat API.
+// Use whichever is available so the icon is set correctly in both browsers.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const extAction = ((globalThis as any).browser ?? chrome).action as typeof chrome.action;
+function setToolbarIcon() { extAction?.setIcon({ path: ICON_PATHS }); }
 
+setToolbarIcon();
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[Reselling Tracker] Extension installed.');
-  chrome.action.setIcon({ path: ICON_PATHS });
+  setToolbarIcon();
 });
+chrome.runtime.onStartup.addListener(setToolbarIcon);
 
 const PLATFORM_CONFIG: Record<string, { host: string; url: string; script: string }> = {
   Amazon: { host: 'www.amazon.com', url: 'https://www.amazon.com/your-orders/orders', script: 'content/amazon.js' },
