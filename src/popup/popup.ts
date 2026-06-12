@@ -318,6 +318,18 @@ async function initDevMode() {
     });
   });
 
+  document.getElementById('devSpyReload')?.addEventListener('click', async () => {
+    await chrome.storage.local.set({ devModeUrl: urlInput.value.trim() });
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return;
+    const btn = document.getElementById('devSpyReload') as HTMLButtonElement;
+    btn.textContent = 'Injecting…';
+    chrome.runtime.sendMessage({ type: 'DEV_SPY_NOW', tabId: tab.id }, () => {
+      chrome.tabs.reload(tab.id!);
+      btn.textContent = 'Spy & Reload';
+    });
+  });
+
   copyBtn.addEventListener('click', async () => {
     const s = await chrome.storage.local.get('apiLogs');
     const text = JSON.stringify((s.apiLogs as ApiLogEntry[] | undefined) ?? [], null, 2);

@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.17
+- Add "Spy & Reload" button in dev mode: injects the API spy then immediately reloads the tab, capturing page-load requests in one click
+
 ### 1.1.16
 - Add pop-out button (↗) to open popup as a persistent standalone window that stays open during syncs and dev mode spying
 
