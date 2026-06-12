@@ -84,77 +84,16 @@ async function getMsalToken(): Promise<string> {
 
 async function getAuth(): Promise<{ token: string; clientId: string; warehouseNumber: string } | null> {
   try {
-    // Try the intercepted token first (set by costco-interceptor.js in MAIN world)
+    // Only the intercepted token works for the API — /gettoken and MSAL fallbacks return id_tokens
+    // which are rejected by ecom-api.costco.com with 401. The interceptor captures the real access token
+    // from Costco's own XHR calls when the orders page loads.
     const intercepted = await chrome.runtime.sendMessage({ type: 'GET_COSTCO_AUTH' }).catch(() => null) as { token: string; clientId: string } | null;
     if (intercepted?.token && intercepted?.clientId) {
       console.log('[CST] using intercepted auth token');
       return { token: intercepted.token, clientId: intercepted.clientId, warehouseNumber: getWarehouseNumber() || '0' };
     }
-    console.log('[CST] no intercepted token — trying live MSAL instance…');
-
-    // Try /gettoken — Costco's own same-origin endpoint that may return the right API token
-    try {
-      const gtRes = await fetch('/gettoken', { credentials: 'include' });
-      console.log('[CST] /gettoken status:', gtRes.status);
-      if (gtRes.ok) {
-        const gtData = await gtRes.json();
-        console.log('[CST] /gettoken keys:', Object.keys(gtData));
-        const gtToken = gtData.id_token ?? gtData.access_token ?? gtData.token ?? '';
-        if (gtToken) {
-          let clientId = location.href.match(/\/app\/([0-9a-f-]{36})\//i)?.[1] ?? '';
-          try {
-            const p = JSON.parse(atob(gtToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-            console.log('[CST] /gettoken token aud:', p.aud, 'iss:', p.iss, 'exp:', new Date(p.exp * 1000).toISOString());
-            if (!clientId) clientId = p.clientId ?? '';
-          } catch { /* skip */ }
-          console.log('[CST] using /gettoken token, clientId:', clientId);
-          return { token: gtToken, clientId, warehouseNumber: getWarehouseNumber() || '0' };
-        }
-      }
-    } catch (e) {
-      console.error('[CST] /gettoken failed', e);
-    }
-
-    // Fall back to MSAL refresh token grant
-    let token = await getMsalToken();
-    console.log('[CST] msal token found:', !!token);
-    if (token) {
-      try {
-        const p = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-        console.log('[CST] msal token aud:', p.aud, 'exp:', new Date(p.exp * 1000).toISOString());
-      } catch { /* skip */ }
-    }
-
-    // Fall back to /gettoken
-    if (!token) {
-      const res = await fetch('/gettoken', { credentials: 'include' });
-      if (!res.ok) { console.error('[CST] gettoken returned', res.status); return null; }
-      const data = await res.json();
-      token = data.id_token ?? data.access_token ?? data.token ?? '';
-      if (!token) { console.error('[CST] no token in gettoken response', Object.keys(data)); return null; }
-    }
-
-    // costco-x-wcs-clientid is the Costco account ID, not the OAuth app client ID.
-    // It's in the URL: /myaccount/#/app/<accountId>/...
-    let clientId = location.href.match(/\/app\/([0-9a-f-]{36})\//i)?.[1] ?? '';
-    if (!clientId) {
-      // Fall back: extract from /gettoken JWT where clientId = account ID
-      try {
-        const res2 = await fetch('/gettoken', { credentials: 'include' });
-        if (res2.ok) {
-          const data2 = await res2.json();
-          const tok2 = data2.id_token ?? data2.access_token ?? '';
-          const payload2 = JSON.parse(atob(tok2.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-          clientId = payload2.clientId ?? '';
-        }
-      } catch { /* use empty */ }
-    }
-
-    // Find warehouse number — check cookies and localStorage
-    const warehouseNumber = getWarehouseNumber();
-    console.log('[CST] auth ok, clientId:', clientId, 'warehouse:', warehouseNumber || '(not found, using 0)');
-
-    return { token, clientId, warehouseNumber: warehouseNumber || '0' };
+    console.log('[CST] no intercepted token — hard-refresh the Costco orders page and wait for orders to load, then sync');
+    return null;
   } catch (e) {
     console.error('[CST] getAuth failed', e);
     return null;
@@ -365,7 +304,7 @@ async function runSync() {
 
   const auth = await getAuth();
   if (!auth) {
-    sendMessage({ type: 'SYNC_ERROR', platform: 'Costco', error: 'Could not get Costco auth token — make sure you are logged in.' });
+    sendMessage({ type: 'SYNC_ERROR', platform: 'Costco', error: 'No auth token — hard-refresh the Costco orders page, wait for orders to load, then sync.' });
     setBadge('!', '#ef4444');
     syncing = false;
     return;
