@@ -430,19 +430,9 @@ function upgradeUrl(trackerUrl: string): string {
 
 async function handleFetchUsers(trackerUrl: string) {
   const url = `${upgradeUrl(trackerUrl)}/api/users`;
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('GET', url);
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try { resolve(JSON.parse(xhr.responseText)); } catch { reject(new Error('Invalid JSON')); }
-      } else {
-        reject(new Error(`${xhr.status}: ${xhr.statusText}`));
-      }
-    };
-    xhr.onerror = () => reject(new Error(`NetworkError: ${url}`));
-    xhr.send();
-  });
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${res.status}: ${res.statusText}`);
+  return res.json();
 }
 
 async function handlePushCostcoReceipts(trackerUrl: string, apiKey: string, receipts: Record<string, unknown>[]) {
