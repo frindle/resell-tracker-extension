@@ -244,8 +244,8 @@ async function fetchCapturedReceipts(): Promise<{ list: Record<string, unknown>[
   }
 }
 
-async function pushReceipts(trackerUrl: string, apiKey: string, receipts: Record<string, unknown>[]): Promise<{ linked: number; unlinked: number; skipped: number }> {
-  const res = await chrome.runtime.sendMessage({ type: 'PUSH_COSTCO_RECEIPTS', trackerUrl, apiKey, receipts });
+async function pushReceipts(trackerUrl: string, apiKey: string, userId: string | number, receipts: Record<string, unknown>[]): Promise<{ linked: number; unlinked: number; skipped: number }> {
+  const res = await chrome.runtime.sendMessage({ type: 'PUSH_COSTCO_RECEIPTS', trackerUrl, apiKey, userId, receipts });
   if (res?.error) throw new Error(res.error);
   return res;
 }
@@ -376,7 +376,7 @@ async function runSync() {
       }
       console.log('[CST] captured receipts:', toSend.length);
       if (toSend.length > 0) {
-        receiptResult = await pushReceipts(settings.trackerUrl, settings.apiKey ?? '', toSend);
+        receiptResult = await pushReceipts(settings.trackerUrl, settings.apiKey ?? '', settings.userId, toSend);
       }
     } catch (e) {
       console.error('[CST] receipt sync failed (non-fatal)', e);

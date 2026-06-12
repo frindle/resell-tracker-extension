@@ -217,7 +217,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'PUSH_COSTCO_RECEIPTS') {
-    handlePushCostcoReceipts(message.trackerUrl, message.apiKey, message.receipts as Record<string, unknown>[])
+    handlePushCostcoReceipts(message.trackerUrl, message.apiKey, message.userId, message.receipts as Record<string, unknown>[])
       .then(sendResponse)
       .catch(e => sendResponse({ error: String(e) }));
     return true;
@@ -450,13 +450,14 @@ async function handleFetchUsers(trackerUrl: string) {
   return res.json();
 }
 
-async function handlePushCostcoReceipts(trackerUrl: string, apiKey: string, receipts: Record<string, unknown>[]) {
+async function handlePushCostcoReceipts(trackerUrl: string, apiKey: string, userId: string | number | undefined, receipts: Record<string, unknown>[]) {
   const url = `${upgradeUrl(trackerUrl)}/api/costco/receipts`;
   const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+      ...(userId != null ? { 'x-user-id': String(userId) } : {}),
     },
     body: JSON.stringify(receipts),
   });

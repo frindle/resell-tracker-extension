@@ -154,6 +154,22 @@
           }).then((results) => sendResponse(results[0]?.result ?? null)).catch(() => sendResponse(null));
           return true;
         }
+        if (message.type === "GET_CAPTURED_RECEIPTS") {
+          const tabId = sender.tab?.id;
+          if (!tabId) {
+            sendResponse(null);
+            return;
+          }
+          chrome.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            func: () => ({
+              list: window.__costcoReceiptList ?? [],
+              details: window.__costcoReceiptDetails ?? {}
+            })
+          }).then((results) => sendResponse(results[0]?.result ?? null)).catch(() => sendResponse(null));
+          return true;
+        }
         if (message.type === "GET_MSAL_TOKEN") {
           const tabId = sender.tab?.id;
           if (!tabId) {
@@ -202,7 +218,7 @@
           return true;
         }
         if (message.type === "PUSH_COSTCO_RECEIPTS") {
-          handlePushCostcoReceipts(message.trackerUrl, message.apiKey, message.receipts).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+          handlePushCostcoReceipts(message.trackerUrl, message.apiKey, message.userId, message.receipts).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
           return true;
         }
         if (message.type === "PUSH_BIGSKY_ORDERS") {
@@ -409,31 +425,18 @@
       }
       async function handleFetchUsers(trackerUrl) {
         const url = `${upgradeUrl(trackerUrl)}/api/users`;
-        return new Promise((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open("GET", url);
-          xhr.onload = () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              try {
-                resolve(JSON.parse(xhr.responseText));
-              } catch {
-                reject(new Error("Invalid JSON"));
-              }
-            } else {
-              reject(new Error(`${xhr.status}: ${xhr.statusText}`));
-            }
-          };
-          xhr.onerror = () => reject(new Error(`NetworkError: ${url}`));
-          xhr.send();
-        });
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`${res.status}: ${res.statusText}`);
+        return res.json();
       }
-      async function handlePushCostcoReceipts(trackerUrl, apiKey, receipts) {
+      async function handlePushCostcoReceipts(trackerUrl, apiKey, userId, receipts) {
         const url = `${upgradeUrl(trackerUrl)}/api/costco/receipts`;
         const res = await fetch(url, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...apiKey ? { "X-API-Key": apiKey } : {}
+            ...apiKey ? { "X-API-Key": apiKey } : {},
+            ...userId != null ? { "x-user-id": String(userId) } : {}
           },
           body: JSON.stringify(receipts)
         });
