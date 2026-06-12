@@ -373,6 +373,19 @@
       }
       init();
       initDevMode();
+      if (new URLSearchParams(location.search).get("standalone")) {
+        const btn = document.getElementById("popOutBtn");
+        if (btn) btn.style.display = "none";
+      } else {
+        document.getElementById("popOutBtn")?.addEventListener("click", () => {
+          chrome.windows.create({
+            url: chrome.runtime.getURL("popup.html?standalone=1"),
+            type: "popup",
+            width: 340,
+            height: 680
+          });
+        });
+      }
       function renderLogs(logs) {
         const el = document.getElementById("devLog");
         const count = document.getElementById("devLogCount");
@@ -455,8 +468,19 @@
           chrome.runtime.sendMessage({ type: "DEV_SPY_NOW", tabId: tab.id }, () => {
             spyNowBtn.textContent = "Injected \u2713";
             setTimeout(() => {
-              spyNowBtn.textContent = "Spy Now";
+              spyNowBtn.textContent = "Spy";
             }, 2e3);
+          });
+        });
+        document.getElementById("devSpyReload")?.addEventListener("click", async () => {
+          await chrome.storage.local.set({ devModeUrl: urlInput.value.trim() });
+          const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (!tab?.id) return;
+          const btn = document.getElementById("devSpyReload");
+          btn.textContent = "Injecting\u2026";
+          chrome.runtime.sendMessage({ type: "DEV_SPY_NOW", tabId: tab.id }, () => {
+            chrome.tabs.reload(tab.id);
+            btn.textContent = "Spy+Reload";
           });
         });
         copyBtn.addEventListener("click", async () => {

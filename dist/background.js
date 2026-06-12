@@ -245,7 +245,8 @@
         }
       }
       chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
-        if (info.status !== "complete" || !tab.url) return;
+        if (!tab.url) return;
+        if (info.status !== "loading" && info.status !== "complete") return;
         const stored = await chrome.storage.local.get(["devMode", "devModeUrl"]);
         if (!stored.devMode) return;
         const pattern = stored.devModeUrl ?? "";

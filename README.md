@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.19
+- Dev mode: move hostname input to its own row, show Spy and Spy+Reload as equal-width buttons below
+
 ### 1.1.18
 - Fix dev mode spy missing page-load requests: inject at navigation start (loading) instead of after page completes
 

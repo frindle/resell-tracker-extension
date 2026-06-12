@@ -26,7 +26,10 @@
   </style>
 </head>
 <body>
-  <h1>Reselling Tracker Sync</h1>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+    <h1 style="margin:0;">Reselling Tracker Sync</h1>
+    <button id="popOutBtn" title="Pop out" style="background:none;border:none;color:#4b5563;cursor:pointer;font-size:0.85rem;padding:0 2px;line-height:1;">↗</button>
+  </div>
   <p class="sub">Auto-syncs when you visit Amazon or Walmart orders.</p>
   <div id="notConfigured" style="display:none">⚠ Tracker URL or user not set — open Settings.</div>
   <div id="rows">
@@ -86,10 +89,11 @@
       </label>
     </div>
     <div id="devControls" style="display:none;">
+      <input id="devUrl" type="text" placeholder="hostname (e.g. cardcenter.cc)"
+        style="width:100%;background:#1f2937;border:1px solid #374151;border-radius:4px;color:#e5e5e5;font-size:0.7rem;padding:4px 6px;outline:none;margin-bottom:4px;" />
       <div style="display:flex;gap:4px;margin-bottom:6px;">
-        <input id="devUrl" type="text" placeholder="hostname (e.g. cardcenter.cc)"
-          style="flex:1;background:#1f2937;border:1px solid #374151;border-radius:4px;color:#e5e5e5;font-size:0.7rem;padding:3px 6px;outline:none;" />
-        <button id="devSpyNow" style="font-size:0.7rem;background:#1d4ed8;color:#fff;border:none;border-radius:4px;padding:3px 8px;cursor:pointer;white-space:nowrap;">Spy Now</button>
+        <button id="devSpyNow" style="flex:1;font-size:0.7rem;background:#1d4ed8;color:#fff;border:none;border-radius:4px;padding:4px 0;cursor:pointer;">Spy</button>
+        <button id="devSpyReload" style="flex:1;font-size:0.7rem;background:#065f46;color:#fff;border:none;border-radius:4px;padding:4px 0;cursor:pointer;">Spy + Reload</button>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
         <span id="devLogCount" style="font-size:0.7rem;color:#4b5563;">0 requests</span>
