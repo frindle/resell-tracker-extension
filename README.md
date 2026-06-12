@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.16
+- Add pop-out button (↗) to open popup as a persistent standalone window that stays open during syncs and dev mode spying
+
 ### 1.1.15
 - Fix cancelRequested not reset on page-navigation sync resume (could permanently abort syncs after a cancel)
 - Fix onUpdated listener leak when 10s tab-load timeout fires before page completes

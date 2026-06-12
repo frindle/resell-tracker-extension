@@ -218,6 +218,21 @@ async function init() {
 init();
 initDevMode();
 
+// Hide pop-out button when already running as a standalone window
+if (new URLSearchParams(location.search).get('standalone')) {
+  const btn = document.getElementById('popOutBtn');
+  if (btn) btn.style.display = 'none';
+} else {
+  document.getElementById('popOutBtn')?.addEventListener('click', () => {
+    chrome.windows.create({
+      url: chrome.runtime.getURL('popup.html?standalone=1'),
+      type: 'popup',
+      width: 340,
+      height: 680,
+    });
+  });
+}
+
 // ── Dev Mode ──────────────────────────────────────────────────────────────────
 
 function renderLogs(logs: ApiLogEntry[]) {
