@@ -314,7 +314,7 @@ async function initDevMode() {
     spyNowBtn.textContent = 'Injecting…';
     chrome.runtime.sendMessage({ type: 'DEV_SPY_NOW', tabId: tab.id }, () => {
       spyNowBtn.textContent = 'Injected ✓';
-      setTimeout(() => { spyNowBtn.textContent = 'Spy Now'; }, 2000);
+      setTimeout(() => { spyNowBtn.textContent = 'Spy'; }, 2000);
     });
   });
 
@@ -326,7 +326,7 @@ async function initDevMode() {
     btn.textContent = 'Injecting…';
     chrome.runtime.sendMessage({ type: 'DEV_SPY_NOW', tabId: tab.id }, () => {
       chrome.tabs.reload(tab.id!);
-      btn.textContent = 'Spy & Reload';
+      btn.textContent = 'Spy+Reload';
     });
   });
 

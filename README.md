@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.18
+- Fix dev mode spy missing page-load requests: inject at navigation start (loading) instead of after page completes
+
 ### 1.1.17
 - Add "Spy & Reload" button in dev mode: injects the API spy then immediately reloads the tab, capturing page-load requests in one click
 

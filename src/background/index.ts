@@ -251,7 +251,9 @@ function urlMatchesPattern(tabUrl: string, pattern: string): boolean {
 }
 
 chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
-  if (info.status !== 'complete' || !tab.url) return;
+  if (!tab.url) return;
+  // Inject at 'loading' to wrap fetch/XHR before page scripts fire; retry at 'complete' as fallback
+  if (info.status !== 'loading' && info.status !== 'complete') return;
   const stored = await chrome.storage.local.get(['devMode', 'devModeUrl']);
   if (!stored.devMode) return;
   const pattern = (stored.devModeUrl as string | undefined) ?? '';
