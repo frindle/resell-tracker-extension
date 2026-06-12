@@ -480,7 +480,6 @@
               pageNum++;
             }
           }
-          clearState();
           if (allOrders.length > 0) {
             for (let i = 0; i < allOrders.length; i++) {
               if (cancelRequested) {
@@ -500,12 +499,14 @@
             }
           }
           if (allOrders.length === 0) {
+            clearState();
             setBadge("\u2014");
             sendMessage({ type: "SYNC_DONE", result: { platform: "Amazon", scraped: 0, imported: 0, updated: 0 } });
             return;
           }
           try {
             const result = await pushOrders(state.trackerUrl, state.apiKey, state.userId, allOrders);
+            clearState();
             await setLastSync("amazon", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
             setBadge(`+${result.imported ?? 0}`, "#22c55e");
             sendMessage({ type: "SYNC_DONE", result: { platform: "Amazon", scraped: allOrders.length, ...result } });

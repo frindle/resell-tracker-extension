@@ -246,9 +246,9 @@
           if (dateMatch) {
             let rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear}`;
             orderDate = new Date(rawDateStr);
-            const tomorrow = /* @__PURE__ */ new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            if (!isNaN(orderDate.getTime()) && orderDate > tomorrow) {
+            const sixtyDaysOut = /* @__PURE__ */ new Date();
+            sixtyDaysOut.setDate(sixtyDaysOut.getDate() + 60);
+            if (!isNaN(orderDate.getTime()) && orderDate > sixtyDaysOut) {
               rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear - 1}`;
               orderDate = new Date(rawDateStr);
             }

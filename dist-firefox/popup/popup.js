@@ -465,8 +465,9 @@
           const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
           if (!tab?.id) return;
           spyNowBtn.textContent = "Injecting\u2026";
-          chrome.runtime.sendMessage({ type: "DEV_SPY_NOW", tabId: tab.id }, () => {
-            spyNowBtn.textContent = "Injected \u2713";
+          chrome.runtime.sendMessage({ type: "DEV_SPY_NOW", tabId: tab.id }, (resp) => {
+            const ok = !chrome.runtime.lastError && !resp?.error;
+            spyNowBtn.textContent = ok ? "Injected \u2713" : "Failed \u2717";
             setTimeout(() => {
               spyNowBtn.textContent = "Spy";
             }, 2e3);
@@ -478,9 +479,16 @@
           if (!tab?.id) return;
           const btn = document.getElementById("devSpyReload");
           btn.textContent = "Injecting\u2026";
-          chrome.runtime.sendMessage({ type: "DEV_SPY_NOW", tabId: tab.id }, () => {
+          chrome.runtime.sendMessage({ type: "DEV_SPY_NOW", tabId: tab.id }, (resp) => {
+            if (chrome.runtime.lastError || resp?.error) {
+              btn.textContent = "Failed \u2717";
+              setTimeout(() => {
+                btn.textContent = "Spy + Reload";
+              }, 2e3);
+              return;
+            }
             chrome.tabs.reload(tab.id);
-            btn.textContent = "Spy+Reload";
+            btn.textContent = "Spy + Reload";
           });
         });
         copyBtn.addEventListener("click", async () => {

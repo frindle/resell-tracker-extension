@@ -280,12 +280,13 @@
               console.log("[CST] /gettoken keys:", Object.keys(gtData));
               const gtToken = gtData.id_token ?? gtData.access_token ?? gtData.token ?? "";
               if (gtToken) {
+                let clientId2 = location.href.match(/\/app\/([0-9a-f-]{36})\//i)?.[1] ?? "";
                 try {
                   const p = JSON.parse(atob(gtToken.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
                   console.log("[CST] /gettoken token aud:", p.aud, "iss:", p.iss, "exp:", new Date(p.exp * 1e3).toISOString());
+                  if (!clientId2) clientId2 = p.clientId ?? "";
                 } catch {
                 }
-                const clientId2 = location.href.match(/\/app\/([0-9a-f-]{36})\//i)?.[1] ?? "";
                 console.log("[CST] using /gettoken token, clientId:", clientId2);
                 return { token: gtToken, clientId: clientId2, warehouseNumber: getWarehouseNumber() || "0" };
               }
@@ -401,19 +402,19 @@
         }
       }
       function mapOrder(o) {
-        if (SKIP_STATUSES.has(o.status.toLowerCase())) return null;
-        const activeItems = o.orderLineItems.filter((li) => !SKIP_STATUSES.has(li.status.toLowerCase()));
+        if (SKIP_STATUSES.has((o.status ?? "").toLowerCase())) return null;
+        const activeItems = o.orderLineItems.filter((li) => !SKIP_STATUSES.has((li.status ?? "").toLowerCase()));
         const descriptions = [...new Set(
           activeItems.map((li) => li.itemDescription?.trim()).filter(Boolean)
         )];
         const itemDescription = descriptions.join(", ").slice(0, 200);
         const tracking = [...new Set(
-          activeItems.flatMap((li) => li.shipment ?? []).filter((s) => s.trackingNumber && !DIGITAL_CARRIERS.has(s.carrierName.toLowerCase())).map((s) => s.trackingNumber)
+          activeItems.flatMap((li) => li.shipment ?? []).filter((s) => s.trackingNumber && !DIGITAL_CARRIERS.has((s.carrierName ?? "").toLowerCase())).map((s) => s.trackingNumber)
         )];
         return {
           platform: "Costco",
           orderNumber: o.orderNumber,
-          orderDate: o.orderPlacedDate.split("T")[0],
+          orderDate: (o.orderPlacedDate ?? "").split("T")[0],
           itemDescription,
           cost: o.orderTotal,
           shippingCost: 0,

@@ -369,8 +369,6 @@ async function runSync(state: SyncState) {
     }
   }
 
-  clearState();
-
   // Fetch tracking + fill missing titles from order detail pages
   if (allOrders.length > 0) {
     for (let i = 0; i < allOrders.length; i++) {
@@ -392,6 +390,7 @@ async function runSync(state: SyncState) {
   }
 
   if (allOrders.length === 0) {
+    clearState();
     setBadge('—');
     sendMessage({ type: 'SYNC_DONE', result: { platform: 'Amazon', scraped: 0, imported: 0, updated: 0 } });
     return;
@@ -399,6 +398,7 @@ async function runSync(state: SyncState) {
 
   try {
     const result = await pushOrders(state.trackerUrl, state.apiKey, state.userId, allOrders);
+    clearState();
     await setLastSync('amazon', new Date().toISOString().split('T')[0]);
     setBadge(`+${result.imported ?? 0}`, '#22c55e');
     sendMessage({ type: 'SYNC_DONE', result: { platform: 'Amazon', scraped: allOrders.length, ...result } });

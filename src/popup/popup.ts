@@ -312,8 +312,9 @@ async function initDevMode() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) return;
     spyNowBtn.textContent = 'Injecting…';
-    chrome.runtime.sendMessage({ type: 'DEV_SPY_NOW', tabId: tab.id }, () => {
-      spyNowBtn.textContent = 'Injected ✓';
+    chrome.runtime.sendMessage({ type: 'DEV_SPY_NOW', tabId: tab.id }, (resp) => {
+      const ok = !chrome.runtime.lastError && !resp?.error;
+      spyNowBtn.textContent = ok ? 'Injected ✓' : 'Failed ✗';
       setTimeout(() => { spyNowBtn.textContent = 'Spy'; }, 2000);
     });
   });
@@ -324,9 +325,14 @@ async function initDevMode() {
     if (!tab?.id) return;
     const btn = document.getElementById('devSpyReload') as HTMLButtonElement;
     btn.textContent = 'Injecting…';
-    chrome.runtime.sendMessage({ type: 'DEV_SPY_NOW', tabId: tab.id }, () => {
+    chrome.runtime.sendMessage({ type: 'DEV_SPY_NOW', tabId: tab.id }, (resp) => {
+      if (chrome.runtime.lastError || resp?.error) {
+        btn.textContent = 'Failed ✗';
+        setTimeout(() => { btn.textContent = 'Spy + Reload'; }, 2000);
+        return;
+      }
       chrome.tabs.reload(tab.id!);
-      btn.textContent = 'Spy+Reload';
+      btn.textContent = 'Spy + Reload';
     });
   });
 

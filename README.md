@@ -51,6 +51,14 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.20
+- Fix Costco sync crash when API returns null status or carrierName on a line item
+- Fix Costco getAuth returning empty clientId when /gettoken succeeds but URL lacks the account UUID path
+- Fix upgradeUrl() incorrectly upgrading http://localhost to https://
+- Fix Amazon clearState() called before detail-fetch loop; moved to after pushOrders succeeds so a tab close mid-fetch no longer silently drops scraped orders
+- Fix Spy and Spy+Reload buttons showing success when injection fails on a restricted page
+- Fix Walmart year-flip misfiring on near-future delivery date strings (e.g. "Delivering on Jan 5")
+
 ### 1.1.19
 - Dev mode: move hostname input to its own row, show Spy and Spy+Reload as equal-width buttons below
 

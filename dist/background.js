@@ -399,7 +399,9 @@
         return res.json();
       }
       function upgradeUrl(trackerUrl) {
-        return trackerUrl.replace(/\/$/, "").replace(/^http:\/\/([^0-9])/i, "https://$1");
+        const stripped = trackerUrl.replace(/\/$/, "");
+        if (/^http:\/\/(localhost|\d)/i.test(stripped)) return stripped;
+        return stripped.replace(/^http:\/\//i, "https://");
       }
       async function handleFetchUsers(trackerUrl) {
         const url = `${upgradeUrl(trackerUrl)}/api/users`;

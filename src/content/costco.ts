@@ -101,11 +101,12 @@ async function getAuth(): Promise<{ token: string; clientId: string; warehouseNu
         console.log('[CST] /gettoken keys:', Object.keys(gtData));
         const gtToken = gtData.id_token ?? gtData.access_token ?? gtData.token ?? '';
         if (gtToken) {
+          let clientId = location.href.match(/\/app\/([0-9a-f-]{36})\//i)?.[1] ?? '';
           try {
             const p = JSON.parse(atob(gtToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
             console.log('[CST] /gettoken token aud:', p.aud, 'iss:', p.iss, 'exp:', new Date(p.exp * 1000).toISOString());
+            if (!clientId) clientId = p.clientId ?? '';
           } catch { /* skip */ }
-          const clientId = location.href.match(/\/app\/([0-9a-f-]{36})\//i)?.[1] ?? '';
           console.log('[CST] using /gettoken token, clientId:', clientId);
           return { token: gtToken, clientId, warehouseNumber: getWarehouseNumber() || '0' };
         }
@@ -237,9 +238,9 @@ async function fetchPage(
 }
 
 function mapOrder(o: BcOrder): ScrapedOrder | null {
-  if (SKIP_STATUSES.has(o.status.toLowerCase())) return null;
+  if (SKIP_STATUSES.has((o.status ?? '').toLowerCase())) return null;
 
-  const activeItems = o.orderLineItems.filter(li => !SKIP_STATUSES.has(li.status.toLowerCase()));
+  const activeItems = o.orderLineItems.filter(li => !SKIP_STATUSES.has((li.status ?? '').toLowerCase()));
 
   const descriptions = [...new Set(
     activeItems.map(li => li.itemDescription?.trim()).filter(Boolean),
@@ -249,14 +250,14 @@ function mapOrder(o: BcOrder): ScrapedOrder | null {
   const tracking = [...new Set(
     activeItems
       .flatMap(li => li.shipment ?? [])
-      .filter(s => s.trackingNumber && !DIGITAL_CARRIERS.has(s.carrierName.toLowerCase()))
+      .filter(s => s.trackingNumber && !DIGITAL_CARRIERS.has((s.carrierName ?? '').toLowerCase()))
       .map(s => s.trackingNumber),
   )];
 
   return {
     platform: 'Costco',
     orderNumber: o.orderNumber,
-    orderDate: o.orderPlacedDate.split('T')[0],
+    orderDate: (o.orderPlacedDate ?? '').split('T')[0],
     itemDescription,
     cost: o.orderTotal,
     shippingCost: 0,

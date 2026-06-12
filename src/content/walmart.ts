@@ -73,8 +73,10 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
       // Append current year if missing; if result is more than a day in the future, use prior year
       let rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear}`;
       orderDate = new Date(rawDateStr);
-      const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
-      if (!isNaN(orderDate.getTime()) && orderDate > tomorrow) {
+      // Only flip the year if the date is implausibly far in the future (>60 days).
+      // Using "tomorrow" caused false flips on near-future delivery date strings like "Delivering on Jan 5".
+      const sixtyDaysOut = new Date(); sixtyDaysOut.setDate(sixtyDaysOut.getDate() + 60);
+      if (!isNaN(orderDate.getTime()) && orderDate > sixtyDaysOut) {
         rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear - 1}`;
         orderDate = new Date(rawDateStr);
       }
