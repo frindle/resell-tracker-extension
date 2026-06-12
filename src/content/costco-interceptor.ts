@@ -73,13 +73,36 @@ console.log('[CST-INT] interceptor script executing');
         if (this.status < 400 && url.includes('order/v1/orders/graphql')) {
           try {
             const data = JSON.parse(this.responseText);
+            const w = window as Record<string, unknown>;
+
             const pages = data?.data?.getOnlineOrders;
             if (Array.isArray(pages)) {
-              const w = window as Record<string, unknown>;
               const existing = (w.__costcoAllOrders as unknown[]) ?? [];
               for (const page of pages) existing.push(page);
               w.__costcoAllOrders = existing;
               console.log('[CST-INT] accumulated orders, total pages:', existing.length);
+            }
+
+            const rc = data?.data?.receiptsWithCounts;
+            if (rc) {
+              const receipts = rc.receipts ?? [];
+              if (receipts.length > 1 || (receipts.length === 1 && receipts[0]?.itemArray?.length > 1)) {
+                // List response — store each receipt
+                const list = (w.__costcoReceiptList as unknown[]) ?? [];
+                for (const r of receipts) {
+                  if (r.transactionBarcode && !list.find((x: unknown) => (x as Record<string, unknown>).transactionBarcode === r.transactionBarcode)) {
+                    list.push(r);
+                  }
+                }
+                w.__costcoReceiptList = list;
+                console.log('[CST-INT] accumulated receipts, total:', list.length);
+              } else if (receipts.length === 1 && receipts[0]?.transactionBarcode) {
+                // Detail response — store by barcode
+                const details = (w.__costcoReceiptDetails as Record<string, unknown>) ?? {};
+                details[receipts[0].transactionBarcode] = receipts[0];
+                w.__costcoReceiptDetails = details;
+                console.log('[CST-INT] stored receipt detail for', receipts[0].transactionBarcode);
+              }
             }
           } catch { /* skip */ }
         }

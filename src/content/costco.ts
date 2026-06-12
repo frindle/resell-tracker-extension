@@ -235,46 +235,12 @@ function mapOrder(o: BcOrder): ScrapedOrder | null {
   };
 }
 
-async function fetchReceiptList(
-  auth: { token: string; clientId: string },
-  startDate: string,
-  endDate: string,
-): Promise<string[]> {
+async function fetchCapturedReceipts(): Promise<{ list: Record<string, unknown>[]; details: Record<string, Record<string, unknown>> }> {
   try {
-    const body = JSON.stringify({
-      query: RECEIPT_LIST_QUERY,
-      variables: { startDate, endDate, documentType: 'WarehouseReceiptDetail', documentSubType: '' },
-    });
-    const resp = await chrome.runtime.sendMessage({ type: 'COSTCO_GRAPHQL', token: auth.token, clientId: auth.clientId, body });
-    console.log('[CST] receipt list resp:', resp?.ok, resp?.status, resp?.text?.substring(0, 500));
-    if (resp?.error || !resp?.ok) return [];
-    const json = JSON.parse(resp.text);
-    const receipts = json?.data?.receiptsWithCounts?.receipts ?? [];
-    console.log('[CST] receipt list count:', receipts.length);
-    return receipts.map((r: { transactionBarcode: string }) => r.transactionBarcode).filter(Boolean);
-  } catch (e) {
-    console.error('[CST] fetchReceiptList failed', e);
-    return [];
-  }
-}
-
-async function fetchReceiptDetail(
-  auth: { token: string; clientId: string },
-  barcode: string,
-): Promise<Record<string, unknown> | null> {
-  try {
-    const body = JSON.stringify({
-      query: RECEIPT_DETAIL_QUERY,
-      variables: { barcode, documentType: 'WarehouseReceiptDetail' },
-    });
-    const resp = await chrome.runtime.sendMessage({ type: 'COSTCO_GRAPHQL', token: auth.token, clientId: auth.clientId, body });
-    if (resp?.error || !resp?.ok) return null;
-    const json = JSON.parse(resp.text);
-    const receipts = json?.data?.receiptsWithCounts?.receipts ?? [];
-    return receipts[0] ?? null;
-  } catch (e) {
-    console.error('[CST] fetchReceiptDetail failed', barcode, e);
-    return null;
+    const captured = await chrome.runtime.sendMessage({ type: 'GET_CAPTURED_RECEIPTS' }).catch(() => null);
+    return captured ?? { list: [], details: {} };
+  } catch {
+    return { list: [], details: {} };
   }
 }
 
@@ -375,22 +341,20 @@ async function runSync() {
       ? await pushOrders(settings.trackerUrl, settings.apiKey ?? '', settings.userId, filteredOrders)
       : { imported: 0, updated: 0 };
 
-    // Fetch and push warehouse receipts — always 90-day lookback so in-store receipts aren't missed
+    // Push warehouse receipts captured from the page's own API calls
     sendMessage({ type: 'SYNC_PROGRESS', platform: 'Costco', scraped: filteredOrders.length, message: 'Fetching receipts…' });
     let receiptResult = { linked: 0, unlinked: 0, skipped: 0 };
-    const receiptStart = formatDate(new Date(Date.now() - 90 * 24 * 60 * 60 * 1000));
     try {
-      const barcodes = await fetchReceiptList(auth, receiptStart, endDate);
-      if (barcodes.length > 0) {
-        const details: Record<string, unknown>[] = [];
-        for (const barcode of barcodes) {
-          await new Promise(r => setTimeout(r, 300));
-          const detail = await fetchReceiptDetail(auth, barcode);
-          if (detail) details.push(detail);
-        }
-        if (details.length > 0) {
-          receiptResult = await pushReceipts(settings.trackerUrl, settings.apiKey ?? '', details);
-        }
+      const captured = await fetchCapturedReceipts();
+      const toSend: Record<string, unknown>[] = [];
+      for (const r of captured.list) {
+        const barcode = r.transactionBarcode as string;
+        // Prefer full detail if we captured it, otherwise use list data
+        toSend.push(captured.details[barcode] ?? r);
+      }
+      console.log('[CST] captured receipts:', toSend.length);
+      if (toSend.length > 0) {
+        receiptResult = await pushReceipts(settings.trackerUrl, settings.apiKey ?? '', toSend);
       }
     } catch (e) {
       console.error('[CST] receipt sync failed (non-fatal)', e);

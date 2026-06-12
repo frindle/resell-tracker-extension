@@ -157,6 +157,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'GET_CAPTURED_RECEIPTS') {
+    const tabId = sender.tab?.id;
+    if (!tabId) { sendResponse(null); return; }
+    chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: () => ({
+        list: (window as Record<string, unknown>).__costcoReceiptList ?? [],
+        details: (window as Record<string, unknown>).__costcoReceiptDetails ?? {},
+      }),
+    }).then(results => sendResponse(results[0]?.result ?? null))
+      .catch(() => sendResponse(null));
+    return true;
+  }
+
   if (message.type === 'GET_MSAL_TOKEN') {
     const tabId = sender.tab?.id;
     if (!tabId) { sendResponse(null); return; }
