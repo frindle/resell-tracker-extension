@@ -202,6 +202,35 @@ const ORDER_QUERY = `query getOnlineOrders($startDate:String!, $endDate:String!,
   }
 }`;
 
+const RECEIPT_LIST_QUERY = `query receiptsWithCounts($startDate: String!, $endDate: String!, $documentType: String!, $documentSubType: String!) {
+  receiptsWithCounts(startDate: $startDate, endDate: $endDate, documentType: $documentType, documentSubType: $documentSubType) {
+    receipts {
+      transactionBarcode
+      transactionDateTime
+      warehouseName
+      total
+      itemArray { itemNumber }
+    }
+  }
+}`;
+
+const RECEIPT_DETAIL_QUERY = `query receiptsWithCounts($barcode: String!, $documentType: String!) {
+  receiptsWithCounts(barcode: $barcode, documentType: $documentType) {
+    receipts {
+      warehouseName warehouseAddress1 warehouseAddress2 warehouseCity warehouseState warehousePostalCode
+      transactionDateTime transactionDate companyNumber warehouseNumber operatorNumber warehouseShortName
+      registerNumber transactionNumber transactionType transactionBarcode
+      total subTotal taxes instantSavings totalItemCount membershipNumber
+      itemArray {
+        itemNumber itemDescription01 itemDescription02 itemIdentifier itemDepartmentNumber
+        unit amount taxFlag itemUnitPriceAmount
+      }
+      tenderArray { tenderTypeCode tenderDescription amountTender }
+      couponArray { upcnumberCoupon }
+    }
+  }
+}`;
+
 interface Shipment { trackingNumber: string; carrierName: string }
 interface LineItem { itemDescription: string; status: string; carrierItemCategory: string; shipment: Shipment[] }
 interface BcOrder {
@@ -265,6 +294,53 @@ function mapOrder(o: BcOrder): ScrapedOrder | null {
     trackingNumbers: tracking,
     sourceUrl: `https://www.costco.com/myaccount/#/app/${o.orderHeaderId}/orderdetails`,
   };
+}
+
+async function fetchReceiptList(
+  auth: { token: string; clientId: string },
+  startDate: string,
+  endDate: string,
+): Promise<string[]> {
+  try {
+    const body = JSON.stringify({
+      query: RECEIPT_LIST_QUERY,
+      variables: { startDate, endDate, documentType: 'WarehouseReceiptDetail', documentSubType: '' },
+    });
+    const resp = await chrome.runtime.sendMessage({ type: 'COSTCO_GRAPHQL', token: auth.token, clientId: auth.clientId, body });
+    if (resp?.error || !resp?.ok) return [];
+    const json = JSON.parse(resp.text);
+    const receipts = json?.data?.receiptsWithCounts?.receipts ?? [];
+    return receipts.map((r: { transactionBarcode: string }) => r.transactionBarcode).filter(Boolean);
+  } catch (e) {
+    console.error('[CST] fetchReceiptList failed', e);
+    return [];
+  }
+}
+
+async function fetchReceiptDetail(
+  auth: { token: string; clientId: string },
+  barcode: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const body = JSON.stringify({
+      query: RECEIPT_DETAIL_QUERY,
+      variables: { barcode, documentType: 'WarehouseReceiptDetail' },
+    });
+    const resp = await chrome.runtime.sendMessage({ type: 'COSTCO_GRAPHQL', token: auth.token, clientId: auth.clientId, body });
+    if (resp?.error || !resp?.ok) return null;
+    const json = JSON.parse(resp.text);
+    const receipts = json?.data?.receiptsWithCounts?.receipts ?? [];
+    return receipts[0] ?? null;
+  } catch (e) {
+    console.error('[CST] fetchReceiptDetail failed', barcode, e);
+    return null;
+  }
+}
+
+async function pushReceipts(trackerUrl: string, apiKey: string, receipts: Record<string, unknown>[]): Promise<{ linked: number; unlinked: number; skipped: number }> {
+  const res = await chrome.runtime.sendMessage({ type: 'PUSH_COSTCO_RECEIPTS', trackerUrl, apiKey, receipts });
+  if (res?.error) throw new Error(res.error);
+  return res;
 }
 
 let syncing = false;
@@ -362,9 +438,30 @@ async function runSync() {
 
   try {
     const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? '', settings.userId, filteredOrders);
+
+    // Fetch and push warehouse receipts for the same date range
+    sendMessage({ type: 'SYNC_PROGRESS', platform: 'Costco', scraped: filteredOrders.length, message: 'Fetching receipts…' });
+    let receiptResult = { linked: 0, unlinked: 0, skipped: 0 };
+    try {
+      const barcodes = await fetchReceiptList(auth, startDate, endDate);
+      if (barcodes.length > 0) {
+        const details: Record<string, unknown>[] = [];
+        for (const barcode of barcodes) {
+          await new Promise(r => setTimeout(r, 300));
+          const detail = await fetchReceiptDetail(auth, barcode);
+          if (detail) details.push(detail);
+        }
+        if (details.length > 0) {
+          receiptResult = await pushReceipts(settings.trackerUrl, settings.apiKey ?? '', details);
+        }
+      }
+    } catch (e) {
+      console.error('[CST] receipt sync failed (non-fatal)', e);
+    }
+
     await setLastSync('costco', now.toISOString().split('T')[0]);
     setBadge(`+${result.imported}`, '#22c55e');
-    sendMessage({ type: 'SYNC_DONE', result: { platform: 'Costco', scraped: filteredOrders.length, ...result } });
+    sendMessage({ type: 'SYNC_DONE', result: { platform: 'Costco', scraped: filteredOrders.length, ...result, receiptsLinked: receiptResult.linked, receiptsUnlinked: receiptResult.unlinked } });
   } catch (err) {
     setBadge('!', '#ef4444');
     sendMessage({ type: 'SYNC_ERROR', platform: 'Costco', error: err instanceof Error ? err.message : String(err) });

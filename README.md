@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.21
+- Add Costco warehouse receipt sync: fetches all in-warehouse receipts for the sync date range, generates a thermal-receipt-style PDF for each, and stores it as an attachment on the matching order. Receipts are auto-linked when exactly one order shares the same date; ambiguous matches surface as a link prompt on the order detail page.
+
 ### 1.1.20
 - Fix Costco sync crash when API returns null status or carrierName on a line item
 - Fix Costco getAuth returning empty clientId when /gettoken succeeds but URL lacks the account UUID path

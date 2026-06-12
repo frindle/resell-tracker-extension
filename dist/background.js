@@ -201,6 +201,10 @@
           handlePushOrders(message.trackerUrl, message.apiKey, message.userId, message.orders).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
           return true;
         }
+        if (message.type === "PUSH_COSTCO_RECEIPTS") {
+          handlePushCostcoReceipts(message.trackerUrl, message.apiKey, message.receipts).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+          return true;
+        }
         if (message.type === "PUSH_BIGSKY_ORDERS") {
           handlePushBigskyOrders(message.trackerUrl, message.apiKey, message.userId, message.groups).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
           return true;
@@ -422,6 +426,22 @@
           xhr.onerror = () => reject(new Error(`NetworkError: ${url}`));
           xhr.send();
         });
+      }
+      async function handlePushCostcoReceipts(trackerUrl, apiKey, receipts) {
+        const url = `${upgradeUrl(trackerUrl)}/api/costco/receipts`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...apiKey ? { "X-API-Key": apiKey } : {}
+          },
+          body: JSON.stringify(receipts)
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => res.statusText);
+          throw new Error(`Tracker API error ${res.status} (${url}): ${text}`);
+        }
+        return res.json();
       }
       async function handlePushOrders(trackerUrl, apiKey, userId, orders) {
         const url = `${upgradeUrl(trackerUrl)}/api/import`;
