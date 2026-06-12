@@ -447,7 +447,7 @@
           shippingCost: 0,
           shippingAddress: "",
           trackingNumbers: tracking,
-          sourceUrl: `https://www.costco.com/myaccount/#/app/${o.orderHeaderId}/orderdetails`
+          sourceUrl: `https://www.costco.com/myaccount/#/app/4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf/orderdetails/${o.orderNumber}`
         };
       }
       async function fetchReceiptList(auth, startDate, endDate) {
