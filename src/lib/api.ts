@@ -14,6 +14,7 @@ export async function fetchUsers(trackerUrl: string): Promise<TrackerUser[]> {
   await chrome.runtime.sendMessage({ type: 'PING' }).catch(() => {});
   const res = await chrome.runtime.sendMessage({ type: 'FETCH_USERS', trackerUrl });
   if (res?.error) throw new Error(res.error);
+  if (!Array.isArray(res)) throw new Error('Unexpected response from background');
   return res.map((u: { id: number; name: string }) => ({ id: u.id, name: u.name }));
 }
 

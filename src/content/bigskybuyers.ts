@@ -25,8 +25,10 @@ async function fetchScanItems(): Promise<ScanItem[]> {
   const url = `https://www.bigskybuyers.com/api/trpc/scan.getScanByUser?batch=1&input=${input}`;
   const res = await fetch(url, { credentials: 'include' });
   if (!res.ok) throw new Error(`BigSky tRPC error ${res.status}`);
-  const json = await res.json() as [{ result: { data: { json: ScanItem[] } } }];
-  return json[0].result.data.json;
+  const json = await res.json() as [{ result?: { data?: { json?: ScanItem[] } }; error?: unknown }];
+  const items = json?.[0]?.result?.data?.json;
+  if (!Array.isArray(items)) throw new Error('Unexpected BigSky tRPC response shape');
+  return items;
 }
 
 function groupByTracking(items: ScanItem[]): SyncGroup[] {

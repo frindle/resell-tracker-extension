@@ -182,6 +182,7 @@
     });
     const res = await chrome.runtime.sendMessage({ type: "FETCH_USERS", trackerUrl });
     if (res?.error) throw new Error(res.error);
+    if (!Array.isArray(res)) throw new Error("Unexpected response from background");
     return res.map((u) => ({ id: u.id, name: u.name }));
   }
   var import_browser_polyfill_min2;
@@ -268,7 +269,7 @@
           status.className = "status";
           try {
             const res = await fetch(`${currentSettings.trackerUrl}/api/orders/backfill`, {
-              headers: { "X-Extension-User-Id": currentSettings.userId }
+              headers: { "X-Extension-User-Id": currentSettings.userId, ...currentSettings.apiKey ? { "X-API-Key": currentSettings.apiKey } : {} }
             });
             if (!res.ok) throw new Error(`API error ${res.status}`);
             const orders = await res.json();
@@ -344,7 +345,7 @@
                 if (address) patch.shippingAddress = address;
                 await fetch(`${currentSettings.trackerUrl}/api/orders/${order.id}`, {
                   method: "PATCH",
-                  headers: { "Content-Type": "application/json", "X-Extension-User-Id": currentSettings.userId },
+                  headers: { "Content-Type": "application/json", "X-Extension-User-Id": currentSettings.userId, ...currentSettings.apiKey ? { "X-API-Key": currentSettings.apiKey } : {} },
                   body: JSON.stringify(patch)
                 });
                 filled++;

@@ -51,6 +51,17 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.15
+- Fix cancelRequested not reset on page-navigation sync resume (could permanently abort syncs after a cancel)
+- Fix onUpdated listener leak when 10s tab-load timeout fires before page completes
+- Fix appendApiLog race condition in dev mode (concurrent writes could drop entries)
+- Fix fetchUsers crash when background returns non-array response
+- Fix BigSkyBuyers tRPC response not null-guarded (auth errors threw confusing TypeError)
+- Fix BigSkyBuyers popup status showing "+0 new" on live updates (now consistent with stored display)
+- Fix backfill requests missing X-API-Key header (caused 401 on authenticated deployments)
+- Fix badge showing "+undefined" when server omits imported count from response
+- Remove dead duplicate Walmart address DOM fallback block
+
 ### 1.1.14
 - Fix Firefox pinned toolbar icon: use SVG instead of PNG for action icon (Firefox supports SVG; PNG toolbar rendering was silently failing)
 

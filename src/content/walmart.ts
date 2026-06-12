@@ -194,10 +194,6 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
       const addrEl = doc.querySelector('[data-automation-id*="shipping-address"], [class*="shipping-address"], [class*="shippingAddress"]');
       address = (addrEl?.textContent ?? '').replace(/\s+/g, ' ').trim();
     }
-    if (!address) {
-      const addrEl = doc.querySelector('[data-automation-id*="shipping-address"], [class*="shipping-address"], [class*="shippingAddress"]');
-      address = (addrEl?.textContent ?? '').replace(/\s+/g, ' ').trim();
-    }
 
     const numbers = new Set<string>();
     const trackPatterns = [

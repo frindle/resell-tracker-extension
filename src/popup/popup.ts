@@ -123,7 +123,7 @@ async function init() {
       setStatus('BigSkyBuyers', bs.message ?? 'syncing…', 'syncing');
       setSyncBtn('BigSkyBuyers', true);
     } else if (bs.type === 'SYNC_DONE' && bs.result) {
-      const text = bs.result.scraped === 0 ? 'no new orders' : `${bs.result.updated} updated`;
+      const text = bs.result.updated === 0 ? 'no new orders' : `${bs.result.updated} updated`;
       setStatus('BigSkyBuyers', text, 'ok');
     } else if (bs.type === 'SYNC_ERROR') {
       setStatus('BigSkyBuyers', `Error: ${bs.error}`, 'fail');
@@ -142,7 +142,7 @@ async function init() {
         setStatus('BigSkyBuyers', bs.message ?? 'syncing…', 'syncing');
         setSyncBtn('BigSkyBuyers', true);
       } else if (bs.type === 'SYNC_DONE' && bs.result) {
-        const text = bs.result.scraped === 0 ? 'no new orders' : `+${bs.result.imported} new, ${bs.result.updated} updated`;
+        const text = bs.result.updated === 0 ? 'no new orders' : `${bs.result.updated} updated`;
         setStatus('BigSkyBuyers', text, 'ok');
         setSyncBtn('BigSkyBuyers', false);
       } else if (bs.type === 'SYNC_ERROR') {

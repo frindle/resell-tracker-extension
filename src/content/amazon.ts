@@ -400,7 +400,7 @@ async function runSync(state: SyncState) {
   try {
     const result = await pushOrders(state.trackerUrl, state.apiKey, state.userId, allOrders);
     await setLastSync('amazon', new Date().toISOString().split('T')[0]);
-    setBadge(`+${result.imported}`, '#22c55e');
+    setBadge(`+${result.imported ?? 0}`, '#22c55e');
     sendMessage({ type: 'SYNC_DONE', result: { platform: 'Amazon', scraped: allOrders.length, ...result } });
   } catch (err) {
     setBadge('!', '#ef4444');
@@ -461,6 +461,7 @@ async function startSync() {
   const state = await loadState();
   if (state) {
     syncing = true;
+    cancelRequested = false;
     sendMessage({ type: 'SYNC_STARTED', platform: 'Amazon' });
     await runSync(state);
   }

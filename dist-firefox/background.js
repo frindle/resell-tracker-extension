@@ -66,14 +66,19 @@
             } catch {
             }
             await new Promise((resolve) => {
-              const timeout = setTimeout(resolve, 1e4);
-              chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
+              let tabListener;
+              const timeout = setTimeout(() => {
+                chrome.tabs.onUpdated.removeListener(tabListener);
+                resolve();
+              }, 1e4);
+              tabListener = (tabId, info) => {
                 if (tabId === targetTabId && info.status === "complete") {
-                  chrome.tabs.onUpdated.removeListener(listener);
+                  chrome.tabs.onUpdated.removeListener(tabListener);
                   clearTimeout(timeout);
                   resolve();
                 }
-              });
+              };
+              chrome.tabs.onUpdated.addListener(tabListener);
             });
           }
         }
@@ -214,13 +219,16 @@
           return true;
         }
       });
-      async function appendApiLog(entry) {
-        const stored = await chrome.storage.local.get(["apiLogs", "apiLogNextId"]);
-        const logs = stored.apiLogs ?? [];
-        const nextId = stored.apiLogNextId ?? 0;
-        logs.push({ ...entry, id: nextId });
-        if (logs.length > 200) logs.splice(0, logs.length - 200);
-        await chrome.storage.local.set({ apiLogs: logs, apiLogNextId: nextId + 1 });
+      var _apiLogQueue = Promise.resolve();
+      function appendApiLog(entry) {
+        _apiLogQueue = _apiLogQueue.then(async () => {
+          const stored = await chrome.storage.local.get(["apiLogs", "apiLogNextId"]);
+          const logs = stored.apiLogs ?? [];
+          const nextId = stored.apiLogNextId ?? 0;
+          logs.push({ ...entry, id: nextId });
+          if (logs.length > 200) logs.splice(0, logs.length - 200);
+          await chrome.storage.local.set({ apiLogs: logs, apiLogNextId: nextId + 1 });
+        });
       }
       async function injectSpy(tabId) {
         await chrome.scripting.executeScript({ target: { tabId }, files: ["content/api-spy-bridge.js"] });

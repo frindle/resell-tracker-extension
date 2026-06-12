@@ -59,14 +59,19 @@ async function triggerSyncInBackground(platform: string, activeTabId?: number, a
       targetTabId = newTab.id;
       try { if (newTab.windowId) await chrome.windows.update(newTab.windowId, { focused: true }); } catch { /* ignore */ }
       await new Promise<void>(resolve => {
-        const timeout = setTimeout(resolve, 10000); // fallback: proceed after 10s regardless
-        chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
+        let tabListener: (tabId: number, info: chrome.tabs.TabChangeInfo) => void;
+        const timeout = setTimeout(() => {
+          chrome.tabs.onUpdated.removeListener(tabListener);
+          resolve();
+        }, 10000);
+        tabListener = (tabId: number, info: chrome.tabs.TabChangeInfo) => {
           if (tabId === targetTabId && info.status === 'complete') {
-            chrome.tabs.onUpdated.removeListener(listener);
+            chrome.tabs.onUpdated.removeListener(tabListener);
             clearTimeout(timeout);
             resolve();
           }
-        });
+        };
+        chrome.tabs.onUpdated.addListener(tabListener);
       });
     }
   }
@@ -219,13 +224,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-async function appendApiLog(entry: Record<string, unknown>) {
-  const stored = await chrome.storage.local.get(['apiLogs', 'apiLogNextId']);
-  const logs = (stored.apiLogs as Record<string, unknown>[] | undefined) ?? [];
-  const nextId = (stored.apiLogNextId as number | undefined) ?? 0;
-  logs.push({ ...entry, id: nextId });
-  if (logs.length > 200) logs.splice(0, logs.length - 200);
-  await chrome.storage.local.set({ apiLogs: logs, apiLogNextId: nextId + 1 });
+let _apiLogQueue: Promise<void> = Promise.resolve();
+function appendApiLog(entry: Record<string, unknown>) {
+  _apiLogQueue = _apiLogQueue.then(async () => {
+    const stored = await chrome.storage.local.get(['apiLogs', 'apiLogNextId']);
+    const logs = (stored.apiLogs as Record<string, unknown>[] | undefined) ?? [];
+    const nextId = (stored.apiLogNextId as number | undefined) ?? 0;
+    logs.push({ ...entry, id: nextId });
+    if (logs.length > 200) logs.splice(0, logs.length - 200);
+    await chrome.storage.local.set({ apiLogs: logs, apiLogNextId: nextId + 1 });
+  });
 }
 
 async function injectSpy(tabId: number) {

@@ -287,7 +287,7 @@
             setStatus("BigSkyBuyers", bs.message ?? "syncing\u2026", "syncing");
             setSyncBtn("BigSkyBuyers", true);
           } else if (bs.type === "SYNC_DONE" && bs.result) {
-            const text = bs.result.scraped === 0 ? "no new orders" : `${bs.result.updated} updated`;
+            const text = bs.result.updated === 0 ? "no new orders" : `${bs.result.updated} updated`;
             setStatus("BigSkyBuyers", text, "ok");
           } else if (bs.type === "SYNC_ERROR") {
             setStatus("BigSkyBuyers", `Error: ${bs.error}`, "fail");
@@ -304,7 +304,7 @@
               setStatus("BigSkyBuyers", bs2.message ?? "syncing\u2026", "syncing");
               setSyncBtn("BigSkyBuyers", true);
             } else if (bs2.type === "SYNC_DONE" && bs2.result) {
-              const text = bs2.result.scraped === 0 ? "no new orders" : `+${bs2.result.imported} new, ${bs2.result.updated} updated`;
+              const text = bs2.result.updated === 0 ? "no new orders" : `${bs2.result.updated} updated`;
               setStatus("BigSkyBuyers", text, "ok");
               setSyncBtn("BigSkyBuyers", false);
             } else if (bs2.type === "SYNC_ERROR") {

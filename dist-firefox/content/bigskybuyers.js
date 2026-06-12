@@ -191,7 +191,9 @@
         const res = await fetch(url, { credentials: "include" });
         if (!res.ok) throw new Error(`BigSky tRPC error ${res.status}`);
         const json = await res.json();
-        return json[0].result.data.json;
+        const items = json?.[0]?.result?.data?.json;
+        if (!Array.isArray(items)) throw new Error("Unexpected BigSky tRPC response shape");
+        return items;
       }
       function groupByTracking(items) {
         const map = /* @__PURE__ */ new Map();
