@@ -307,9 +307,11 @@ async function fetchReceiptList(
       variables: { startDate, endDate, documentType: 'WarehouseReceiptDetail', documentSubType: '' },
     });
     const resp = await chrome.runtime.sendMessage({ type: 'COSTCO_GRAPHQL', token: auth.token, clientId: auth.clientId, body });
+    console.log('[CST] receipt list resp:', resp?.ok, resp?.status, resp?.text?.substring(0, 500));
     if (resp?.error || !resp?.ok) return [];
     const json = JSON.parse(resp.text);
     const receipts = json?.data?.receiptsWithCounts?.receipts ?? [];
+    console.log('[CST] receipt list count:', receipts.length);
     return receipts.map((r: { transactionBarcode: string }) => r.transactionBarcode).filter(Boolean);
   } catch (e) {
     console.error('[CST] fetchReceiptList failed', e);
