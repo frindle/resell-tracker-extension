@@ -429,15 +429,10 @@ async function runSync() {
   const filteredOrders = allOrders.filter(o => new Date(o.orderDate) >= sinceDate);
   console.log('[CST] filtered to', filteredOrders.length, 'orders on/after', startDate, '(dropped', allOrders.length - filteredOrders.length, 'older)');
 
-  if (filteredOrders.length === 0) {
-    setBadge('—');
-    sendMessage({ type: 'SYNC_DONE', result: { platform: 'Costco', scraped: 0, imported: 0, updated: 0 } });
-    syncing = false;
-    return;
-  }
-
   try {
-    const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? '', settings.userId, filteredOrders);
+    const result = filteredOrders.length > 0
+      ? await pushOrders(settings.trackerUrl, settings.apiKey ?? '', settings.userId, filteredOrders)
+      : { imported: 0, updated: 0 };
 
     // Fetch and push warehouse receipts — always 90-day lookback so in-store receipts aren't missed
     sendMessage({ type: 'SYNC_PROGRESS', platform: 'Costco', scraped: filteredOrders.length, message: 'Fetching receipts…' });
@@ -461,7 +456,7 @@ async function runSync() {
     }
 
     await setLastSync('costco', now.toISOString().split('T')[0]);
-    setBadge(`+${result.imported}`, '#22c55e');
+    setBadge(filteredOrders.length === 0 ? '—' : `+${result.imported}`, filteredOrders.length === 0 ? '#6b7280' : '#22c55e');
     sendMessage({ type: 'SYNC_DONE', result: { platform: 'Costco', scraped: filteredOrders.length, ...result, receiptsLinked: receiptResult.linked, receiptsUnlinked: receiptResult.unlinked } });
   } catch (err) {
     setBadge('!', '#ef4444');
