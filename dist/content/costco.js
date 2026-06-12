@@ -217,53 +217,6 @@
       function formatDate(d) {
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       }
-      function getMsalRefreshToken() {
-        for (const storage of [sessionStorage, localStorage]) {
-          for (const key of Object.keys(storage)) {
-            if (!key.toLowerCase().includes("refreshtoken")) continue;
-            if (!key.includes("a3a5186b")) continue;
-            try {
-              const item = JSON.parse(storage.getItem(key) ?? "{}");
-              if (item.secret) return item.secret;
-            } catch {
-            }
-          }
-        }
-        return "";
-      }
-      async function getMsalToken() {
-        const refreshToken = getMsalRefreshToken();
-        if (!refreshToken) {
-          console.log("[CST] no refresh token found");
-          return "";
-        }
-        console.log("[CST] exchanging refresh token for fresh id_token\u2026");
-        try {
-          const res = await fetch(
-            "https://signin.costco.com/e0714dd4-784d-46d6-a278-3e29553483eb/B2C_1A_SSO_WCS_signup_signin_209/oauth2/v2.0/token",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/x-www-form-urlencoded" },
-              body: new URLSearchParams({
-                grant_type: "refresh_token",
-                refresh_token: refreshToken,
-                client_id: "a3a5186b-7c89-4b4c-93a8-dd604e930757",
-                scope: "openid profile offline_access"
-              }).toString()
-            }
-          );
-          if (!res.ok) {
-            console.error("[CST] token refresh failed", res.status, await res.text());
-            return "";
-          }
-          const data = await res.json();
-          console.log("[CST] token refresh ok, keys:", Object.keys(data));
-          return data.id_token ?? data.access_token ?? "";
-        } catch (e) {
-          console.error("[CST] token refresh error", e);
-          return "";
-        }
-      }
       async function getAuth() {
         try {
           const intercepted = await chrome.runtime.sendMessage({ type: "GET_COSTCO_AUTH" }).catch(() => null);
@@ -271,67 +224,8 @@
             console.log("[CST] using intercepted auth token");
             return { token: intercepted.token, clientId: intercepted.clientId, warehouseNumber: getWarehouseNumber() || "0" };
           }
-          console.log("[CST] no intercepted token \u2014 trying live MSAL instance\u2026");
-          try {
-            const gtRes = await fetch("/gettoken", { credentials: "include" });
-            console.log("[CST] /gettoken status:", gtRes.status);
-            if (gtRes.ok) {
-              const gtData = await gtRes.json();
-              console.log("[CST] /gettoken keys:", Object.keys(gtData));
-              const gtToken = gtData.id_token ?? gtData.access_token ?? gtData.token ?? "";
-              if (gtToken) {
-                let clientId2 = location.href.match(/\/app\/([0-9a-f-]{36})\//i)?.[1] ?? "";
-                try {
-                  const p = JSON.parse(atob(gtToken.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-                  console.log("[CST] /gettoken token aud:", p.aud, "iss:", p.iss, "exp:", new Date(p.exp * 1e3).toISOString());
-                  if (!clientId2) clientId2 = p.clientId ?? "";
-                } catch {
-                }
-                console.log("[CST] using /gettoken token, clientId:", clientId2);
-                return { token: gtToken, clientId: clientId2, warehouseNumber: getWarehouseNumber() || "0" };
-              }
-            }
-          } catch (e) {
-            console.error("[CST] /gettoken failed", e);
-          }
-          let token = await getMsalToken();
-          console.log("[CST] msal token found:", !!token);
-          if (token) {
-            try {
-              const p = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-              console.log("[CST] msal token aud:", p.aud, "exp:", new Date(p.exp * 1e3).toISOString());
-            } catch {
-            }
-          }
-          if (!token) {
-            const res = await fetch("/gettoken", { credentials: "include" });
-            if (!res.ok) {
-              console.error("[CST] gettoken returned", res.status);
-              return null;
-            }
-            const data = await res.json();
-            token = data.id_token ?? data.access_token ?? data.token ?? "";
-            if (!token) {
-              console.error("[CST] no token in gettoken response", Object.keys(data));
-              return null;
-            }
-          }
-          let clientId = location.href.match(/\/app\/([0-9a-f-]{36})\//i)?.[1] ?? "";
-          if (!clientId) {
-            try {
-              const res2 = await fetch("/gettoken", { credentials: "include" });
-              if (res2.ok) {
-                const data2 = await res2.json();
-                const tok2 = data2.id_token ?? data2.access_token ?? "";
-                const payload2 = JSON.parse(atob(tok2.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-                clientId = payload2.clientId ?? "";
-              }
-            } catch {
-            }
-          }
-          const warehouseNumber = getWarehouseNumber();
-          console.log("[CST] auth ok, clientId:", clientId, "warehouse:", warehouseNumber || "(not found, using 0)");
-          return { token, clientId, warehouseNumber: warehouseNumber || "0" };
+          console.log("[CST] no intercepted token \u2014 hard-refresh the Costco orders page and wait for orders to load, then sync");
+          return null;
         } catch (e) {
           console.error("[CST] getAuth failed", e);
           return null;
@@ -371,33 +265,6 @@
           carrierName
         }
       }
-    }
-  }
-}`;
-      var RECEIPT_LIST_QUERY = `query receiptsWithCounts($startDate: String!, $endDate: String!, $documentType: String!, $documentSubType: String!) {
-  receiptsWithCounts(startDate: $startDate, endDate: $endDate, documentType: $documentType, documentSubType: $documentSubType) {
-    receipts {
-      transactionBarcode
-      transactionDateTime
-      warehouseName
-      total
-      itemArray { itemNumber }
-    }
-  }
-}`;
-      var RECEIPT_DETAIL_QUERY = `query receiptsWithCounts($barcode: String!, $documentType: String!) {
-  receiptsWithCounts(barcode: $barcode, documentType: $documentType) {
-    receipts {
-      warehouseName warehouseAddress1 warehouseAddress2 warehouseCity warehouseState warehousePostalCode
-      transactionDateTime transactionDate companyNumber warehouseNumber operatorNumber warehouseShortName
-      registerNumber transactionNumber transactionType transactionBarcode
-      total subTotal taxes instantSavings totalItemCount membershipNumber
-      itemArray {
-        itemNumber itemDescription01 itemDescription02 itemIdentifier itemDepartmentNumber
-        unit amount taxFlag itemUnitPriceAmount
-      }
-      tenderArray { tenderTypeCode tenderDescription amountTender }
-      couponArray { upcnumberCoupon }
     }
   }
 }`;
@@ -450,42 +317,37 @@
           sourceUrl: `https://www.costco.com/myaccount/#/app/4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf/orderdetails/${o.orderNumber}`
         };
       }
-      async function fetchReceiptList(auth, startDate, endDate) {
+      async function fetchCapturedReceipts() {
         try {
-          const body = JSON.stringify({
-            query: RECEIPT_LIST_QUERY,
-            variables: { startDate, endDate, documentType: "WarehouseReceiptDetail", documentSubType: "" }
-          });
-          const resp = await chrome.runtime.sendMessage({ type: "COSTCO_GRAPHQL", token: auth.token, clientId: auth.clientId, body });
-          if (resp?.error || !resp?.ok) return [];
-          const json = JSON.parse(resp.text);
-          const receipts = json?.data?.receiptsWithCounts?.receipts ?? [];
-          return receipts.map((r) => r.transactionBarcode).filter(Boolean);
-        } catch (e) {
-          console.error("[CST] fetchReceiptList failed", e);
-          return [];
-        }
-      }
-      async function fetchReceiptDetail(auth, barcode) {
-        try {
-          const body = JSON.stringify({
-            query: RECEIPT_DETAIL_QUERY,
-            variables: { barcode, documentType: "WarehouseReceiptDetail" }
-          });
-          const resp = await chrome.runtime.sendMessage({ type: "COSTCO_GRAPHQL", token: auth.token, clientId: auth.clientId, body });
-          if (resp?.error || !resp?.ok) return null;
-          const json = JSON.parse(resp.text);
-          const receipts = json?.data?.receiptsWithCounts?.receipts ?? [];
-          return receipts[0] ?? null;
-        } catch (e) {
-          console.error("[CST] fetchReceiptDetail failed", barcode, e);
-          return null;
+          const captured = await chrome.runtime.sendMessage({ type: "GET_CAPTURED_RECEIPTS" }).catch(() => null);
+          return captured ?? { list: [], details: {} };
+        } catch {
+          return { list: [], details: {} };
         }
       }
       async function pushReceipts(trackerUrl, apiKey, receipts) {
         const res = await chrome.runtime.sendMessage({ type: "PUSH_COSTCO_RECEIPTS", trackerUrl, apiKey, receipts });
         if (res?.error) throw new Error(res.error);
         return res;
+      }
+      async function clickThroughReceiptButtons() {
+        const buttons = Array.from(document.querySelectorAll('[automation-id="ViewInWareHouseReciept"]'));
+        if (buttons.length === 0) return;
+        console.log("[CST] clicking through", buttons.length, "receipt button(s)");
+        for (const btn of buttons) {
+          btn.click();
+          await new Promise((r) => setTimeout(r, 2e3));
+          const dialog = document.querySelector('[role="dialog"]');
+          const closeBtn = document.querySelector(
+            'button[aria-label="close"], button[aria-label="Close"], [data-testid="close-button"]'
+          ) ?? dialog?.querySelector(".MuiIconButton-root");
+          if (closeBtn) {
+            closeBtn.click();
+          } else {
+            (dialog ?? document).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+          }
+          await new Promise((r) => setTimeout(r, 500));
+        }
       }
       var syncing = false;
       async function runSync() {
@@ -503,7 +365,7 @@
         sendMessage({ type: "SYNC_PROGRESS", platform: "Costco", scraped: 0, message: "Getting auth\u2026" });
         const auth = await getAuth();
         if (!auth) {
-          sendMessage({ type: "SYNC_ERROR", platform: "Costco", error: "Could not get Costco auth token \u2014 make sure you are logged in." });
+          sendMessage({ type: "SYNC_ERROR", platform: "Costco", error: "No auth token \u2014 hard-refresh the Costco orders page, wait for orders to load, then sync." });
           setBadge("!", "#ef4444");
           syncing = false;
           return;
@@ -556,34 +418,27 @@
         }
         const filteredOrders = allOrders.filter((o) => new Date(o.orderDate) >= sinceDate);
         console.log("[CST] filtered to", filteredOrders.length, "orders on/after", startDate, "(dropped", allOrders.length - filteredOrders.length, "older)");
-        if (filteredOrders.length === 0) {
-          setBadge("\u2014");
-          sendMessage({ type: "SYNC_DONE", result: { platform: "Costco", scraped: 0, imported: 0, updated: 0 } });
-          syncing = false;
-          return;
-        }
         try {
-          const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? "", settings.userId, filteredOrders);
+          const result = filteredOrders.length > 0 ? await pushOrders(settings.trackerUrl, settings.apiKey ?? "", settings.userId, filteredOrders) : { imported: 0, updated: 0 };
           sendMessage({ type: "SYNC_PROGRESS", platform: "Costco", scraped: filteredOrders.length, message: "Fetching receipts\u2026" });
+          await clickThroughReceiptButtons();
           let receiptResult = { linked: 0, unlinked: 0, skipped: 0 };
           try {
-            const barcodes = await fetchReceiptList(auth, startDate, endDate);
-            if (barcodes.length > 0) {
-              const details = [];
-              for (const barcode of barcodes) {
-                await new Promise((r) => setTimeout(r, 300));
-                const detail = await fetchReceiptDetail(auth, barcode);
-                if (detail) details.push(detail);
-              }
-              if (details.length > 0) {
-                receiptResult = await pushReceipts(settings.trackerUrl, settings.apiKey ?? "", details);
-              }
+            const captured2 = await fetchCapturedReceipts();
+            const toSend = [];
+            for (const r of captured2.list) {
+              const barcode = r.transactionBarcode;
+              toSend.push(captured2.details[barcode] ?? r);
+            }
+            console.log("[CST] captured receipts:", toSend.length);
+            if (toSend.length > 0) {
+              receiptResult = await pushReceipts(settings.trackerUrl, settings.apiKey ?? "", toSend);
             }
           } catch (e) {
             console.error("[CST] receipt sync failed (non-fatal)", e);
           }
           await setLastSync("costco", now.toISOString().split("T")[0]);
-          setBadge(`+${result.imported}`, "#22c55e");
+          setBadge(filteredOrders.length === 0 ? "\u2014" : `+${result.imported}`, filteredOrders.length === 0 ? "#6b7280" : "#22c55e");
           sendMessage({ type: "SYNC_DONE", result: { platform: "Costco", scraped: filteredOrders.length, ...result, receiptsLinked: receiptResult.linked, receiptsUnlinked: receiptResult.unlinked } });
         } catch (err) {
           setBadge("!", "#ef4444");

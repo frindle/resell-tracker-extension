@@ -250,6 +250,27 @@ async function pushReceipts(trackerUrl: string, apiKey: string, receipts: Record
   return res;
 }
 
+async function clickThroughReceiptButtons(): Promise<void> {
+  const buttons = Array.from(document.querySelectorAll<HTMLElement>('[automation-id="ViewInWareHouseReciept"]'));
+  if (buttons.length === 0) return;
+  console.log('[CST] clicking through', buttons.length, 'receipt button(s)');
+  for (const btn of buttons) {
+    btn.click();
+    await new Promise(r => setTimeout(r, 2000));
+    // Close modal — try various close button selectors, fall back to Escape on dialog
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    const closeBtn = document.querySelector<HTMLElement>(
+      'button[aria-label="close"], button[aria-label="Close"], [data-testid="close-button"]'
+    ) ?? dialog?.querySelector<HTMLElement>('.MuiIconButton-root');
+    if (closeBtn) {
+      closeBtn.click();
+    } else {
+      (dialog ?? document).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    }
+    await new Promise(r => setTimeout(r, 500));
+  }
+}
+
 let syncing = false;
 
 async function runSync() {
@@ -343,6 +364,7 @@ async function runSync() {
 
     // Push warehouse receipts captured from the page's own API calls
     sendMessage({ type: 'SYNC_PROGRESS', platform: 'Costco', scraped: filteredOrders.length, message: 'Fetching receipts…' });
+    await clickThroughReceiptButtons();
     let receiptResult = { linked: 0, unlinked: 0, skipped: 0 };
     try {
       const captured = await fetchCapturedReceipts();
