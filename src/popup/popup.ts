@@ -104,13 +104,15 @@ async function init() {
     }
   }
 
-  const cs = stored.costcoSyncStatus as { type: string; message?: string; result?: { scraped: number; imported: number; updated: number; platform: string }; error?: string; ts: number } | undefined;
+  const cs = stored.costcoSyncStatus as { type: string; message?: string; result?: { scraped: number; imported: number; updated: number; platform: string; receiptsLinked?: number; receiptsUnlinked?: number }; error?: string; ts: number } | undefined;
   if (cs) {
     if ((cs.type === 'SYNC_STARTED' || cs.type === 'SYNC_PROGRESS') && Date.now() - cs.ts < 5 * 60 * 1000) {
       setStatus('Costco', cs.message ?? 'syncing…', 'syncing');
       setSyncBtn('Costco', true);
     } else if (cs.type === 'SYNC_DONE' && cs.result) {
-      const text = cs.result.scraped === 0 ? 'no new orders' : `+${cs.result.imported} new, ${cs.result.updated} updated`;
+      const orderText = cs.result.scraped === 0 ? 'no new orders' : `+${cs.result.imported} new, ${cs.result.updated} updated`;
+      const receiptText = cs.result.receiptsLinked != null ? `, ${cs.result.receiptsLinked} receipts linked` + (cs.result.receiptsUnlinked ? `, ${cs.result.receiptsUnlinked} unlinked` : '') : '';
+      const text = orderText + receiptText;
       setStatus('Costco', text, 'ok');
     } else if (cs.type === 'SYNC_ERROR') {
       setStatus('Costco', `Error: ${cs.error}`, 'fail');
@@ -150,14 +152,15 @@ async function init() {
         setSyncBtn('BigSkyBuyers', false);
       }
     }
-    const cs = changes.costcoSyncStatus?.newValue as { type: string; message?: string; result?: { scraped: number; imported: number; updated: number; platform: string }; error?: string } | undefined;
+    const cs = changes.costcoSyncStatus?.newValue as { type: string; message?: string; result?: { scraped: number; imported: number; updated: number; platform: string; receiptsLinked?: number; receiptsUnlinked?: number }; error?: string } | undefined;
     if (cs) {
       if (cs.type === 'SYNC_STARTED' || cs.type === 'SYNC_PROGRESS') {
         setStatus('Costco', cs.message ?? 'syncing…', 'syncing');
         setSyncBtn('Costco', true);
       } else if (cs.type === 'SYNC_DONE' && cs.result) {
-        const text = cs.result.scraped === 0 ? 'no new orders' : `+${cs.result.imported} new, ${cs.result.updated} updated`;
-        setStatus('Costco', text, 'ok');
+        const orderText = cs.result.scraped === 0 ? 'no new orders' : `+${cs.result.imported} new, ${cs.result.updated} updated`;
+        const receiptText = cs.result.receiptsLinked != null ? `, ${cs.result.receiptsLinked} receipts linked` + (cs.result.receiptsUnlinked ? `, ${cs.result.receiptsUnlinked} unlinked` : '') : '';
+        setStatus('Costco', orderText + receiptText, 'ok');
         setSyncBtn('Costco', false);
       } else if (cs.type === 'SYNC_ERROR') {
         setStatus('Costco', `Error: ${cs.error}`, 'fail');
