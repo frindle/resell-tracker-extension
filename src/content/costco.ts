@@ -439,11 +439,12 @@ async function runSync() {
   try {
     const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? '', settings.userId, filteredOrders);
 
-    // Fetch and push warehouse receipts for the same date range
+    // Fetch and push warehouse receipts — always 90-day lookback so in-store receipts aren't missed
     sendMessage({ type: 'SYNC_PROGRESS', platform: 'Costco', scraped: filteredOrders.length, message: 'Fetching receipts…' });
     let receiptResult = { linked: 0, unlinked: 0, skipped: 0 };
+    const receiptStart = formatDate(new Date(Date.now() - 90 * 24 * 60 * 60 * 1000));
     try {
-      const barcodes = await fetchReceiptList(auth, startDate, endDate);
+      const barcodes = await fetchReceiptList(auth, receiptStart, endDate);
       if (barcodes.length > 0) {
         const details: Record<string, unknown>[] = [];
         for (const barcode of barcodes) {
