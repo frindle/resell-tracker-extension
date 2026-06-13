@@ -331,6 +331,31 @@
         return res;
       }
       var capturedReceiptHtml = {};
+      async function waitForDialog(timeoutMs = 6e3) {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+          const byRole = document.querySelector('[role="dialog"]');
+          if (byRole) return byRole;
+          const byPaper = document.querySelector(".MuiDialog-paper");
+          if (byPaper) return byPaper.closest(".MuiDialog-root") ?? byPaper;
+          const allMui = Array.from(document.querySelectorAll(".MuiTypography-root"));
+          const printBtn = allMui.find((el) => el.textContent?.trim() === "Print Receipt");
+          if (printBtn) {
+            const modal = printBtn.closest('[class*="Modal"], [class*="Dialog"], [class*="Paper"]');
+            if (modal) return modal;
+          }
+          await new Promise((r) => setTimeout(r, 150));
+        }
+        return null;
+      }
+      async function waitForDialogGone(timeoutMs = 3e3) {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+          const el = document.querySelector('[role="dialog"], .MuiDialog-root');
+          if (!el || el.offsetParent === null) return;
+          await new Promise((r) => setTimeout(r, 150));
+        }
+      }
       async function clickThroughReceiptButtons() {
         const buttons = Array.from(document.querySelectorAll('[automation-id="ViewInWareHouseReciept"]'));
         if (buttons.length === 0) return;
@@ -339,21 +364,24 @@
           const describedBy = btn.getAttribute("aria-describedby") ?? "";
           const barcode = describedBy.replace(/^viewRecieptBtn_/, "");
           btn.click();
-          await new Promise((r) => setTimeout(r, 2e3));
-          const dialog = document.querySelector('[role="dialog"]');
+          const dialog = await waitForDialog(6e3);
           if (dialog && barcode) {
+            await new Promise((r) => setTimeout(r, 300));
             capturedReceiptHtml[barcode] = dialog.outerHTML;
-            console.log("[CST] captured receipt HTML for", barcode);
+            console.log("[CST] captured receipt HTML for", barcode, "(", dialog.outerHTML.length, "chars)");
+          } else {
+            console.warn("[CST] dialog not found for barcode", barcode, "\u2014 skipping HTML capture");
           }
-          const closeBtn = document.querySelector(
-            'button[aria-label="close"], button[aria-label="Close"], [data-testid="close-button"]'
-          ) ?? dialog?.querySelector(".MuiIconButton-root");
+          const closeBtn = dialog?.querySelector(
+            'button[aria-label="close"], button[aria-label="Close"], [data-testid="close-button"], .MuiIconButton-root'
+          ) ?? document.querySelector('button[aria-label="close"], button[aria-label="Close"]');
           if (closeBtn) {
             closeBtn.click();
           } else {
-            (dialog ?? document).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+            document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
           }
-          await new Promise((r) => setTimeout(r, 500));
+          await waitForDialogGone(3e3);
+          await new Promise((r) => setTimeout(r, 200));
         }
       }
       var syncing = false;

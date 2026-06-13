@@ -51,6 +51,15 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.29
+- Fix Costco receipt HTML capture: replace fixed 2s wait with a poll-based wait (up to 6s) for the dialog to appear; try multiple selectors including `.MuiDialog-paper` and "Print Receipt" text fallback
+- Server now saves Costco's rendered receipt modal as an HTML attachment instead of a custom-generated PDF
+
+### 1.1.28
+- Costco receipt sync: pass captured modal HTML to server; server saves it as HTML attachment instead of generating a low-quality PDF
+- Fix receipt interceptor: detail responses (1 receipt) now overwrite the list entry so full item data is used instead of minimal list data
+- Add "Reset all (re-import)" button to /costco debug page to unlink and re-import receipts with corrected HTML
+
 ### 1.1.21
 - Add Costco warehouse receipt sync: fetches all in-warehouse receipts for the sync date range, generates a thermal-receipt-style PDF for each, and stores it as an attachment on the matching order. Receipts are auto-linked when exactly one order shares the same date; ambiguous matches surface as a link prompt on the order detail page.
 

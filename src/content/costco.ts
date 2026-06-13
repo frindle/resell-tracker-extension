@@ -252,6 +252,35 @@ async function pushReceipts(trackerUrl: string, apiKey: string, userId: string |
 
 const capturedReceiptHtml: Record<string, string> = {};
 
+async function waitForDialog(timeoutMs = 6000): Promise<HTMLElement | null> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    // MUI Dialog renders in a portal — find by role, MUI class, or "Print Receipt" text
+    const byRole = document.querySelector<HTMLElement>('[role="dialog"]');
+    if (byRole) return byRole;
+    const byPaper = document.querySelector<HTMLElement>('.MuiDialog-paper');
+    if (byPaper) return byPaper.closest<HTMLElement>('.MuiDialog-root') ?? byPaper;
+    // Last resort: any element containing "Print Receipt" text
+    const allMui = Array.from(document.querySelectorAll<HTMLElement>('.MuiTypography-root'));
+    const printBtn = allMui.find(el => el.textContent?.trim() === 'Print Receipt');
+    if (printBtn) {
+      const modal = printBtn.closest<HTMLElement>('[class*="Modal"], [class*="Dialog"], [class*="Paper"]');
+      if (modal) return modal;
+    }
+    await new Promise(r => setTimeout(r, 150));
+  }
+  return null;
+}
+
+async function waitForDialogGone(timeoutMs = 3000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const el = document.querySelector<HTMLElement>('[role="dialog"], .MuiDialog-root');
+    if (!el || el.offsetParent === null) return;
+    await new Promise(r => setTimeout(r, 150));
+  }
+}
+
 async function clickThroughReceiptButtons(): Promise<void> {
   const buttons = Array.from(document.querySelectorAll<HTMLElement>('[automation-id="ViewInWareHouseReciept"]'));
   if (buttons.length === 0) return;
@@ -262,25 +291,31 @@ async function clickThroughReceiptButtons(): Promise<void> {
     const barcode = describedBy.replace(/^viewRecieptBtn_/, '');
 
     btn.click();
-    await new Promise(r => setTimeout(r, 2000));
 
-    // Capture the rendered modal HTML
-    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    // Poll for dialog to appear (up to 6s) instead of a fixed sleep
+    const dialog = await waitForDialog(6000);
     if (dialog && barcode) {
+      // Give React one more tick to finish rendering content
+      await new Promise(r => setTimeout(r, 300));
       capturedReceiptHtml[barcode] = dialog.outerHTML;
-      console.log('[CST] captured receipt HTML for', barcode);
+      console.log('[CST] captured receipt HTML for', barcode, '(', dialog.outerHTML.length, 'chars)');
+    } else {
+      console.warn('[CST] dialog not found for barcode', barcode, '— skipping HTML capture');
     }
 
-    // Close modal — try various close button selectors, fall back to Escape on dialog
-    const closeBtn = document.querySelector<HTMLElement>(
-      'button[aria-label="close"], button[aria-label="Close"], [data-testid="close-button"]'
-    ) ?? dialog?.querySelector<HTMLElement>('.MuiIconButton-root');
+    // Close modal — try various close button selectors, fall back to Escape
+    const closeBtn = dialog?.querySelector<HTMLElement>(
+      'button[aria-label="close"], button[aria-label="Close"], [data-testid="close-button"], .MuiIconButton-root'
+    ) ?? document.querySelector<HTMLElement>('button[aria-label="close"], button[aria-label="Close"]');
     if (closeBtn) {
       closeBtn.click();
     } else {
-      (dialog ?? document).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     }
-    await new Promise(r => setTimeout(r, 500));
+
+    // Wait for dialog to actually disappear before clicking next button
+    await waitForDialogGone(3000);
+    await new Promise(r => setTimeout(r, 200));
   }
 }
 
