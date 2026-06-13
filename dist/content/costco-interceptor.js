@@ -54,21 +54,26 @@
                 const rc = data?.data?.receiptsWithCounts;
                 if (rc) {
                   const receipts = rc.receipts ?? [];
-                  if (receipts.length > 1 || receipts.length === 1 && receipts[0]?.itemArray?.length > 1) {
-                    const list = w.__costcoReceiptList ?? [];
+                  const list = w.__costcoReceiptList ?? [];
+                  const details = w.__costcoReceiptDetails ?? {};
+                  if (receipts.length > 1) {
                     for (const r of receipts) {
                       if (r.transactionBarcode && !list.find((x) => x.transactionBarcode === r.transactionBarcode)) {
                         list.push(r);
                       }
                     }
-                    w.__costcoReceiptList = list;
                     console.log("[CST-INT] fetch: accumulated receipts, total:", list.length);
                   } else if (receipts.length === 1 && receipts[0]?.transactionBarcode) {
-                    const details = w.__costcoReceiptDetails ?? {};
-                    details[receipts[0].transactionBarcode] = receipts[0];
-                    w.__costcoReceiptDetails = details;
-                    console.log("[CST-INT] fetch: stored receipt detail for", receipts[0].transactionBarcode);
+                    const r = receipts[0];
+                    const bc = r.transactionBarcode;
+                    const idx = list.findIndex((x) => x.transactionBarcode === bc);
+                    if (idx >= 0) list[idx] = r;
+                    else list.push(r);
+                    details[bc] = r;
+                    console.log("[CST-INT] fetch: stored receipt detail for", bc);
                   }
+                  w.__costcoReceiptList = list;
+                  w.__costcoReceiptDetails = details;
                 }
               }).catch(() => {
               });
@@ -111,21 +116,26 @@
                   const rc = data?.data?.receiptsWithCounts;
                   if (rc) {
                     const receipts = rc.receipts ?? [];
-                    if (receipts.length > 1 || receipts.length === 1 && receipts[0]?.itemArray?.length > 1) {
-                      const list = w.__costcoReceiptList ?? [];
+                    const list = w.__costcoReceiptList ?? [];
+                    const details = w.__costcoReceiptDetails ?? {};
+                    if (receipts.length > 1) {
                       for (const r of receipts) {
                         if (r.transactionBarcode && !list.find((x) => x.transactionBarcode === r.transactionBarcode)) {
                           list.push(r);
                         }
                       }
-                      w.__costcoReceiptList = list;
                       console.log("[CST-INT] accumulated receipts, total:", list.length);
                     } else if (receipts.length === 1 && receipts[0]?.transactionBarcode) {
-                      const details = w.__costcoReceiptDetails ?? {};
-                      details[receipts[0].transactionBarcode] = receipts[0];
-                      w.__costcoReceiptDetails = details;
-                      console.log("[CST-INT] stored receipt detail for", receipts[0].transactionBarcode);
+                      const r = receipts[0];
+                      const bc = r.transactionBarcode;
+                      const idx = list.findIndex((x) => x.transactionBarcode === bc);
+                      if (idx >= 0) list[idx] = r;
+                      else list.push(r);
+                      details[bc] = r;
+                      console.log("[CST-INT] stored receipt detail for", bc);
                     }
+                    w.__costcoReceiptList = list;
+                    w.__costcoReceiptDetails = details;
                   }
                 } catch {
                 }

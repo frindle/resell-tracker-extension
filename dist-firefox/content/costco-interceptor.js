@@ -75,13 +75,32 @@
               if (this.status < 400 && url.includes("order/v1/orders/graphql")) {
                 try {
                   const data = JSON.parse(this.responseText);
+                  const w = window;
                   const pages = data?.data?.getOnlineOrders;
                   if (Array.isArray(pages)) {
-                    const w = window;
                     const existing = w.__costcoAllOrders ?? [];
                     for (const page of pages) existing.push(page);
                     w.__costcoAllOrders = existing;
                     console.log("[CST-INT] accumulated orders, total pages:", existing.length);
+                  }
+                  const rc = data?.data?.receiptsWithCounts;
+                  if (rc) {
+                    const receipts = rc.receipts ?? [];
+                    if (receipts.length > 1 || receipts.length === 1 && receipts[0]?.itemArray?.length > 1) {
+                      const list = w.__costcoReceiptList ?? [];
+                      for (const r of receipts) {
+                        if (r.transactionBarcode && !list.find((x) => x.transactionBarcode === r.transactionBarcode)) {
+                          list.push(r);
+                        }
+                      }
+                      w.__costcoReceiptList = list;
+                      console.log("[CST-INT] accumulated receipts, total:", list.length);
+                    } else if (receipts.length === 1 && receipts[0]?.transactionBarcode) {
+                      const details = w.__costcoReceiptDetails ?? {};
+                      details[receipts[0].transactionBarcode] = receipts[0];
+                      w.__costcoReceiptDetails = details;
+                      console.log("[CST-INT] stored receipt detail for", receipts[0].transactionBarcode);
+                    }
                   }
                 } catch {
                 }

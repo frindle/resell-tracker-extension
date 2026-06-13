@@ -245,20 +245,33 @@ async function fetchCapturedReceipts(): Promise<{ list: Record<string, unknown>[
 }
 
 async function pushReceipts(trackerUrl: string, apiKey: string, userId: string | number, receipts: Record<string, unknown>[]): Promise<{ linked: number; unlinked: number; skipped: number }> {
-  const res = await chrome.runtime.sendMessage({ type: 'PUSH_COSTCO_RECEIPTS', trackerUrl, apiKey, userId, receipts });
+  const res = await chrome.runtime.sendMessage({ type: 'PUSH_COSTCO_RECEIPTS', trackerUrl, apiKey, userId, receipts, receiptHtml: capturedReceiptHtml });
   if (res?.error) throw new Error(res.error);
   return res;
 }
+
+const capturedReceiptHtml: Record<string, string> = {};
 
 async function clickThroughReceiptButtons(): Promise<void> {
   const buttons = Array.from(document.querySelectorAll<HTMLElement>('[automation-id="ViewInWareHouseReciept"]'));
   if (buttons.length === 0) return;
   console.log('[CST] clicking through', buttons.length, 'receipt button(s)');
   for (const btn of buttons) {
+    // Extract barcode from aria-describedby="viewRecieptBtn_BARCODE"
+    const describedBy = btn.getAttribute('aria-describedby') ?? '';
+    const barcode = describedBy.replace(/^viewRecieptBtn_/, '');
+
     btn.click();
     await new Promise(r => setTimeout(r, 2000));
-    // Close modal — try various close button selectors, fall back to Escape on dialog
+
+    // Capture the rendered modal HTML
     const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    if (dialog && barcode) {
+      capturedReceiptHtml[barcode] = dialog.outerHTML;
+      console.log('[CST] captured receipt HTML for', barcode);
+    }
+
+    // Close modal — try various close button selectors, fall back to Escape on dialog
     const closeBtn = document.querySelector<HTMLElement>(
       'button[aria-label="close"], button[aria-label="Close"], [data-testid="close-button"]'
     ) ?? dialog?.querySelector<HTMLElement>('.MuiIconButton-root');

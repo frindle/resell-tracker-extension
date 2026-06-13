@@ -275,7 +275,9 @@
             setStatus("Costco", cs.message ?? "syncing\u2026", "syncing");
             setSyncBtn("Costco", true);
           } else if (cs.type === "SYNC_DONE" && cs.result) {
-            const text = cs.result.scraped === 0 ? "no new orders" : `+${cs.result.imported} new, ${cs.result.updated} updated`;
+            const orderText = cs.result.scraped === 0 ? "no new orders" : `+${cs.result.imported} new, ${cs.result.updated} updated`;
+            const receiptText = cs.result.receiptsLinked != null ? `, ${cs.result.receiptsLinked} receipts linked` + (cs.result.receiptsUnlinked ? `, ${cs.result.receiptsUnlinked} unlinked` : "") : "";
+            const text = orderText + receiptText;
             setStatus("Costco", text, "ok");
           } else if (cs.type === "SYNC_ERROR") {
             setStatus("Costco", `Error: ${cs.error}`, "fail");
@@ -318,8 +320,9 @@
               setStatus("Costco", cs2.message ?? "syncing\u2026", "syncing");
               setSyncBtn("Costco", true);
             } else if (cs2.type === "SYNC_DONE" && cs2.result) {
-              const text = cs2.result.scraped === 0 ? "no new orders" : `+${cs2.result.imported} new, ${cs2.result.updated} updated`;
-              setStatus("Costco", text, "ok");
+              const orderText = cs2.result.scraped === 0 ? "no new orders" : `+${cs2.result.imported} new, ${cs2.result.updated} updated`;
+              const receiptText = cs2.result.receiptsLinked != null ? `, ${cs2.result.receiptsLinked} receipts linked` + (cs2.result.receiptsUnlinked ? `, ${cs2.result.receiptsUnlinked} unlinked` : "") : "";
+              setStatus("Costco", orderText + receiptText, "ok");
               setSyncBtn("Costco", false);
             } else if (cs2.type === "SYNC_ERROR") {
               setStatus("Costco", `Error: ${cs2.error}`, "fail");

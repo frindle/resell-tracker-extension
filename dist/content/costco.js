@@ -326,18 +326,25 @@
         }
       }
       async function pushReceipts(trackerUrl, apiKey, userId, receipts) {
-        const res = await chrome.runtime.sendMessage({ type: "PUSH_COSTCO_RECEIPTS", trackerUrl, apiKey, userId, receipts });
+        const res = await chrome.runtime.sendMessage({ type: "PUSH_COSTCO_RECEIPTS", trackerUrl, apiKey, userId, receipts, receiptHtml: capturedReceiptHtml });
         if (res?.error) throw new Error(res.error);
         return res;
       }
+      var capturedReceiptHtml = {};
       async function clickThroughReceiptButtons() {
         const buttons = Array.from(document.querySelectorAll('[automation-id="ViewInWareHouseReciept"]'));
         if (buttons.length === 0) return;
         console.log("[CST] clicking through", buttons.length, "receipt button(s)");
         for (const btn of buttons) {
+          const describedBy = btn.getAttribute("aria-describedby") ?? "";
+          const barcode = describedBy.replace(/^viewRecieptBtn_/, "");
           btn.click();
           await new Promise((r) => setTimeout(r, 2e3));
           const dialog = document.querySelector('[role="dialog"]');
+          if (dialog && barcode) {
+            capturedReceiptHtml[barcode] = dialog.outerHTML;
+            console.log("[CST] captured receipt HTML for", barcode);
+          }
           const closeBtn = document.querySelector(
             'button[aria-label="close"], button[aria-label="Close"], [data-testid="close-button"]'
           ) ?? dialog?.querySelector(".MuiIconButton-root");
