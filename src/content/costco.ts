@@ -313,25 +313,13 @@ async function clickThroughReceiptButtons(): Promise<void> {
     if (dialog && barcode) {
       await waitForDialogContent(dialog, 8000);
 
-      // Costco renders receipts onto canvas elements (PDF-viewer style).
-      // toDataURL() captures the actual pixels; outerHTML of canvas is always blank.
-      const canvases = Array.from(dialog.querySelectorAll<HTMLCanvasElement>('canvas'));
-      if (canvases.length > 0) {
-        const imgs = canvases.map(c => {
-          try {
-            const dataUrl = c.toDataURL('image/png');
-            return `<img src="${dataUrl}" style="max-width:100%;display:block;margin:0 auto;">`;
-          } catch {
-            return '';
-          }
-        }).filter(Boolean).join('\n');
-        capturedReceiptHtml[barcode] = `<div style="background:#fff;padding:16px;text-align:center;">${imgs}</div>`;
-        console.log('[CST] captured', canvases.length, 'canvas(es) as PNG for receipt', barcode);
-      } else {
-        const pageStyles = capturePageStyles();
-        capturedReceiptHtml[barcode] = pageStyles + dialog.outerHTML;
-        console.log('[CST] captured receipt HTML for', barcode, '(', capturedReceiptHtml[barcode].length, 'chars)');
-      }
+      // MUI Dialog renders as: fixed overlay > fixed container (role=dialog) > .MuiDialog-paper (the card)
+      // Capturing role=dialog or its parent gives a fixed-position element that renders off-screen in a
+      // standalone HTML file. Capture .MuiDialog-paper (the actual card content) instead.
+      const paper = dialog.querySelector<HTMLElement>('.MuiDialog-paper') ?? dialog;
+      const pageStyles = capturePageStyles();
+      capturedReceiptHtml[barcode] = pageStyles + paper.outerHTML;
+      console.log('[CST] captured receipt HTML for', barcode, '(', capturedReceiptHtml[barcode].length, 'chars paper=', paper.className.slice(0, 60), ')');
     } else {
       console.warn('[CST] dialog not found for barcode', barcode, '— skipping HTML capture');
     }

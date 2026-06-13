@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.32
+- Fix blank receipt: capture .MuiDialog-paper (the card content) instead of role=dialog outer element which has fixed positioning and renders off-screen in a standalone HTML file
+
 ### 1.1.31
 - Fix Costco receipt capture: detect canvas-rendered receipt (Costco renders receipt as PDF onto canvas); use toDataURL() to capture pixels as PNG data URLs embedded in the saved HTML instead of blank outerHTML
 
