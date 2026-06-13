@@ -338,15 +338,20 @@
           if (byRole) return byRole;
           const byPaper = document.querySelector(".MuiDialog-paper");
           if (byPaper) return byPaper.closest(".MuiDialog-root") ?? byPaper;
-          const allMui = Array.from(document.querySelectorAll(".MuiTypography-root"));
-          const printBtn = allMui.find((el) => el.textContent?.trim() === "Print Receipt");
-          if (printBtn) {
-            const modal = printBtn.closest('[class*="Modal"], [class*="Dialog"], [class*="Paper"]');
-            if (modal) return modal;
-          }
           await new Promise((r) => setTimeout(r, 150));
         }
         return null;
+      }
+      async function waitForDialogContent(dialog, timeoutMs = 8e3) {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+          const hasPrintBtn = !!Array.from(dialog.querySelectorAll("*")).find(
+            (el) => el.textContent?.trim() === "Print Receipt"
+          );
+          if (hasPrintBtn) return;
+          if (dialog.innerHTML.length > 8e3) return;
+          await new Promise((r) => setTimeout(r, 200));
+        }
       }
       async function waitForDialogGone(timeoutMs = 3e3) {
         const start = Date.now();
@@ -355,6 +360,11 @@
           if (!el || el.offsetParent === null) return;
           await new Promise((r) => setTimeout(r, 150));
         }
+      }
+      function capturePageStyles() {
+        const links = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).map((l) => l.outerHTML).join("");
+        const styles = Array.from(document.querySelectorAll("style")).map((s) => `<style>${s.textContent ?? ""}</style>`).join("");
+        return links + styles;
       }
       async function clickThroughReceiptButtons() {
         const buttons = Array.from(document.querySelectorAll('[automation-id="ViewInWareHouseReciept"]'));
@@ -366,9 +376,10 @@
           btn.click();
           const dialog = await waitForDialog(6e3);
           if (dialog && barcode) {
-            await new Promise((r) => setTimeout(r, 300));
-            capturedReceiptHtml[barcode] = dialog.outerHTML;
-            console.log("[CST] captured receipt HTML for", barcode, "(", dialog.outerHTML.length, "chars)");
+            await waitForDialogContent(dialog, 8e3);
+            const pageStyles = capturePageStyles();
+            capturedReceiptHtml[barcode] = pageStyles + dialog.outerHTML;
+            console.log("[CST] captured receipt HTML for", barcode, "(", capturedReceiptHtml[barcode].length, "chars)");
           } else {
             console.warn("[CST] dialog not found for barcode", barcode, "\u2014 skipping HTML capture");
           }

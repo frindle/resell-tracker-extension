@@ -51,6 +51,10 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.30
+- Fix Costco receipt HTML capture: wait for "Print Receipt" button to appear inside the dialog (confirms receipt content is fully rendered) before capturing outerHTML
+- Capture page's MUI/emotion style tags and external stylesheets alongside the dialog HTML so the saved receipt renders correctly when opened
+
 ### 1.1.29
 - Fix Costco receipt HTML capture: replace fixed 2s wait with a poll-based wait (up to 6s) for the dialog to appear; try multiple selectors including `.MuiDialog-paper` and "Print Receipt" text fallback
 - Server now saves Costco's rendered receipt modal as an HTML attachment instead of a custom-generated PDF
