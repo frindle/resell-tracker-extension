@@ -374,9 +374,10 @@ async function runSync() {
         // Prefer full detail if we captured it, otherwise use list data
         toSend.push(captured.details[barcode] ?? r);
       }
-      console.log('[CST] captured receipts:', toSend.length);
+      console.log('[CST] captured receipts:', toSend.length, 'userId=', settings.userId, 'trackerUrl=', settings.trackerUrl);
       if (toSend.length > 0) {
         receiptResult = await pushReceipts(settings.trackerUrl, settings.apiKey ?? '', settings.userId, toSend);
+        console.log('[CST] receipt push result:', JSON.stringify(receiptResult));
       }
     } catch (e) {
       console.error('[CST] receipt sync failed (non-fatal)', e);
