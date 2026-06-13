@@ -245,97 +245,9 @@ async function fetchCapturedReceipts(): Promise<{ list: Record<string, unknown>[
 }
 
 async function pushReceipts(trackerUrl: string, apiKey: string, userId: string | number, receipts: Record<string, unknown>[]): Promise<{ linked: number; unlinked: number; skipped: number }> {
-  const res = await chrome.runtime.sendMessage({ type: 'PUSH_COSTCO_RECEIPTS', trackerUrl, apiKey, userId, receipts, receiptHtml: capturedReceiptHtml });
+  const res = await chrome.runtime.sendMessage({ type: 'PUSH_COSTCO_RECEIPTS', trackerUrl, apiKey, userId, receipts });
   if (res?.error) throw new Error(res.error);
   return res;
-}
-
-const capturedReceiptHtml: Record<string, string> = {};
-
-async function waitForDialog(timeoutMs = 6000): Promise<HTMLElement | null> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const byRole = document.querySelector<HTMLElement>('[role="dialog"]');
-    if (byRole) return byRole;
-    const byPaper = document.querySelector<HTMLElement>('.MuiDialog-paper');
-    if (byPaper) return byPaper.closest<HTMLElement>('.MuiDialog-root') ?? byPaper;
-    await new Promise(r => setTimeout(r, 150));
-  }
-  return null;
-}
-
-async function waitForDialogContent(dialog: HTMLElement, timeoutMs = 8000): Promise<void> {
-  // Wait until the dialog has rendered actual receipt content (not just a loading spinner).
-  // "Print Receipt" text appearing is a reliable signal that the full receipt is rendered.
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const hasPrintBtn = !!Array.from(dialog.querySelectorAll('*')).find(
-      el => el.textContent?.trim() === 'Print Receipt'
-    );
-    if (hasPrintBtn) return;
-    // Also accept if dialog is large enough to have real content
-    if (dialog.innerHTML.length > 8000) return;
-    await new Promise(r => setTimeout(r, 200));
-  }
-}
-
-async function waitForDialogGone(timeoutMs = 3000): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const el = document.querySelector<HTMLElement>('[role="dialog"], .MuiDialog-root');
-    if (!el || el.offsetParent === null) return;
-    await new Promise(r => setTimeout(r, 150));
-  }
-}
-
-function capturePageStyles(): string {
-  // MUI/emotion injects styles as <style> tags; external sheets via <link>
-  const links = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]'))
-    .map(l => l.outerHTML)
-    .join('');
-  const styles = Array.from(document.querySelectorAll<HTMLStyleElement>('style'))
-    .map(s => `<style>${s.textContent ?? ''}</style>`)
-    .join('');
-  return links + styles;
-}
-
-async function clickThroughReceiptButtons(): Promise<void> {
-  const buttons = Array.from(document.querySelectorAll<HTMLElement>('[automation-id="ViewInWareHouseReciept"]'));
-  if (buttons.length === 0) return;
-  console.log('[CST] clicking through', buttons.length, 'receipt button(s)');
-  for (const btn of buttons) {
-    const describedBy = btn.getAttribute('aria-describedby') ?? '';
-    const barcode = describedBy.replace(/^viewRecieptBtn_/, '');
-
-    btn.click();
-
-    const dialog = await waitForDialog(6000);
-    if (dialog && barcode) {
-      await waitForDialogContent(dialog, 8000);
-
-      // MUI Dialog renders as: fixed overlay > fixed container (role=dialog) > .MuiDialog-paper (the card)
-      // Capturing role=dialog or its parent gives a fixed-position element that renders off-screen in a
-      // standalone HTML file. Capture .MuiDialog-paper (the actual card content) instead.
-      const paper = dialog.querySelector<HTMLElement>('.MuiDialog-paper') ?? dialog;
-      const pageStyles = capturePageStyles();
-      capturedReceiptHtml[barcode] = pageStyles + paper.outerHTML;
-      console.log('[CST] captured receipt HTML for', barcode, '(', capturedReceiptHtml[barcode].length, 'chars paper=', paper.className.slice(0, 60), ')');
-    } else {
-      console.warn('[CST] dialog not found for barcode', barcode, '— skipping HTML capture');
-    }
-
-    const closeBtn = dialog?.querySelector<HTMLElement>(
-      'button[aria-label="close"], button[aria-label="Close"], [data-testid="close-button"], .MuiIconButton-root'
-    ) ?? document.querySelector<HTMLElement>('button[aria-label="close"], button[aria-label="Close"]');
-    if (closeBtn) {
-      closeBtn.click();
-    } else {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    }
-
-    await waitForDialogGone(3000);
-    await new Promise(r => setTimeout(r, 200));
-  }
 }
 
 let syncing = false;
@@ -431,7 +343,6 @@ async function runSync() {
 
     // Push warehouse receipts captured from the page's own API calls
     sendMessage({ type: 'SYNC_PROGRESS', platform: 'Costco', scraped: filteredOrders.length, message: 'Fetching receipts…' });
-    await clickThroughReceiptButtons();
     let receiptResult = { linked: 0, unlinked: 0, skipped: 0 };
     try {
       const captured = await fetchCapturedReceipts();
