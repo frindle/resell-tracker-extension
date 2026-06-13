@@ -44,6 +44,30 @@ console.log('[CST-INT] interceptor script executing');
     const res = await origFetch(input, init);
     if (url.includes('ecom-api.costco.com')) {
       console.log('[CST-INT] response ←', url, res.status, res.ok ? 'OK' : 'FAIL');
+      if (res.ok && url.includes('order/v1/orders/graphql')) {
+        res.clone().json().then((data: Record<string, unknown>) => {
+          const w = window as Record<string, unknown>;
+          const rc = (data?.data as Record<string, unknown>)?.receiptsWithCounts as { receipts?: Record<string, unknown>[] } | undefined;
+          if (rc) {
+            const receipts = rc.receipts ?? [];
+            if (receipts.length > 1 || (receipts.length === 1 && (receipts[0]?.itemArray as unknown[])?.length > 1)) {
+              const list = (w.__costcoReceiptList as unknown[]) ?? [];
+              for (const r of receipts) {
+                if (r.transactionBarcode && !list.find((x: unknown) => (x as Record<string, unknown>).transactionBarcode === r.transactionBarcode)) {
+                  list.push(r);
+                }
+              }
+              w.__costcoReceiptList = list;
+              console.log('[CST-INT] fetch: accumulated receipts, total:', list.length);
+            } else if (receipts.length === 1 && receipts[0]?.transactionBarcode) {
+              const details = (w.__costcoReceiptDetails as Record<string, unknown>) ?? {};
+              details[receipts[0].transactionBarcode as string] = receipts[0];
+              w.__costcoReceiptDetails = details;
+              console.log('[CST-INT] fetch: stored receipt detail for', receipts[0].transactionBarcode);
+            }
+          }
+        }).catch(() => {});
+      }
     }
     return res;
   };
