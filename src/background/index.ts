@@ -452,6 +452,7 @@ async function handleFetchUsers(trackerUrl: string) {
 
 async function handlePushCostcoReceipts(trackerUrl: string, apiKey: string, userId: string | number | undefined, receipts: Record<string, unknown>[]) {
   const url = `${upgradeUrl(trackerUrl)}/api/costco/receipts`;
+  console.log('[RECEIPTS] pushing', receipts.length, 'receipts, userId=', userId, 'url=', url);
   const res = await fetch(url, {
     method: 'POST',
     headers: {
@@ -461,11 +462,10 @@ async function handlePushCostcoReceipts(trackerUrl: string, apiKey: string, user
     },
     body: JSON.stringify(receipts),
   });
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`Tracker API error ${res.status} (${url}): ${text}`);
-  }
-  return res.json();
+  const text = await res.text();
+  console.log('[RECEIPTS] response', res.status, text.slice(0, 200));
+  if (!res.ok) throw new Error(`Tracker API error ${res.status} (${url}): ${text}`);
+  return JSON.parse(text);
 }
 
 async function handlePushOrders(
