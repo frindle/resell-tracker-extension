@@ -436,7 +436,7 @@
           headers: {
             "Content-Type": "application/json",
             ...apiKey ? { "X-API-Key": apiKey } : {},
-            ...userId != null ? { "x-user-id": String(userId) } : {}
+            ...userId != null ? { "X-Extension-User-Id": String(userId) } : {}
           },
           body: JSON.stringify(receipts)
         });
