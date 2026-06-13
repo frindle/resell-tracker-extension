@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.31
+- Fix Costco receipt capture: detect canvas-rendered receipt (Costco renders receipt as PDF onto canvas); use toDataURL() to capture pixels as PNG data URLs embedded in the saved HTML instead of blank outerHTML
+
 ### 1.1.30
 - Fix Costco receipt HTML capture: wait for "Print Receipt" button to appear inside the dialog (confirms receipt content is fully rendered) before capturing outerHTML
 - Capture page's MUI/emotion style tags and external stylesheets alongside the dialog HTML so the saved receipt renders correctly when opened
