@@ -178,39 +178,6 @@
     "src/popup/popup.ts"() {
       var import_browser_polyfill_min2 = __toESM(require_browser_polyfill_min());
       init_storage();
-      function setStatus(platform, text, cls) {
-        const id = platform === "Amazon" ? "amazonStatus" : platform === "Walmart" ? "walmartStatus" : platform === "Costco" ? "costcoStatus" : "bigskyStatus";
-        const el = document.getElementById(id);
-        el.textContent = text;
-        el.className = `status ${cls}`;
-      }
-      function setMeta(platform, text) {
-        const id = platform === "Amazon" ? "amazonMeta" : platform === "Walmart" ? "walmartMeta" : platform === "Costco" ? "costcoMeta" : "bigskyMeta";
-        const el = document.getElementById(id);
-        el.textContent = text;
-      }
-      function setSyncBtn(platform, disabled, cancel = false) {
-        const id = platform === "Amazon" ? "syncAmazon" : platform === "Walmart" ? "syncWalmart" : platform === "Costco" ? "syncCostco" : "syncBigsky";
-        const btn = document.getElementById(id);
-        btn.disabled = disabled && !cancel;
-        btn.textContent = cancel ? "Cancel" : "Sync";
-        btn.dataset.cancel = cancel ? "1" : "";
-      }
-      async function cancelSync(platform) {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!tab?.id) return;
-        chrome.tabs.sendMessage(tab.id, { type: "CANCEL_SYNC", platform }).catch(() => {
-        });
-        setSyncBtn(platform, false);
-        setStatus(platform, "cancelled", "idle");
-      }
-      async function triggerSync(platform) {
-        setSyncBtn(platform, true, platform === "Amazon");
-        setStatus(platform, "syncing\u2026", "syncing");
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        chrome.runtime.sendMessage({ type: "TRIGGER_SYNC", platform, activeTabId: tab?.id, activeTabUrl: tab?.url }).catch(() => {
-        });
-      }
       async function checkVersions(trackerUrl) {
         const manifest = chrome.runtime.getManifest();
         const extVersion = manifest.version;
@@ -240,10 +207,6 @@
         }
         checkVersions(settings.trackerUrl).catch(() => {
         });
-        if (settings.amazonLastSync) setMeta("Amazon", `Last sync: ${settings.amazonLastSync}`);
-        if (settings.walmartLastSync) setMeta("Walmart", `Last sync: ${settings.walmartLastSync}`);
-        if (settings.costcoLastSync) setMeta("Costco", `Last sync: ${settings.costcoLastSync}`);
-        if (settings.bigskyLastSync) setMeta("BigSkyBuyers", `Last sync: ${settings.bigskyLastSync}`);
         const pollStored = await chrome.storage.local.get("lastPoll");
         if (pollStored.lastPoll) {
           const ago = Math.round((Date.now() - pollStored.lastPoll) / 1e3);
@@ -251,134 +214,9 @@
           document.getElementById("pollStatus").textContent = "active";
           document.getElementById("pollStatus").className = "status ok";
         }
-        const stored = await chrome.storage.local.get(["amazonSyncStatus", "walmartSyncStatus", "costcoSyncStatus", "bigskyStatus"]);
-        const s = stored.amazonSyncStatus;
-        if (s) {
-          if ((s.type === "SYNC_STARTED" || s.type === "SYNC_PROGRESS") && Date.now() - s.ts < 5 * 60 * 1e3) {
-            setStatus("Amazon", s.message ?? "syncing\u2026", "syncing");
-            setSyncBtn("Amazon", true, true);
-          } else if (s.type === "SYNC_DONE" && s.result) {
-            const text = s.result.scraped === 0 ? "no new orders" : `+${s.result.imported} new, ${s.result.updated} updated`;
-            setStatus("Amazon", text, "ok");
-          } else if (s.type === "SYNC_ERROR") {
-            setStatus("Amazon", `Error: ${s.error}`, "fail");
-          }
-        }
-        const ws = stored.walmartSyncStatus;
-        if (ws) {
-          if ((ws.type === "SYNC_STARTED" || ws.type === "SYNC_PROGRESS") && Date.now() - ws.ts < 5 * 60 * 1e3) {
-            setStatus("Walmart", ws.message ?? "syncing\u2026", "syncing");
-            setSyncBtn("Walmart", true);
-          } else if (ws.type === "SYNC_DONE" && ws.result) {
-            const text = ws.result.scraped === 0 ? "no new orders" : `+${ws.result.imported} new, ${ws.result.updated} updated`;
-            setStatus("Walmart", text, "ok");
-          } else if (ws.type === "SYNC_ERROR") {
-            setStatus("Walmart", `Error: ${ws.error}`, "fail");
-          }
-        }
-        const cs = stored.costcoSyncStatus;
-        if (cs) {
-          if ((cs.type === "SYNC_STARTED" || cs.type === "SYNC_PROGRESS") && Date.now() - cs.ts < 5 * 60 * 1e3) {
-            setStatus("Costco", cs.message ?? "syncing\u2026", "syncing");
-            setSyncBtn("Costco", true);
-          } else if (cs.type === "SYNC_DONE" && cs.result) {
-            const orderText = cs.result.scraped === 0 ? "no new orders" : `+${cs.result.imported} new, ${cs.result.updated} updated`;
-            const receiptText = cs.result.receiptsLinked != null ? `, ${cs.result.receiptsLinked} receipts linked` + (cs.result.receiptsUnlinked ? `, ${cs.result.receiptsUnlinked} unlinked` : "") : "";
-            const text = orderText + receiptText;
-            setStatus("Costco", text, "ok");
-          } else if (cs.type === "SYNC_ERROR") {
-            setStatus("Costco", `Error: ${cs.error}`, "fail");
-          }
-        }
-        const bs = stored.bigskyStatus;
-        if (bs) {
-          if ((bs.type === "SYNC_STARTED" || bs.type === "SYNC_PROGRESS") && Date.now() - bs.ts < 5 * 60 * 1e3) {
-            setStatus("BigSkyBuyers", bs.message ?? "syncing\u2026", "syncing");
-            setSyncBtn("BigSkyBuyers", true);
-          } else if (bs.type === "SYNC_DONE" && bs.result) {
-            const text = bs.result.updated === 0 ? "no new orders" : `${bs.result.updated} updated`;
-            setStatus("BigSkyBuyers", text, "ok");
-          } else if (bs.type === "SYNC_ERROR") {
-            setStatus("BigSkyBuyers", `Error: ${bs.error}`, "fail");
-          }
-        }
-        chrome.storage.onChanged.addListener((changes) => {
-          if (changes.amazonLastSync?.newValue) setMeta("Amazon", `Last sync: ${changes.amazonLastSync.newValue}`);
-          if (changes.walmartLastSync?.newValue) setMeta("Walmart", `Last sync: ${changes.walmartLastSync.newValue}`);
-          if (changes.costcoLastSync?.newValue) setMeta("Costco", `Last sync: ${changes.costcoLastSync.newValue}`);
-          if (changes.bigskyLastSync?.newValue) setMeta("BigSkyBuyers", `Last sync: ${changes.bigskyLastSync.newValue}`);
-          const bs2 = changes.bigskyStatus?.newValue;
-          if (bs2) {
-            if (bs2.type === "SYNC_STARTED" || bs2.type === "SYNC_PROGRESS") {
-              setStatus("BigSkyBuyers", bs2.message ?? "syncing\u2026", "syncing");
-              setSyncBtn("BigSkyBuyers", true);
-            } else if (bs2.type === "SYNC_DONE" && bs2.result) {
-              const text = bs2.result.updated === 0 ? "no new orders" : `${bs2.result.updated} updated`;
-              setStatus("BigSkyBuyers", text, "ok");
-              setSyncBtn("BigSkyBuyers", false);
-            } else if (bs2.type === "SYNC_ERROR") {
-              setStatus("BigSkyBuyers", `Error: ${bs2.error}`, "fail");
-              setSyncBtn("BigSkyBuyers", false);
-            }
-          }
-          const cs2 = changes.costcoSyncStatus?.newValue;
-          if (cs2) {
-            if (cs2.type === "SYNC_STARTED" || cs2.type === "SYNC_PROGRESS") {
-              setStatus("Costco", cs2.message ?? "syncing\u2026", "syncing");
-              setSyncBtn("Costco", true);
-            } else if (cs2.type === "SYNC_DONE" && cs2.result) {
-              const orderText = cs2.result.scraped === 0 ? "no new orders" : `+${cs2.result.imported} new, ${cs2.result.updated} updated`;
-              const receiptText = cs2.result.receiptsLinked != null ? `, ${cs2.result.receiptsLinked} receipts linked` + (cs2.result.receiptsUnlinked ? `, ${cs2.result.receiptsUnlinked} unlinked` : "") : "";
-              setStatus("Costco", orderText + receiptText, "ok");
-              setSyncBtn("Costco", false);
-            } else if (cs2.type === "SYNC_ERROR") {
-              setStatus("Costco", `Error: ${cs2.error}`, "fail");
-              setSyncBtn("Costco", false);
-            }
-          }
-          const s2 = changes.amazonSyncStatus?.newValue;
-          if (s2) {
-            if (s2.type === "SYNC_STARTED" || s2.type === "SYNC_PROGRESS") {
-              setStatus("Amazon", s2.message ?? "syncing\u2026", "syncing");
-              setSyncBtn("Amazon", true, true);
-            } else if (s2.type === "SYNC_DONE" && s2.result) {
-              const text = s2.result.scraped === 0 ? "no new orders" : `+${s2.result.imported} new, ${s2.result.updated} updated`;
-              setStatus("Amazon", text, "ok");
-              setSyncBtn("Amazon", false);
-            } else if (s2.type === "SYNC_ERROR") {
-              setStatus("Amazon", `Error: ${s2.error}`, "fail");
-              setSyncBtn("Amazon", false);
-            }
-          }
-        });
-        document.getElementById("syncAmazon").addEventListener("click", (e) => {
-          const btn = e.currentTarget;
-          if (btn.dataset.cancel) cancelSync("Amazon");
-          else triggerSync("Amazon");
-        });
-        document.getElementById("syncWalmart").addEventListener("click", () => triggerSync("Walmart"));
-        document.getElementById("syncCostco").addEventListener("click", () => triggerSync("Costco"));
-        document.getElementById("syncBigsky").addEventListener("click", () => triggerSync("BigSkyBuyers"));
         document.getElementById("openSettings").addEventListener("click", (e) => {
           e.preventDefault();
           chrome.runtime.openOptionsPage();
-        });
-        chrome.runtime.onMessage.addListener((message) => {
-          if (message.type === "SYNC_STARTED") {
-            setStatus(message.platform, "syncing\u2026", "syncing");
-            setSyncBtn(message.platform, true, message.platform === "Amazon");
-          } else if (message.type === "SYNC_PROGRESS") {
-            setStatus(message.platform, message.message, "syncing");
-          } else if (message.type === "SYNC_DONE") {
-            const { result } = message;
-            const text = result.scraped === 0 ? "no new orders" : `+${result.imported} new, ${result.updated} updated`;
-            setStatus(result.platform, text, "ok");
-            setMeta(result.platform, `Last sync: ${(/* @__PURE__ */ new Date()).toISOString().split("T")[0]}`);
-            setSyncBtn(result.platform, false);
-          } else if (message.type === "SYNC_ERROR") {
-            setStatus(message.platform, `Error: ${message.error}`, "fail");
-            setSyncBtn(message.platform, false);
-          }
         });
       }
       init();
