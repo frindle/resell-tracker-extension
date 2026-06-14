@@ -19,8 +19,15 @@ setToolbarIcon();
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[Reselling Tracker] Extension installed.');
   setToolbarIcon();
+  chrome.alarms.create('pollCommands', { periodInMinutes: 1 });
 });
-chrome.runtime.onStartup.addListener(setToolbarIcon);
+chrome.runtime.onStartup.addListener(() => {
+  setToolbarIcon();
+  chrome.alarms.create('pollCommands', { periodInMinutes: 1 });
+});
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === 'pollCommands') pollAndExecuteCommands().catch(console.error);
+});
 
 const PLATFORM_CONFIG: Record<string, { host: string; url: string; script: string }> = {
   Amazon: { host: 'www.amazon.com', url: 'https://www.amazon.com/your-orders/orders', script: 'content/amazon.js' },
@@ -230,6 +237,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'CBM_SCRAPE_DONE') {
+    const { merchant, rateCount, ok } = message as { merchant: string; rateCount: number; ok: boolean };
+    const resolve = pendingCbmScrapes.get(merchant);
+    if (resolve) {
+      pendingCbmScrapes.delete(merchant);
+      resolve(ok, rateCount);
+    }
+    // Close the tab that sent this
+    const tabId = sender.tab?.id;
+    if (tabId) chrome.tabs.remove(tabId).catch(() => {});
+    return;
+  }
+
   if (message.type === 'API_LOG') {
     appendApiLog(message.entry as Record<string, unknown>).catch(() => {});
     return;
@@ -413,6 +433,101 @@ function inPageCostcoGraphql(token: string, clientId: string, body: string): Pro
     xhr.send(body);
   });
 }
+
+// ── Tracker-driven command polling ────────────────────────────────────────────
+
+type TrackerCommand = { id: number; type: string; payload: string | null };
+
+async function pollAndExecuteCommands() {
+  const { trackerUrl, apiKey } = await import('../lib/storage').then(m => m.getSettings());
+  if (!trackerUrl) return;
+
+  const base = upgradeUrl(trackerUrl);
+  const headers: Record<string, string> = {};
+  if (apiKey) headers['X-API-Key'] = apiKey;
+
+  let commands: TrackerCommand[] = [];
+  try {
+    const res = await fetch(`${base}/api/extension/commands`, { headers });
+    if (!res.ok) return;
+    commands = await res.json() as TrackerCommand[];
+  } catch { return; }
+
+  await chrome.storage.local.set({ lastPoll: Date.now() });
+
+  for (const cmd of commands) {
+    await patchCommand(base, cmd.id, 'running', headers);
+    try {
+      let result: unknown;
+      if (cmd.type === 'SYNC_AMAZON') result = await runSyncCommand('Amazon');
+      else if (cmd.type === 'SYNC_WALMART') result = await runSyncCommand('Walmart');
+      else if (cmd.type === 'SYNC_COSTCO') result = await runSyncCommand('Costco');
+      else if (cmd.type === 'SYNC_BIGSKY') result = await runSyncCommand('BigSkyBuyers');
+      else if (cmd.type === 'SCRAPE_CBM') result = await runScrapeCbm(base, headers, cmd.payload);
+      await patchCommand(base, cmd.id, 'done', headers, result);
+    } catch (e) {
+      await patchCommand(base, cmd.id, 'failed', headers, String(e));
+    }
+  }
+}
+
+async function patchCommand(base: string, id: number, status: string, headers: Record<string, string>, result?: unknown) {
+  await fetch(`${base}/api/extension/commands/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: JSON.stringify({ status, result }),
+  }).catch(() => {});
+}
+
+async function runSyncCommand(platform: string): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    triggerSyncInBackground(platform)
+      .then(() => resolve({ ok: true }))
+      .catch(reject);
+  });
+}
+
+// Pending CBM scrapes: maps merchant → resolve function
+const pendingCbmScrapes = new Map<string, (ok: boolean, count: number) => void>();
+
+async function runScrapeCbm(trackerBase: string, headers: Record<string, string>, rawPayload: string | null): Promise<unknown> {
+  // Get merchant list: prefer command payload, fall back to /api/bfmr/vendors
+  let merchants: string[] = [];
+  if (rawPayload) {
+    try { merchants = JSON.parse(rawPayload) as string[]; } catch { /* ignore */ }
+  }
+  if (!merchants.length) {
+    const res = await fetch(`${trackerBase}/api/bfmr/vendors`, { headers });
+    if (res.ok) merchants = await res.json() as string[];
+  }
+  if (!merchants.length) return { skipped: true, reason: 'no merchants' };
+
+  const results: { merchant: string; rateCount: number; ok: boolean }[] = [];
+
+  // Open CBM page for each merchant sequentially, wait for content script to report back
+  for (const merchant of merchants) {
+    const slug = merchant.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    const url = `https://www.cashbackmonitor.com/cashback-store/${slug}/?vendor=${encodeURIComponent(merchant)}`;
+
+    const result = await new Promise<{ ok: boolean; rateCount: number }>(resolve => {
+      pendingCbmScrapes.set(merchant, (ok, rateCount) => resolve({ ok, rateCount }));
+      setTimeout(() => {
+        pendingCbmScrapes.delete(merchant);
+        resolve({ ok: false, rateCount: 0 });
+      }, 15000);
+
+      chrome.tabs.create({ url, active: false }).catch(() => resolve({ ok: false, rateCount: 0 }));
+    });
+
+    results.push({ merchant, ...result });
+  }
+
+  return { merchants: results };
+}
+
+// ── CBM scrape result from content script ─────────────────────────────────────
+
+// handled inline in the onMessage listener below
 
 async function handlePushBigskyOrders(
   trackerUrl: string,

@@ -76,6 +76,15 @@ async function init() {
   if (settings.costcoLastSync) setMeta('Costco', `Last sync: ${settings.costcoLastSync}`);
   if (settings.bigskyLastSync) setMeta('BigSkyBuyers', `Last sync: ${settings.bigskyLastSync}`);
 
+  // Show last poll time for tracker commands
+  const pollStored = await chrome.storage.local.get('lastPoll');
+  if (pollStored.lastPoll) {
+    const ago = Math.round((Date.now() - (pollStored.lastPoll as number)) / 1000);
+    document.getElementById('pollMeta')!.textContent = `last poll: ${ago}s ago`;
+    document.getElementById('pollStatus')!.textContent = 'active';
+    document.getElementById('pollStatus')!.className = 'status ok';
+  }
+
   // Restore in-progress or recent sync status if popup was closed during sync
   const stored = await chrome.storage.local.get(['amazonSyncStatus', 'walmartSyncStatus', 'costcoSyncStatus', 'bigskyStatus']);
   const s = stored.amazonSyncStatus as { type: string; message?: string; result?: { scraped: number; imported: number; updated: number; platform: string }; error?: string; ts: number } | undefined;

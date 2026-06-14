@@ -325,8 +325,8 @@
           return { list: [], details: {} };
         }
       }
-      async function pushReceipts(trackerUrl, apiKey, receipts) {
-        const res = await chrome.runtime.sendMessage({ type: "PUSH_COSTCO_RECEIPTS", trackerUrl, apiKey, receipts });
+      async function pushReceipts(trackerUrl, apiKey, userId, receipts) {
+        const res = await chrome.runtime.sendMessage({ type: "PUSH_COSTCO_RECEIPTS", trackerUrl, apiKey, userId, receipts });
         if (res?.error) throw new Error(res.error);
         return res;
       }
@@ -410,9 +410,10 @@
               const barcode = r.transactionBarcode;
               toSend.push(captured2.details[barcode] ?? r);
             }
-            console.log("[CST] captured receipts:", toSend.length);
+            console.log("[CST] captured receipts:", toSend.length, "userId=", settings.userId, "trackerUrl=", settings.trackerUrl);
             if (toSend.length > 0) {
-              receiptResult = await pushReceipts(settings.trackerUrl, settings.apiKey ?? "", toSend);
+              receiptResult = await pushReceipts(settings.trackerUrl, settings.apiKey ?? "", settings.userId, toSend);
+              console.log("[CST] receipt push result:", JSON.stringify(receiptResult));
             }
           } catch (e) {
             console.error("[CST] receipt sync failed (non-fatal)", e);

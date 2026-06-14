@@ -244,6 +244,13 @@
         if (settings.walmartLastSync) setMeta("Walmart", `Last sync: ${settings.walmartLastSync}`);
         if (settings.costcoLastSync) setMeta("Costco", `Last sync: ${settings.costcoLastSync}`);
         if (settings.bigskyLastSync) setMeta("BigSkyBuyers", `Last sync: ${settings.bigskyLastSync}`);
+        const pollStored = await chrome.storage.local.get("lastPoll");
+        if (pollStored.lastPoll) {
+          const ago = Math.round((Date.now() - pollStored.lastPoll) / 1e3);
+          document.getElementById("pollMeta").textContent = `last poll: ${ago}s ago`;
+          document.getElementById("pollStatus").textContent = "active";
+          document.getElementById("pollStatus").className = "status ok";
+        }
         const stored = await chrome.storage.local.get(["amazonSyncStatus", "walmartSyncStatus", "costcoSyncStatus", "bigskyStatus"]);
         const s = stored.amazonSyncStatus;
         if (s) {

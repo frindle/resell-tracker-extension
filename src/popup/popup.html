@@ -30,7 +30,7 @@
     <h1 style="margin:0;">Reselling Tracker Sync</h1>
     <button id="popOutBtn" title="Pop out" style="background:none;border:none;color:#4b5563;cursor:pointer;font-size:0.85rem;padding:0 2px;line-height:1;">↗</button>
   </div>
-  <p class="sub">Auto-syncs when you visit Amazon or Walmart orders.</p>
+  <p class="sub">Auto-syncs orders and accepts commands from the tracker.</p>
   <div id="notConfigured" style="display:none">⚠ Tracker URL or user not set — open Settings.</div>
   <div id="rows">
     <div class="row">
@@ -74,6 +74,16 @@
       </div>
     </div>
   </div>
+  <div class="row" style="border-top:1px solid #1f1f1f;">
+    <div>
+      <div class="platform">Tracker Commands</div>
+      <div class="meta" id="pollMeta">polls every 60s</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div class="status idle" id="pollStatus">idle</div>
+    </div>
+  </div>
+
   <div id="versionRow" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:0.7rem;color:#4b5563;">
     <span id="versionLabel"></span>
     <a id="versionUpdate" href="https://github.com/frindle/resell-tracker-extension/releases/latest" target="_blank" style="display:none;color:#fbbf24;font-weight:500;text-decoration:underline;cursor:pointer;">update available</a>

@@ -1,9 +1,52 @@
 "use strict";
 (() => {
+  var __defProp = Object.defineProperty;
   var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __esm = (fn, res) => function __init() {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  };
   var __commonJS = (cb, mod) => function __require() {
     return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
   };
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+
+  // src/lib/storage.ts
+  var storage_exports = {};
+  __export(storage_exports, {
+    getSettings: () => getSettings,
+    saveSettings: () => saveSettings,
+    setLastSync: () => setLastSync
+  });
+  async function getSettings() {
+    const result = await chrome.storage.sync.get(Object.keys(DEFAULTS));
+    return { ...DEFAULTS, ...result };
+  }
+  async function saveSettings(settings) {
+    await chrome.storage.sync.set(settings);
+  }
+  async function setLastSync(platform, date) {
+    const key = platform === "amazon" ? "amazonLastSync" : platform === "walmart" ? "walmartLastSync" : platform === "costco" ? "costcoLastSync" : "bigskyLastSync";
+    await chrome.storage.sync.set({ [key]: date });
+  }
+  var DEFAULTS;
+  var init_storage = __esm({
+    "src/lib/storage.ts"() {
+      "use strict";
+      DEFAULTS = {
+        trackerUrl: "",
+        apiKey: "",
+        userId: "",
+        userName: "",
+        amazonLastSync: "",
+        walmartLastSync: "",
+        costcoLastSync: "",
+        bigskyLastSync: ""
+      };
+    }
+  });
 
   // src/background/index.ts
   var require_background = __commonJS({
@@ -24,8 +67,15 @@
       chrome.runtime.onInstalled.addListener(() => {
         console.log("[Reselling Tracker] Extension installed.");
         setToolbarIcon();
+        chrome.alarms.create("pollCommands", { periodInMinutes: 1 });
       });
-      chrome.runtime.onStartup.addListener(setToolbarIcon);
+      chrome.runtime.onStartup.addListener(() => {
+        setToolbarIcon();
+        chrome.alarms.create("pollCommands", { periodInMinutes: 1 });
+      });
+      chrome.alarms.onAlarm.addListener((alarm) => {
+        if (alarm.name === "pollCommands") pollAndExecuteCommands().catch(console.error);
+      });
       var PLATFORM_CONFIG = {
         Amazon: { host: "www.amazon.com", url: "https://www.amazon.com/your-orders/orders", script: "content/amazon.js" },
         Walmart: { host: "www.walmart.com", url: "https://www.walmart.com/orders", script: "content/walmart.js" },
@@ -225,6 +275,18 @@
           handlePushBigskyOrders(message.trackerUrl, message.apiKey, message.userId, message.groups).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
           return true;
         }
+        if (message.type === "CBM_SCRAPE_DONE") {
+          const { merchant, rateCount, ok } = message;
+          const resolve = pendingCbmScrapes.get(merchant);
+          if (resolve) {
+            pendingCbmScrapes.delete(merchant);
+            resolve(ok, rateCount);
+          }
+          const tabId = sender.tab?.id;
+          if (tabId) chrome.tabs.remove(tabId).catch(() => {
+          });
+          return;
+        }
         if (message.type === "API_LOG") {
           appendApiLog(message.entry).catch(() => {
           });
@@ -400,6 +462,79 @@
           xhr.onerror = () => resolve({ ok: false, status: 0, text: "network error" });
           xhr.send(body);
         });
+      }
+      async function pollAndExecuteCommands() {
+        const { trackerUrl, apiKey } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
+        if (!trackerUrl) return;
+        const base = upgradeUrl(trackerUrl);
+        const headers = {};
+        if (apiKey) headers["X-API-Key"] = apiKey;
+        let commands = [];
+        try {
+          const res = await fetch(`${base}/api/extension/commands`, { headers });
+          if (!res.ok) return;
+          commands = await res.json();
+        } catch {
+          return;
+        }
+        await chrome.storage.local.set({ lastPoll: Date.now() });
+        for (const cmd of commands) {
+          await patchCommand(base, cmd.id, "running", headers);
+          try {
+            let result;
+            if (cmd.type === "SYNC_AMAZON") result = await runSyncCommand("Amazon");
+            else if (cmd.type === "SYNC_WALMART") result = await runSyncCommand("Walmart");
+            else if (cmd.type === "SYNC_COSTCO") result = await runSyncCommand("Costco");
+            else if (cmd.type === "SYNC_BIGSKY") result = await runSyncCommand("BigSkyBuyers");
+            else if (cmd.type === "SCRAPE_CBM") result = await runScrapeCbm(base, headers, cmd.payload);
+            await patchCommand(base, cmd.id, "done", headers, result);
+          } catch (e) {
+            await patchCommand(base, cmd.id, "failed", headers, String(e));
+          }
+        }
+      }
+      async function patchCommand(base, id, status, headers, result) {
+        await fetch(`${base}/api/extension/commands/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", ...headers },
+          body: JSON.stringify({ status, result })
+        }).catch(() => {
+        });
+      }
+      async function runSyncCommand(platform) {
+        return new Promise((resolve, reject) => {
+          triggerSyncInBackground(platform).then(() => resolve({ ok: true })).catch(reject);
+        });
+      }
+      var pendingCbmScrapes = /* @__PURE__ */ new Map();
+      async function runScrapeCbm(trackerBase, headers, rawPayload) {
+        let merchants = [];
+        if (rawPayload) {
+          try {
+            merchants = JSON.parse(rawPayload);
+          } catch {
+          }
+        }
+        if (!merchants.length) {
+          const res = await fetch(`${trackerBase}/api/bfmr/vendors`, { headers });
+          if (res.ok) merchants = await res.json();
+        }
+        if (!merchants.length) return { skipped: true, reason: "no merchants" };
+        const results = [];
+        for (const merchant of merchants) {
+          const slug = merchant.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+          const url = `https://www.cashbackmonitor.com/cashback-store/${slug}/?vendor=${encodeURIComponent(merchant)}`;
+          const result = await new Promise((resolve) => {
+            pendingCbmScrapes.set(merchant, (ok, rateCount) => resolve({ ok, rateCount }));
+            setTimeout(() => {
+              pendingCbmScrapes.delete(merchant);
+              resolve({ ok: false, rateCount: 0 });
+            }, 15e3);
+            chrome.tabs.create({ url, active: false }).catch(() => resolve({ ok: false, rateCount: 0 }));
+          });
+          results.push({ merchant, ...result });
+        }
+        return { merchants: results };
       }
       async function handlePushBigskyOrders(trackerUrl, apiKey, userId, groups) {
         const url = `${upgradeUrl(trackerUrl)}/api/bigsky/sync-orders`;

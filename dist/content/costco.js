@@ -326,75 +326,9 @@
         }
       }
       async function pushReceipts(trackerUrl, apiKey, userId, receipts) {
-        const res = await chrome.runtime.sendMessage({ type: "PUSH_COSTCO_RECEIPTS", trackerUrl, apiKey, userId, receipts, receiptHtml: capturedReceiptHtml });
+        const res = await chrome.runtime.sendMessage({ type: "PUSH_COSTCO_RECEIPTS", trackerUrl, apiKey, userId, receipts });
         if (res?.error) throw new Error(res.error);
         return res;
-      }
-      var capturedReceiptHtml = {};
-      async function waitForDialog(timeoutMs = 6e3) {
-        const start = Date.now();
-        while (Date.now() - start < timeoutMs) {
-          const byRole = document.querySelector('[role="dialog"]');
-          if (byRole) return byRole;
-          const byPaper = document.querySelector(".MuiDialog-paper");
-          if (byPaper) return byPaper.closest(".MuiDialog-root") ?? byPaper;
-          await new Promise((r) => setTimeout(r, 150));
-        }
-        return null;
-      }
-      async function waitForDialogContent(dialog, timeoutMs = 8e3) {
-        const start = Date.now();
-        while (Date.now() - start < timeoutMs) {
-          const hasPrintBtn = !!Array.from(dialog.querySelectorAll("*")).find(
-            (el) => el.textContent?.trim() === "Print Receipt"
-          );
-          if (hasPrintBtn) return;
-          if (dialog.innerHTML.length > 8e3) return;
-          await new Promise((r) => setTimeout(r, 200));
-        }
-      }
-      async function waitForDialogGone(timeoutMs = 3e3) {
-        const start = Date.now();
-        while (Date.now() - start < timeoutMs) {
-          const el = document.querySelector('[role="dialog"], .MuiDialog-root');
-          if (!el || el.offsetParent === null) return;
-          await new Promise((r) => setTimeout(r, 150));
-        }
-      }
-      function capturePageStyles() {
-        const links = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).map((l) => l.outerHTML).join("");
-        const styles = Array.from(document.querySelectorAll("style")).map((s) => `<style>${s.textContent ?? ""}</style>`).join("");
-        return links + styles;
-      }
-      async function clickThroughReceiptButtons() {
-        const buttons = Array.from(document.querySelectorAll('[automation-id="ViewInWareHouseReciept"]'));
-        if (buttons.length === 0) return;
-        console.log("[CST] clicking through", buttons.length, "receipt button(s)");
-        for (const btn of buttons) {
-          const describedBy = btn.getAttribute("aria-describedby") ?? "";
-          const barcode = describedBy.replace(/^viewRecieptBtn_/, "");
-          btn.click();
-          const dialog = await waitForDialog(6e3);
-          if (dialog && barcode) {
-            await waitForDialogContent(dialog, 8e3);
-            const paper = dialog.querySelector(".MuiDialog-paper") ?? dialog;
-            const pageStyles = capturePageStyles();
-            capturedReceiptHtml[barcode] = pageStyles + paper.outerHTML;
-            console.log("[CST] captured receipt HTML for", barcode, "(", capturedReceiptHtml[barcode].length, "chars paper=", paper.className.slice(0, 60), ")");
-          } else {
-            console.warn("[CST] dialog not found for barcode", barcode, "\u2014 skipping HTML capture");
-          }
-          const closeBtn = dialog?.querySelector(
-            'button[aria-label="close"], button[aria-label="Close"], [data-testid="close-button"], .MuiIconButton-root'
-          ) ?? document.querySelector('button[aria-label="close"], button[aria-label="Close"]');
-          if (closeBtn) {
-            closeBtn.click();
-          } else {
-            document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-          }
-          await waitForDialogGone(3e3);
-          await new Promise((r) => setTimeout(r, 200));
-        }
       }
       var syncing = false;
       async function runSync() {
@@ -468,7 +402,6 @@
         try {
           const result = filteredOrders.length > 0 ? await pushOrders(settings.trackerUrl, settings.apiKey ?? "", settings.userId, filteredOrders) : { imported: 0, updated: 0 };
           sendMessage({ type: "SYNC_PROGRESS", platform: "Costco", scraped: filteredOrders.length, message: "Fetching receipts\u2026" });
-          await clickThroughReceiptButtons();
           let receiptResult = { linked: 0, unlinked: 0, skipped: 0 };
           try {
             const captured2 = await fetchCapturedReceipts();
