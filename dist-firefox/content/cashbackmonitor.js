@@ -222,7 +222,11 @@
         const merchant = params.get("vendor") || merchantFromUrl();
         if (!merchant) return;
         const rates = parseTables();
-        if (!rates.length) return;
+        if (!rates.length) {
+          chrome.runtime.sendMessage({ type: "CBM_SCRAPE_DONE", merchant, rateCount: 0, ok: true }).catch(() => {
+          });
+          return;
+        }
         const settings = await getSettings();
         if (!settings.trackerUrl) return;
         const base = settings.trackerUrl.replace(/\/$/, "");

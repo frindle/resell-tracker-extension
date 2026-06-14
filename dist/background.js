@@ -505,12 +505,18 @@
         }
       }
       async function patchCommand(base, id, status, headers, result) {
-        await fetch(`${base}/api/extension/commands/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json", ...headers },
-          body: JSON.stringify({ status, result })
-        }).catch(() => {
-        });
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const res = await fetch(`${base}/api/extension/commands/${id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json", ...headers },
+              body: JSON.stringify({ status, result })
+            });
+            if (res.ok) return;
+          } catch {
+          }
+          if (attempt < 2) await new Promise((r) => setTimeout(r, 2e3 * (attempt + 1)));
+        }
       }
       async function runSyncCommand(platform) {
         return new Promise((resolve, reject) => {
@@ -530,7 +536,7 @@
           targetTabId = existingTabs[0].id;
         } else {
           const newTab = await chrome.tabs.create({ url: config.url, active: false });
-          if (!newTab.id) return { ok: false, error: "failed to open Amazon tab" };
+          if (!newTab.id) throw new Error("failed to open Amazon tab");
           targetTabId = newTab.id;
           await new Promise((resolve) => {
             let tabListener;
@@ -554,7 +560,7 @@
             await chrome.scripting.executeScript({ target: { tabId: targetTabId }, files: [config.script] });
           } catch (e) {
             console.error("[BG] injection failed for SYNC_AMAZON_ORDER", e);
-            return { ok: false, error: String(e) };
+            throw e;
           }
         }
         return new Promise((resolve) => {
@@ -590,12 +596,30 @@
           const slug = merchant.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
           const url = `https://www.cashbackmonitor.com/cashback-store/${slug}/?vendor=${encodeURIComponent(merchant)}`;
           const result = await new Promise((resolve) => {
-            pendingCbmScrapes.set(merchant, (ok, rateCount) => resolve({ ok, rateCount }));
-            setTimeout(() => {
+            let openedTabId;
+            let settled = false;
+            const settle = (val) => {
+              if (settled) return;
+              settled = true;
+              resolve(val);
+            };
+            const timeoutId = setTimeout(() => {
               pendingCbmScrapes.delete(merchant);
-              resolve({ ok: false, rateCount: 0 });
+              if (openedTabId) chrome.tabs.remove(openedTabId).catch(() => {
+              });
+              settle({ ok: false, rateCount: 0 });
             }, 15e3);
-            chrome.tabs.create({ url, active: false }).catch(() => resolve({ ok: false, rateCount: 0 }));
+            pendingCbmScrapes.set(merchant, (ok, rateCount) => {
+              clearTimeout(timeoutId);
+              settle({ ok, rateCount });
+            });
+            chrome.tabs.create({ url, active: false }).then((tab) => {
+              if (tab.id) openedTabId = tab.id;
+            }).catch(() => {
+              clearTimeout(timeoutId);
+              pendingCbmScrapes.delete(merchant);
+              settle({ ok: false, rateCount: 0 });
+            });
           });
           results.push({ merchant, ...result });
         }
