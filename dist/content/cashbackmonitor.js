@@ -6,9 +6,6 @@
   var __getOwnPropNames = Object.getOwnPropertyNames;
   var __getProtoOf = Object.getPrototypeOf;
   var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __esm = (fn, res) => function __init() {
-    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-  };
   var __commonJS = (cb, mod) => function __require() {
     return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
   };
@@ -150,34 +147,10 @@
     }
   });
 
-  // src/lib/storage.ts
-  async function getSettings() {
-    const result = await chrome.storage.sync.get(Object.keys(DEFAULTS));
-    return { ...DEFAULTS, ...result };
-  }
-  var import_browser_polyfill_min, DEFAULTS;
-  var init_storage = __esm({
-    "src/lib/storage.ts"() {
-      "use strict";
-      import_browser_polyfill_min = __toESM(require_browser_polyfill_min());
-      DEFAULTS = {
-        trackerUrl: "",
-        apiKey: "",
-        userId: "",
-        userName: "",
-        amazonLastSync: "",
-        walmartLastSync: "",
-        costcoLastSync: "",
-        bigskyLastSync: ""
-      };
-    }
-  });
-
   // src/content/cashbackmonitor.ts
   var require_cashbackmonitor = __commonJS({
     "src/content/cashbackmonitor.ts"() {
-      var import_browser_polyfill_min2 = __toESM(require_browser_polyfill_min());
-      init_storage();
+      var import_browser_polyfill_min = __toESM(require_browser_polyfill_min());
       function parseTables() {
         const rates = [];
         let currentCategory = null;
@@ -217,43 +190,19 @@
         const m = location.pathname.match(/\/cashback-store\/([^/]+)/);
         return m ? m[1].replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : null;
       }
-      async function scrapeAndSend() {
+      function scrapeAndSend() {
         const params = new URLSearchParams(location.search);
         const merchant = params.get("vendor") || merchantFromUrl();
         if (!merchant) return;
         const rates = parseTables();
-        if (!rates.length) {
-          chrome.runtime.sendMessage({ type: "CBM_SCRAPE_DONE", merchant, rateCount: 0, ok: true }).catch(() => {
-          });
-          return;
-        }
-        const settings = await getSettings();
-        if (!settings.trackerUrl) return;
-        const base = settings.trackerUrl.replace(/\/$/, "");
-        const headers = { "Content-Type": "application/json" };
-        if (settings.apiKey) headers["X-API-Key"] = settings.apiKey;
-        try {
-          const res = await fetch(`${base}/api/portal-rates/bulk`, {
-            method: "POST",
-            headers,
-            body: JSON.stringify([{ merchant, rates }])
-          });
-          chrome.runtime.sendMessage({
-            type: "CBM_SCRAPE_DONE",
-            merchant,
-            rateCount: rates.length,
-            ok: res.ok
-          }).catch(() => {
-          });
-        } catch {
-          chrome.runtime.sendMessage({
-            type: "CBM_SCRAPE_DONE",
-            merchant,
-            rateCount: 0,
-            ok: false
-          }).catch(() => {
-          });
-        }
+        chrome.runtime.sendMessage({
+          type: "CBM_SCRAPE_DONE",
+          merchant,
+          rates,
+          rateCount: rates.length,
+          ok: true
+        }).catch(() => {
+        });
       }
       if (document.readyState === "complete") {
         scrapeAndSend();

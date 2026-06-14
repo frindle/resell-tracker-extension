@@ -1,5 +1,3 @@
-import { getSettings } from '../lib/storage';
-
 interface CbmRate {
   portal: string;
   rate: string;
@@ -58,42 +56,22 @@ function merchantFromUrl(): string | null {
   return m ? m[1].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : null;
 }
 
-async function scrapeAndSend() {
+function scrapeAndSend() {
   // Vendor name passed as query param by extension when it opens this page
   const params = new URLSearchParams(location.search);
   const merchant = params.get('vendor') || merchantFromUrl();
   if (!merchant) return;
 
   const rates = parseTables();
-  if (!rates.length) return;
-
-  const settings = await getSettings();
-  if (!settings.trackerUrl) return;
-
-  const base = settings.trackerUrl.replace(/\/$/, '');
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (settings.apiKey) headers['X-API-Key'] = settings.apiKey;
-
-  try {
-    const res = await fetch(`${base}/api/portal-rates/bulk`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify([{ merchant, rates }]),
-    });
-    chrome.runtime.sendMessage({
-      type: 'CBM_SCRAPE_DONE',
-      merchant,
-      rateCount: rates.length,
-      ok: res.ok,
-    }).catch(() => {});
-  } catch {
-    chrome.runtime.sendMessage({
-      type: 'CBM_SCRAPE_DONE',
-      merchant,
-      rateCount: 0,
-      ok: false,
-    }).catch(() => {});
-  }
+  // Send rates (or empty) to the background — background handles the POST to the tracker
+  // so we avoid cashbackmonitor.com's CSP blocking cross-origin fetch from content scripts
+  chrome.runtime.sendMessage({
+    type: 'CBM_SCRAPE_DONE',
+    merchant,
+    rates,
+    rateCount: rates.length,
+    ok: true,
+  }).catch(() => {});
 }
 
 // Run after page is idle so JS-rendered rates are in the DOM

@@ -240,15 +240,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'CBM_SCRAPE_DONE') {
-    const { merchant, rateCount, ok } = message as { merchant: string; rateCount: number; ok: boolean };
-    const resolve = pendingCbmScrapes.get(merchant);
-    if (resolve) {
-      pendingCbmScrapes.delete(merchant);
-      resolve(ok, rateCount);
-    }
-    // Close the tab that sent this
+    const { merchant, rates, rateCount } = message as { merchant: string; rates?: { portal: string; rate: string; category: string | null }[]; rateCount: number; ok: boolean };
     const tabId = sender.tab?.id;
-    if (tabId) chrome.tabs.remove(tabId).catch(() => {});
+
+    (async () => {
+      let ok = true;
+      if (rates && rates.length > 0) {
+        try {
+          const { trackerUrl, apiKey, userId } = await import('../lib/storage').then(m => m.getSettings());
+          if (trackerUrl) {
+            const base = trackerUrl.replace(/\/$/, '');
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+            if (apiKey) headers['X-API-Key'] = apiKey;
+            if (userId) headers['X-Extension-User-Id'] = userId;
+            const res = await fetch(`${base}/api/portal-rates/bulk`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify([{ merchant, rates }]),
+            });
+            ok = res.ok;
+          }
+        } catch { ok = false; }
+      }
+      const resolve = pendingCbmScrapes.get(merchant);
+      if (resolve) {
+        pendingCbmScrapes.delete(merchant);
+        resolve(ok, rateCount);
+      }
+      if (tabId) chrome.tabs.remove(tabId).catch(() => {});
+    })();
     return;
   }
 
@@ -442,12 +462,13 @@ type TrackerCommand = { id: number; type: string; payload: string | null };
 
 async function pollAndExecuteCommands() {
   await chrome.storage.local.set({ lastPoll: Date.now() });
-  const { trackerUrl, apiKey } = await import('../lib/storage').then(m => m.getSettings());
+  const { trackerUrl, apiKey, userId } = await import('../lib/storage').then(m => m.getSettings());
   if (!trackerUrl) return;
 
   const base = upgradeUrl(trackerUrl);
   const headers: Record<string, string> = {};
   if (apiKey) headers['X-API-Key'] = apiKey;
+  if (userId) headers['X-Extension-User-Id'] = userId;
 
   let commands: TrackerCommand[] = [];
   try {

@@ -278,15 +278,37 @@
           return true;
         }
         if (message.type === "CBM_SCRAPE_DONE") {
-          const { merchant, rateCount, ok } = message;
-          const resolve = pendingCbmScrapes.get(merchant);
-          if (resolve) {
-            pendingCbmScrapes.delete(merchant);
-            resolve(ok, rateCount);
-          }
+          const { merchant, rates, rateCount } = message;
           const tabId = sender.tab?.id;
-          if (tabId) chrome.tabs.remove(tabId).catch(() => {
-          });
+          (async () => {
+            let ok = true;
+            if (rates && rates.length > 0) {
+              try {
+                const { trackerUrl, apiKey, userId } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
+                if (trackerUrl) {
+                  const base = trackerUrl.replace(/\/$/, "");
+                  const headers = { "Content-Type": "application/json" };
+                  if (apiKey) headers["X-API-Key"] = apiKey;
+                  if (userId) headers["X-Extension-User-Id"] = userId;
+                  const res = await fetch(`${base}/api/portal-rates/bulk`, {
+                    method: "POST",
+                    headers,
+                    body: JSON.stringify([{ merchant, rates }])
+                  });
+                  ok = res.ok;
+                }
+              } catch {
+                ok = false;
+              }
+            }
+            const resolve = pendingCbmScrapes.get(merchant);
+            if (resolve) {
+              pendingCbmScrapes.delete(merchant);
+              resolve(ok, rateCount);
+            }
+            if (tabId) chrome.tabs.remove(tabId).catch(() => {
+            });
+          })();
           return;
         }
         if (message.type === "API_LOG") {
@@ -467,11 +489,12 @@
       }
       async function pollAndExecuteCommands() {
         await chrome.storage.local.set({ lastPoll: Date.now() });
-        const { trackerUrl, apiKey } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
+        const { trackerUrl, apiKey, userId } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
         if (!trackerUrl) return;
         const base = upgradeUrl(trackerUrl);
         const headers = {};
         if (apiKey) headers["X-API-Key"] = apiKey;
+        if (userId) headers["X-Extension-User-Id"] = userId;
         let commands = [];
         try {
           const res = await fetch(`${base}/api/extension/commands`, { headers });
