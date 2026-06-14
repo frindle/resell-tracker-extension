@@ -19,11 +19,13 @@ setToolbarIcon();
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[Reselling Tracker] Extension installed.');
   setToolbarIcon();
-  chrome.alarms.create('pollCommands', { periodInMinutes: 1 });
+  chrome.alarms.create('pollCommands', { when: Date.now() + 2000, periodInMinutes: 1 });
+  pollAndExecuteCommands().catch(console.error);
 });
 chrome.runtime.onStartup.addListener(() => {
   setToolbarIcon();
-  chrome.alarms.create('pollCommands', { periodInMinutes: 1 });
+  chrome.alarms.create('pollCommands', { when: Date.now() + 2000, periodInMinutes: 1 });
+  pollAndExecuteCommands().catch(console.error);
 });
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === 'pollCommands') pollAndExecuteCommands().catch(console.error);
@@ -439,6 +441,7 @@ function inPageCostcoGraphql(token: string, clientId: string, body: string): Pro
 type TrackerCommand = { id: number; type: string; payload: string | null };
 
 async function pollAndExecuteCommands() {
+  await chrome.storage.local.set({ lastPoll: Date.now() });
   const { trackerUrl, apiKey } = await import('../lib/storage').then(m => m.getSettings());
   if (!trackerUrl) return;
 
@@ -452,8 +455,6 @@ async function pollAndExecuteCommands() {
     if (!res.ok) return;
     commands = await res.json() as TrackerCommand[];
   } catch { return; }
-
-  await chrome.storage.local.set({ lastPoll: Date.now() });
 
   for (const cmd of commands) {
     await patchCommand(base, cmd.id, 'running', headers);
@@ -482,11 +483,17 @@ async function pollAndExecuteCommands() {
 }
 
 async function patchCommand(base: string, id: number, status: string, headers: Record<string, string>, result?: unknown) {
-  await fetch(`${base}/api/extension/commands/${id}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...headers },
-    body: JSON.stringify({ status, result }),
-  }).catch(() => {});
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(`${base}/api/extension/commands/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify({ status, result }),
+      });
+      if (res.ok) return;
+    } catch { /* retry */ }
+    if (attempt < 2) await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+  }
 }
 
 async function runSyncCommand(platform: string): Promise<unknown> {
@@ -512,7 +519,7 @@ async function runAmazonOrderSync(orderNumbers: string[]): Promise<unknown> {
   } else {
     // Open the orders page so content script is available
     const newTab = await chrome.tabs.create({ url: config.url, active: false });
-    if (!newTab.id) return { ok: false, error: 'failed to open Amazon tab' };
+    if (!newTab.id) throw new Error('failed to open Amazon tab');
     targetTabId = newTab.id;
     await new Promise<void>(resolve => {
       let tabListener: (tabId: number, info: chrome.tabs.TabChangeInfo) => void;
@@ -538,7 +545,7 @@ async function runAmazonOrderSync(orderNumbers: string[]): Promise<unknown> {
       await chrome.scripting.executeScript({ target: { tabId: targetTabId }, files: [config.script] });
     } catch (e) {
       console.error('[BG] injection failed for SYNC_AMAZON_ORDER', e);
-      return { ok: false, error: String(e) };
+      throw e;
     }
   }
 
@@ -581,13 +588,32 @@ async function runScrapeCbm(trackerBase: string, headers: Record<string, string>
     const url = `https://www.cashbackmonitor.com/cashback-store/${slug}/?vendor=${encodeURIComponent(merchant)}`;
 
     const result = await new Promise<{ ok: boolean; rateCount: number }>(resolve => {
-      pendingCbmScrapes.set(merchant, (ok, rateCount) => resolve({ ok, rateCount }));
-      setTimeout(() => {
+      let openedTabId: number | undefined;
+      let settled = false;
+      const settle = (val: { ok: boolean; rateCount: number }) => {
+        if (settled) return;
+        settled = true;
+        resolve(val);
+      };
+
+      const timeoutId = setTimeout(() => {
         pendingCbmScrapes.delete(merchant);
-        resolve({ ok: false, rateCount: 0 });
+        if (openedTabId) chrome.tabs.remove(openedTabId).catch(() => {});
+        settle({ ok: false, rateCount: 0 });
       }, 15000);
 
-      chrome.tabs.create({ url, active: false }).catch(() => resolve({ ok: false, rateCount: 0 }));
+      pendingCbmScrapes.set(merchant, (ok, rateCount) => {
+        clearTimeout(timeoutId);
+        settle({ ok, rateCount });
+      });
+
+      chrome.tabs.create({ url, active: false })
+        .then(tab => { if (tab.id) openedTabId = tab.id; })
+        .catch(() => {
+          clearTimeout(timeoutId);
+          pendingCbmScrapes.delete(merchant);
+          settle({ ok: false, rateCount: 0 });
+        });
     });
 
     results.push({ merchant, ...result });

@@ -67,11 +67,13 @@
       chrome.runtime.onInstalled.addListener(() => {
         console.log("[Reselling Tracker] Extension installed.");
         setToolbarIcon();
-        chrome.alarms.create("pollCommands", { periodInMinutes: 1 });
+        chrome.alarms.create("pollCommands", { when: Date.now() + 2e3, periodInMinutes: 1 });
+        pollAndExecuteCommands().catch(console.error);
       });
       chrome.runtime.onStartup.addListener(() => {
         setToolbarIcon();
-        chrome.alarms.create("pollCommands", { periodInMinutes: 1 });
+        chrome.alarms.create("pollCommands", { when: Date.now() + 2e3, periodInMinutes: 1 });
+        pollAndExecuteCommands().catch(console.error);
       });
       chrome.alarms.onAlarm.addListener((alarm) => {
         if (alarm.name === "pollCommands") pollAndExecuteCommands().catch(console.error);
@@ -464,6 +466,7 @@
         });
       }
       async function pollAndExecuteCommands() {
+        await chrome.storage.local.set({ lastPoll: Date.now() });
         const { trackerUrl, apiKey } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
         if (!trackerUrl) return;
         const base = upgradeUrl(trackerUrl);
@@ -477,7 +480,6 @@
         } catch {
           return;
         }
-        await chrome.storage.local.set({ lastPoll: Date.now() });
         for (const cmd of commands) {
           await patchCommand(base, cmd.id, "running", headers);
           try {
