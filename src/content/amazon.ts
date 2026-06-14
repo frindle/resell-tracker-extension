@@ -213,13 +213,25 @@ function extractAddressFromDoc(doc: Document): string {
   return '';
 }
 
-async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[]; title: string; address: string }> {
+function extractCostFromDoc(doc: Document): number {
+  const text = (doc.body?.textContent ?? '').replace(/\s+/g, ' ');
+  // Look for "Order Total: $XX.XX" or "Grand Total: $XX.XX"
+  const totalMatch = text.match(/(?:Order Total|Grand Total)[:\s]+\$?([\d,]+\.?\d*)/i);
+  if (totalMatch) return parseMoney(totalMatch[1]);
+  // Fallback: look for "Total: $XX.XX" near order summary
+  const fallbackMatch = text.match(/\bTotal[:\s]+\$?([\d,]+\.?\d*)/i);
+  if (fallbackMatch) return parseMoney(fallbackMatch[1]);
+  return 0;
+}
+
+async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[]; title: string; address: string; cost: number }> {
   console.log('[AMZ] fetchOrderDetails', orderId);
   const detailDoc = await fetchHtml(`https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`);
-  if (!detailDoc) { console.warn('[AMZ] fetchOrderDetails: no doc for', orderId); return { tracking: [], title: '', address: '' }; }
+  if (!detailDoc) { console.warn('[AMZ] fetchOrderDetails: no doc for', orderId); return { tracking: [], title: '', address: '', cost: 0 }; }
 
   const title = extractTitleFromDoc(detailDoc);
   const address = extractAddressFromDoc(detailDoc);
+  const cost = extractCostFromDoc(detailDoc);
 
   // Extract ship-track URLs — each has a unique shipmentId
   const shipTrackUrls = Array.from(detailDoc.querySelectorAll<HTMLAnchorElement>('a[href*="ship-track"]'))
@@ -227,8 +239,8 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
     .filter((href, i, arr) => arr.indexOf(href) === i);
 
   if (shipTrackUrls.length === 0) {
-    console.log('[AMZ] no ship-track links for', orderId, '| title:', title || '(none)', '| addr:', address || '(none)');
-    return { tracking: [], title, address };
+    console.log('[AMZ] no ship-track links for', orderId, '| title:', title || '(none)', '| addr:', address || '(none)', '| cost:', cost);
+    return { tracking: [], title, address, cost };
   }
 
   // Fetch each ship-track page and extract carrier tracking numbers
@@ -249,8 +261,8 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
   const cleaned = [...new Set(tracking)].map(t => t.replace(/[A-Za-z]+$/, ''));
   // Drop any entry that is a superstring of another (keep the shorter canonical form)
   const unique = [...new Set(cleaned)].filter(t => !cleaned.some(other => other !== t && t.startsWith(other))).slice(0, 5);
-  console.log('[AMZ] tracking for', orderId, ':', unique, '| title:', title || '(none)', '| addr:', address || '(none)');
-  return { tracking: unique, title, address };
+  console.log('[AMZ] tracking for', orderId, ':', unique, '| title:', title || '(none)', '| addr:', address || '(none)', '| cost:', cost);
+  return { tracking: unique, title, address, cost };
 }
 
 async function fetchOrdersPage(startIndex: number): Promise<Document | null> {
@@ -379,13 +391,14 @@ async function runSync(state: SyncState) {
       const order = allOrders[i];
       sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Fetching details for order ${i + 1} of ${allOrders.length}…` });
       await new Promise(r => setTimeout(r, 800));
-      const timeout = new Promise<{ tracking: string[]; title: string; address: string }>(
-        r => setTimeout(() => r({ tracking: [], title: '', address: '' }), 12000)
+      const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number }>(
+        r => setTimeout(() => r({ tracking: [], title: '', address: '', cost: 0 }), 12000)
       );
-      const { tracking, title, address } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
+      const { tracking, title, address, cost } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
       if (tracking.length > 0) order.trackingNumbers = tracking;
       if (!order.itemDescription && title) order.itemDescription = title;
       if (!order.shippingAddress && address) order.shippingAddress = address;
+      if (!order.cost && cost) order.cost = cost;
     }
   }
 
@@ -467,11 +480,52 @@ async function startSync() {
   }
 })();
 
+async function scrapeAmazonOrders(orderNumbers: string[]): Promise<{ scraped: number; imported: number; updated: number }> {
+  const settings = await getSettings();
+  if (!settings.trackerUrl || !settings.userId) {
+    throw new Error('Tracker URL or user not configured — open Settings.');
+  }
+
+  const orders: ScrapedOrder[] = [];
+  for (const orderId of orderNumbers) {
+    console.log('[AMZ] SCRAPE_AMAZON_ORDER: fetching', orderId);
+    const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number }>(
+      r => setTimeout(() => r({ tracking: [], title: '', address: '', cost: 0 }), 20000)
+    );
+    const { tracking, title, address, cost } = await Promise.race([fetchOrderDetails(orderId), timeout]);
+    const today = new Date().toISOString().split('T')[0];
+    orders.push({
+      platform: 'Amazon',
+      orderNumber: orderId,
+      orderDate: today,
+      itemDescription: title,
+      cost,
+      shippingCost: 0,
+      shippingAddress: address,
+      trackingNumbers: tracking,
+      sourceUrl: `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`,
+    });
+    await new Promise(r => setTimeout(r, 800));
+  }
+
+  if (orders.length === 0) return { scraped: 0, imported: 0, updated: 0 };
+
+  const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? '', settings.userId, orders);
+  return { scraped: orders.length, imported: result.imported ?? 0, updated: result.updated ?? 0 };
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'PING') { sendResponse('ok'); return; }
   if (msg.type === 'START_SYNC' && msg.platform === 'Amazon') startSync();
   if (msg.type === 'CANCEL_SYNC' && msg.platform === 'Amazon') {
     cancelRequested = true;
     sendResponse('ok');
+  }
+  if (msg.type === 'SCRAPE_AMAZON_ORDER') {
+    const orderNumbers: string[] = Array.isArray(msg.orderNumbers) ? msg.orderNumbers : [];
+    scrapeAmazonOrders(orderNumbers)
+      .then(result => sendResponse({ ok: true, ...result }))
+      .catch(err => sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+    return true; // keep channel open for async response
   }
 });

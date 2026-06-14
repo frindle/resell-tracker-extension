@@ -487,6 +487,17 @@
             else if (cmd.type === "SYNC_COSTCO") result = await runSyncCommand("Costco");
             else if (cmd.type === "SYNC_BIGSKY") result = await runSyncCommand("BigSkyBuyers");
             else if (cmd.type === "SCRAPE_CBM") result = await runScrapeCbm(base, headers, cmd.payload);
+            else if (cmd.type === "SYNC_AMAZON_ORDER") {
+              let orderNumbers = [];
+              if (cmd.payload) {
+                try {
+                  const parsed = JSON.parse(cmd.payload);
+                  if (Array.isArray(parsed.orderNumbers)) orderNumbers = parsed.orderNumbers;
+                } catch {
+                }
+              }
+              result = await runAmazonOrderSync(orderNumbers);
+            }
             await patchCommand(base, cmd.id, "done", headers, result);
           } catch (e) {
             await patchCommand(base, cmd.id, "failed", headers, String(e));
@@ -504,6 +515,60 @@
       async function runSyncCommand(platform) {
         return new Promise((resolve, reject) => {
           triggerSyncInBackground(platform).then(() => resolve({ ok: true })).catch(reject);
+        });
+      }
+      async function runAmazonOrderSync(orderNumbers) {
+        if (!orderNumbers.length) return { skipped: true, reason: "no order numbers" };
+        const config = PLATFORM_CONFIG["Amazon"];
+        let targetTabId;
+        let existingTabs = [];
+        try {
+          existingTabs = await chrome.tabs.query({ url: `https://${config.host}/*` });
+        } catch {
+        }
+        if (existingTabs.length > 0 && existingTabs[0].id) {
+          targetTabId = existingTabs[0].id;
+        } else {
+          const newTab = await chrome.tabs.create({ url: config.url, active: false });
+          if (!newTab.id) return { ok: false, error: "failed to open Amazon tab" };
+          targetTabId = newTab.id;
+          await new Promise((resolve) => {
+            let tabListener;
+            const timeout = setTimeout(() => {
+              chrome.tabs.onUpdated.removeListener(tabListener);
+              resolve();
+            }, 15e3);
+            tabListener = (tabId, info) => {
+              if (tabId === targetTabId && info.status === "complete") {
+                chrome.tabs.onUpdated.removeListener(tabListener);
+                clearTimeout(timeout);
+                resolve();
+              }
+            };
+            chrome.tabs.onUpdated.addListener(tabListener);
+          });
+        }
+        const alive = await chrome.tabs.sendMessage(targetTabId, { type: "PING" }).catch(() => null);
+        if (!alive) {
+          try {
+            await chrome.scripting.executeScript({ target: { tabId: targetTabId }, files: [config.script] });
+          } catch (e) {
+            console.error("[BG] injection failed for SYNC_AMAZON_ORDER", e);
+            return { ok: false, error: String(e) };
+          }
+        }
+        return new Promise((resolve) => {
+          chrome.tabs.sendMessage(
+            targetTabId,
+            { type: "SCRAPE_AMAZON_ORDER", orderNumbers },
+            (response) => {
+              if (chrome.runtime.lastError) {
+                resolve({ ok: false, error: chrome.runtime.lastError.message });
+              } else {
+                resolve(response ?? { ok: false, error: "no response" });
+              }
+            }
+          );
         });
       }
       var pendingCbmScrapes = /* @__PURE__ */ new Map();
