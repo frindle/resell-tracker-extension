@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.37
+- Bump dev mode API spy response capture limit from 1000 to 2500 chars to avoid truncating larger API responses (e.g. CardCenter Submissions)
+
 ### 1.1.32
 - Fix blank receipt: capture .MuiDialog-paper (the card content) instead of role=dialog outer element which has fixed positioning and renders off-screen in a standalone HTML file
 

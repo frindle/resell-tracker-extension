@@ -26,7 +26,7 @@
           try {
             const res = await origFetch(...args);
             const resBody = await res.clone().text().catch(() => "");
-            post({ method, url, status: res.status, reqBody, resBody: resBody.slice(0, 1e3), duration: Date.now() - ts, ts });
+            post({ method, url, status: res.status, reqBody, resBody: resBody.slice(0, 2500), duration: Date.now() - ts, ts });
             return res;
           } catch (e) {
             post({ method, url, error: String(e), reqBody, duration: Date.now() - ts, ts });
@@ -59,7 +59,7 @@
                 url: this._u,
                 status: this.status,
                 reqBody: this._body,
-                resBody: (this.responseText || "").slice(0, 1e3),
+                resBody: (this.responseText || "").slice(0, 2500),
                 duration: Date.now() - this._ts,
                 ts: this._ts
               });
