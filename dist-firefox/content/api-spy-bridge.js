@@ -151,6 +151,14 @@
   var require_api_spy_bridge = __commonJS({
     "src/content/api-spy-bridge.ts"() {
       var import_browser_polyfill_min = __toESM(require_browser_polyfill_min());
+      chrome.storage.local.get(["spyReqLimit", "spyResLimit"]).then((stored) => {
+        const reqLimit = stored.spyReqLimit ?? 500;
+        const resLimit = stored.spyResLimit ?? 2500;
+        const script = document.createElement("script");
+        script.textContent = `window.__apiSpyConfig = { reqLimit: ${reqLimit}, resLimit: ${resLimit} };`;
+        document.documentElement.appendChild(script);
+        script.remove();
+      });
       window.addEventListener("message", (e) => {
         if (e.source !== window || !e.data?.__apiSpyEntry) return;
         chrome.runtime.sendMessage({ type: "API_LOG", entry: e.data }).catch(() => {

@@ -4,6 +4,10 @@
   if (w.__apiSpyActive) return;
   w.__apiSpyActive = true;
 
+  const cfg = (w.__apiSpyConfig as { reqLimit?: number; resLimit?: number } | undefined) ?? {};
+  const REQ_LIMIT = cfg.reqLimit ?? 500;
+  const RES_LIMIT = cfg.resLimit ?? 2500;
+
   function post(entry: Record<string, unknown>) {
     window.postMessage({ __apiSpyEntry: true, ...entry }, '*');
   }
@@ -17,12 +21,12 @@
       : input instanceof URL ? input.toString()
       : (input as Request).url;
     const method = ((init?.method ?? (input instanceof Request ? input.method : undefined) ?? 'GET') as string).toUpperCase();
-    const reqBody = typeof init?.body === 'string' ? (init.body as string).slice(0, 500) : undefined;
+    const reqBody = typeof init?.body === 'string' ? (init.body as string).slice(0, REQ_LIMIT) : undefined;
     const ts = Date.now();
     try {
       const res = await origFetch(...args);
       const resBody = await res.clone().text().catch(() => '');
-      post({ method, url, status: res.status, reqBody, resBody: resBody.slice(0, 2500), duration: Date.now() - ts, ts });
+      post({ method, url, status: res.status, reqBody, resBody: resBody.slice(0, RES_LIMIT), duration: Date.now() - ts, ts });
       return res;
     } catch (e) {
       post({ method, url, error: String(e), reqBody, duration: Date.now() - ts, ts });
@@ -50,14 +54,14 @@
 
     send(body?: Document | XMLHttpRequestBodyInit | null): void {
       this._ts = Date.now();
-      if (typeof body === 'string') this._body = (body as string).slice(0, 500);
+      if (typeof body === 'string') this._body = (body as string).slice(0, REQ_LIMIT);
       this.addEventListener('loadend', () => {
         post({
           method: this._m,
           url: this._u,
           status: this.status,
           reqBody: this._body,
-          resBody: (this.responseText || '').slice(0, 2500),
+          resBody: (this.responseText || '').slice(0, RES_LIMIT),
           duration: Date.now() - this._ts,
           ts: this._ts,
         });

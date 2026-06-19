@@ -114,12 +114,14 @@ async function initDevMode() {
   const label = document.getElementById('devToggleLabel')!;
   const controls = document.getElementById('devControls')!;
   const urlInput = document.getElementById('devUrl') as HTMLInputElement;
+  const reqLimitInput = document.getElementById('devReqLimit') as HTMLInputElement;
+  const resLimitInput = document.getElementById('devResLimit') as HTMLInputElement;
   const spyNowBtn = document.getElementById('devSpyNow')!;
   const copyBtn = document.getElementById('devCopyJson')!;
   const clearBtn = document.getElementById('devClear')!;
 
   // Load persisted state
-  const stored = await chrome.storage.local.get(['devMode', 'devModeUrl', 'apiLogs']);
+  const stored = await chrome.storage.local.get(['devMode', 'devModeUrl', 'apiLogs', 'spyReqLimit', 'spyResLimit']);
   const isOn = !!(stored.devMode as boolean | undefined);
   const savedUrl = (stored.devModeUrl as string | undefined) ?? '';
   const logs = (stored.apiLogs as ApiLogEntry[] | undefined) ?? [];
@@ -128,6 +130,8 @@ async function initDevMode() {
   label.textContent = isOn ? 'on' : 'off';
   controls.style.display = isOn ? 'block' : 'none';
   urlInput.value = savedUrl;
+  if (stored.spyReqLimit != null) reqLimitInput.value = String(stored.spyReqLimit);
+  if (stored.spyResLimit != null) resLimitInput.value = String(stored.spyResLimit);
   renderLogs(logs);
 
   toggle.addEventListener('change', async () => {
@@ -139,6 +143,16 @@ async function initDevMode() {
 
   urlInput.addEventListener('change', async () => {
     await chrome.storage.local.set({ devModeUrl: urlInput.value.trim() });
+  });
+
+  reqLimitInput.addEventListener('change', async () => {
+    const v = parseInt(reqLimitInput.value);
+    if (!isNaN(v) && v > 0) await chrome.storage.local.set({ spyReqLimit: v });
+  });
+
+  resLimitInput.addEventListener('change', async () => {
+    const v = parseInt(resLimitInput.value);
+    if (!isNaN(v) && v > 0) await chrome.storage.local.set({ spyResLimit: v });
   });
 
   spyNowBtn.addEventListener('click', async () => {

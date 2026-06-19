@@ -287,10 +287,12 @@
         const label = document.getElementById("devToggleLabel");
         const controls = document.getElementById("devControls");
         const urlInput = document.getElementById("devUrl");
+        const reqLimitInput = document.getElementById("devReqLimit");
+        const resLimitInput = document.getElementById("devResLimit");
         const spyNowBtn = document.getElementById("devSpyNow");
         const copyBtn = document.getElementById("devCopyJson");
         const clearBtn = document.getElementById("devClear");
-        const stored = await chrome.storage.local.get(["devMode", "devModeUrl", "apiLogs"]);
+        const stored = await chrome.storage.local.get(["devMode", "devModeUrl", "apiLogs", "spyReqLimit", "spyResLimit"]);
         const isOn = !!stored.devMode;
         const savedUrl = stored.devModeUrl ?? "";
         const logs = stored.apiLogs ?? [];
@@ -298,6 +300,8 @@
         label.textContent = isOn ? "on" : "off";
         controls.style.display = isOn ? "block" : "none";
         urlInput.value = savedUrl;
+        if (stored.spyReqLimit != null) reqLimitInput.value = String(stored.spyReqLimit);
+        if (stored.spyResLimit != null) resLimitInput.value = String(stored.spyResLimit);
         renderLogs(logs);
         toggle.addEventListener("change", async () => {
           const on = toggle.checked;
@@ -307,6 +311,14 @@
         });
         urlInput.addEventListener("change", async () => {
           await chrome.storage.local.set({ devModeUrl: urlInput.value.trim() });
+        });
+        reqLimitInput.addEventListener("change", async () => {
+          const v = parseInt(reqLimitInput.value);
+          if (!isNaN(v) && v > 0) await chrome.storage.local.set({ spyReqLimit: v });
+        });
+        resLimitInput.addEventListener("change", async () => {
+          const v = parseInt(resLimitInput.value);
+          if (!isNaN(v) && v > 0) await chrome.storage.local.set({ spyResLimit: v });
         });
         spyNowBtn.addEventListener("click", async () => {
           await chrome.storage.local.set({ devModeUrl: urlInput.value.trim() });
