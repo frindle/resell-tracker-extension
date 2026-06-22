@@ -354,7 +354,7 @@
                 for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
                   const m = str.match(pat);
                   if (m) {
-                    orderDate = m[1].split("T")[0];
+                    orderDate = m[1];
                     break;
                   }
                 }
@@ -387,7 +387,7 @@
               for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
                 const m = str.match(pat);
                 if (m) {
-                  orderDate = m[1].split("T")[0];
+                  orderDate = m[1];
                   break;
                 }
               }
@@ -520,10 +520,12 @@
               if (detail.tracking.length) order.trackingNumbers = detail.tracking;
               if (detail.cost != null && detail.cost > 0 && order.cost === 0) order.cost = detail.cost;
               if (detail.itemDescription && !order.itemDescription) order.itemDescription = detail.itemDescription;
-              if (!order.orderDate) {
-                order.orderDate = detail.orderDate ?? (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-                console.log("[WM] resolved order date:", order.orderNumber, order.orderDate);
+              if (detail.orderDate) {
+                order.orderDate = detail.orderDate;
+              } else if (!order.orderDate) {
+                order.orderDate = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
               }
+              console.log("[WM] order date:", order.orderNumber, order.orderDate);
             }));
           }
           const todayStr = sinceDate.toISOString().split("T")[0];

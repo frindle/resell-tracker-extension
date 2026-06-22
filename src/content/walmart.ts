@@ -231,7 +231,7 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
         const str = JSON.stringify(parsed);
         if (!orderDate) {
           for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
-            const m = str.match(pat); if (m) { orderDate = m[1].split('T')[0]; break; }
+            const m = str.match(pat); if (m) { orderDate = m[1]; break; } // full ISO incl. time
           }
         }
         if (cost == null) {
@@ -264,7 +264,7 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
       if (!orderDate) {
         const str = JSON.stringify(ndOrder);
         for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
-          const m = str.match(pat); if (m) { orderDate = m[1].split('T')[0]; break; }
+          const m = str.match(pat); if (m) { orderDate = m[1]; break; } // full ISO incl. time
         }
       }
     }
@@ -413,10 +413,15 @@ async function startSync() {
         if (detail.tracking.length) order.trackingNumbers = detail.tracking;
         if (detail.cost != null && detail.cost > 0 && order.cost === 0) order.cost = detail.cost;
         if (detail.itemDescription && !order.itemDescription) order.itemDescription = detail.itemDescription;
-        if (!order.orderDate) {
-          order.orderDate = detail.orderDate ?? new Date().toISOString().split('T')[0];
-          console.log('[WM] resolved order date:', order.orderNumber, order.orderDate);
+        // Prefer detail's full ISO (with time) over the listing's date-only.
+        // Time data lets the user track reset cycles per the cancel/refund
+        // windows. Falls back to listing date when detail didn't parse.
+        if (detail.orderDate) {
+          order.orderDate = detail.orderDate;
+        } else if (!order.orderDate) {
+          order.orderDate = new Date().toISOString().split('T')[0];
         }
+        console.log('[WM] order date:', order.orderNumber, order.orderDate);
       }));
     }
 

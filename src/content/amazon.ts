@@ -224,14 +224,15 @@ function extractCostFromDoc(doc: Document): number {
   return 0;
 }
 
-async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[]; title: string; address: string; cost: number }> {
+async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null }> {
   console.log('[AMZ] fetchOrderDetails', orderId);
   const detailDoc = await fetchHtml(`https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`);
-  if (!detailDoc) { console.warn('[AMZ] fetchOrderDetails: no doc for', orderId); return { tracking: [], title: '', address: '', cost: 0 }; }
+  if (!detailDoc) { console.warn('[AMZ] fetchOrderDetails: no doc for', orderId); return { tracking: [], title: '', address: '', cost: 0, orderDate: null }; }
 
   const title = extractTitleFromDoc(detailDoc);
   const address = extractAddressFromDoc(detailDoc);
   const cost = extractCostFromDoc(detailDoc);
+  const orderDate = extractOrderDateFromDoc(detailDoc, orderId);
 
   // Extract ship-track URLs — each has a unique shipmentId
   const shipTrackUrls = Array.from(detailDoc.querySelectorAll<HTMLAnchorElement>('a[href*="ship-track"]'))
@@ -240,7 +241,7 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
 
   if (shipTrackUrls.length === 0) {
     console.log('[AMZ] no ship-track links for', orderId, '| title:', title || '(none)', '| addr:', address || '(none)', '| cost:', cost);
-    return { tracking: [], title, address, cost };
+    return { tracking: [], title, address, cost, orderDate };
   }
 
   // Fetch each ship-track page and extract carrier tracking numbers
@@ -261,8 +262,57 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
   const cleaned = [...new Set(tracking)].map(t => t.replace(/[A-Za-z]+$/, ''));
   // Drop any entry that is a superstring of another (keep the shorter canonical form)
   const unique = [...new Set(cleaned)].filter(t => !cleaned.some(other => other !== t && t.startsWith(other))).slice(0, 5);
-  console.log('[AMZ] tracking for', orderId, ':', unique, '| title:', title || '(none)', '| addr:', address || '(none)', '| cost:', cost);
-  return { tracking: unique, title, address, cost };
+  console.log('[AMZ] tracking for', orderId, ':', unique, '| title:', title || '(none)', '| addr:', address || '(none)', '| cost:', cost, '| orderDate:', orderDate);
+  return { tracking: unique, title, address, cost, orderDate };
+}
+
+// Probe Amazon's order detail page for a placed timestamp. Amazon's UI usually
+// only shows the date as plain text ("Order placed: May 22, 2026"), but
+// occasional ISO timestamps appear in embedded JSON / data attributes / JSON-LD.
+// We log every candidate so we can refine once we see real pages.
+function extractOrderDateFromDoc(doc: Document, orderId: string): string | null {
+  const html = doc.documentElement.outerHTML;
+  const candidates: string[] = [];
+
+  // JSON-style ISO timestamps
+  for (const pat of [
+    /"orderDate"\s*:\s*"([^"]+)"/i,
+    /"orderPlacedDate"\s*:\s*"([^"]+)"/i,
+    /"placedDate"\s*:\s*"([^"]+)"/i,
+    /"orderTimestamp"\s*:\s*"?([^",}]+)"?/i,
+    /"creationDate"\s*:\s*"([^"]+)"/i,
+  ]) {
+    const m = html.match(pat);
+    if (m) candidates.push(`${pat.source} → ${m[1]}`);
+  }
+
+  // data-order-date attributes
+  const dataEls = doc.querySelectorAll('[data-order-date], [data-order-placed-date], [data-order-timestamp]');
+  dataEls.forEach(el => {
+    for (const attr of ['data-order-date', 'data-order-placed-date', 'data-order-timestamp']) {
+      const v = el.getAttribute(attr);
+      if (v) candidates.push(`${attr} → ${v}`);
+    }
+  });
+
+  // Visible text fallback: "Order placed: May 22, 2026" with optional time
+  const textMatch = html.match(/Order placed[:\s]+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}(?:\s+\d{1,2}:\d{2}(?:\s?[AP]M)?)?)/i);
+  if (textMatch) candidates.push(`text → ${textMatch[1]}`);
+
+  if (candidates.length === 0) {
+    console.log('[AMZ] no order date candidates found for', orderId);
+    return null;
+  }
+  console.log('[AMZ] order date candidates for', orderId, ':', candidates);
+
+  // Prefer the first ISO-like timestamp; fall back to first candidate raw value.
+  for (const c of candidates) {
+    const v = c.split(' → ').pop()!;
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v)) return v;
+  }
+  const fallback = candidates[0].split(' → ').pop()!;
+  const parsed = new Date(fallback);
+  return isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 async function fetchOrdersPage(startIndex: number): Promise<Document | null> {
@@ -391,14 +441,17 @@ async function runSync(state: SyncState) {
       const order = allOrders[i];
       sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Fetching details for order ${i + 1} of ${allOrders.length}…` });
       await new Promise(r => setTimeout(r, 800));
-      const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number }>(
-        r => setTimeout(() => r({ tracking: [], title: '', address: '', cost: 0 }), 12000)
+      const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null }>(
+        r => setTimeout(() => r({ tracking: [], title: '', address: '', cost: 0, orderDate: null }), 12000)
       );
-      const { tracking, title, address, cost } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
+      const { tracking, title, address, cost, orderDate } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
       if (tracking.length > 0) order.trackingNumbers = tracking;
       if (!order.itemDescription && title) order.itemDescription = title;
       if (!order.shippingAddress && address) order.shippingAddress = address;
       if (!order.cost && cost) order.cost = cost;
+      // Prefer detail's orderDate if it has a time component (T...:); otherwise
+      // keep the listing's date-only value.
+      if (orderDate && /T\d{2}:\d{2}/.test(orderDate)) order.orderDate = orderDate;
     }
   }
 
@@ -489,15 +542,15 @@ async function scrapeAmazonOrders(orderNumbers: string[]): Promise<{ scraped: nu
   const orders: ScrapedOrder[] = [];
   for (const orderId of orderNumbers) {
     console.log('[AMZ] SCRAPE_AMAZON_ORDER: fetching', orderId);
-    const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number }>(
-      r => setTimeout(() => r({ tracking: [], title: '', address: '', cost: 0 }), 20000)
+    const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null }>(
+      r => setTimeout(() => r({ tracking: [], title: '', address: '', cost: 0, orderDate: null }), 20000)
     );
-    const { tracking, title, address, cost } = await Promise.race([fetchOrderDetails(orderId), timeout]);
+    const { tracking, title, address, cost, orderDate } = await Promise.race([fetchOrderDetails(orderId), timeout]);
     const today = new Date().toISOString().split('T')[0];
     orders.push({
       platform: 'Amazon',
       orderNumber: orderId,
-      orderDate: today,
+      orderDate: orderDate ?? today,
       itemDescription: title,
       cost,
       shippingCost: 0,
