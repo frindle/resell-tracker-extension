@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.50
+- Diagnostic logging on Walmart sync: `[WM/diag] <orderNumber> status: <status> candidates: <n1>[origin], <n2>[origin], ...` for every order whose detail-fetch ran. Lets us see exactly which tracking-shaped numbers are in Walmart's HTML and where each came from (NEXT_DATA trackingNumber field, a stray 20-22 digit run in some other JSON blob, etc.). Will use this to design a smarter filter.
+
 ### 1.1.49
 - **Removed Walmart order-number tracking fallback.** v1.1.44 added a fallback that wrote the Walmart order number as the tracking value when only internal `555…` IDs were filtered out. Walmart embeds 555-prefixed IDs in every order's NEXT_DATA — including not-yet-shipped orders — so the fallback fired on every sync and overwrote orders with fake tracking. Real carrier numbers (UPS / FedEx / USPS) still flow through unchanged. If you need the Walmart order number on a specific order, set it manually.
 

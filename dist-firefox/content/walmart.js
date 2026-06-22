@@ -340,13 +340,28 @@
           }
           const numbers = /* @__PURE__ */ new Set();
           const trackPatterns = [
-            /trackingNumber["\s:]+["']?([A-Z0-9]{10,25})/g,
-            /\b(1Z[A-Z0-9]{16})\b/g,
-            /\b([0-9]{20,22})\b/g
+            ["trackingNumber-field", /trackingNumber["\s:]+["']?([A-Z0-9]{10,25})/g],
+            ["ups-1Z", /\b(1Z[A-Z0-9]{16})\b/g],
+            ["digits-20-22", /\b([0-9]{20,22})\b/g]
           ];
-          for (const pat of trackPatterns) {
+          const numberOrigins = /* @__PURE__ */ new Map();
+          for (const [name, pat] of trackPatterns) {
             let m;
-            while ((m = pat.exec(html)) !== null) numbers.add(m[1]);
+            while ((m = pat.exec(html)) !== null) {
+              numbers.add(m[1]);
+              if (!numberOrigins.has(m[1])) numberOrigins.set(m[1], name);
+            }
+          }
+          if (numbers.size > 0 || ndOrder) {
+            const status = ndOrder?.status ?? ndOrder?.fulfillment?.status;
+            console.log(
+              "[WM/diag]",
+              orderNumber,
+              "status:",
+              status ?? "(none)",
+              "candidates:",
+              Array.from(numbers).map((n) => `${n}[${numberOrigins.get(n)}]`).join(", ") || "(none)"
+            );
           }
           const isWalmartInternal = (n) => /^555\d{15,}$/.test(n);
           let hadInternalTracking = false;
