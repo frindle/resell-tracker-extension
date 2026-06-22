@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.48
+- Sync-status banner: when the tracker page provides a `[data-rt-sync-target]` mount point (orders page in v1.1.48+ tracker), render the status inline there instead of floating in the bottom-right corner. Same status content; just lives next to the Sync buttons where it makes contextual sense. Falls back to floating bottom-right on pages without the mount point.
+
 ### 1.1.47
 - **Faster sync after click.** Chrome MV3 caps `chrome.alarms` at 1-minute periods, so a queued sync could wait up to 60s for the background to wake. The tracker-status content script (already running on tracker pages) now sends a `POLL_COMMANDS_NOW` message to the background every 15s, and on page load. Background rate-limits to one real poll per 10s. Net: clicking Sync in the tracker UI now fires within ~15s.
 
