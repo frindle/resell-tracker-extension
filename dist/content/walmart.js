@@ -524,7 +524,13 @@
               const detail = await fetchOrderDetail(order.orderNumber, order.sourceUrl);
               console.log("[WM] detail done:", order.orderNumber, "address:", detail.address.slice(0, 40) || "(none)", "tracking:", detail.tracking, "orderDate:", detail.orderDate);
               if (detail.address) order.shippingAddress = detail.address;
-              if (detail.tracking.length) order.trackingNumbers = detail.tracking;
+              if (detail.tracking.length) {
+                order.trackingNumbers = detail.tracking;
+              } else if (order.orderNumber) {
+                const fallback = order.orderNumber.replace(/-/g, "");
+                if (fallback) order.trackingNumbers = [fallback];
+                console.log("[WM] no carrier tracking \u2014 using order number as fallback:", fallback);
+              }
               if (detail.cost != null && detail.cost > 0 && order.cost === 0) order.cost = detail.cost;
               if (detail.itemDescription && !order.itemDescription) order.itemDescription = detail.itemDescription;
               if (detail.orderDate) {

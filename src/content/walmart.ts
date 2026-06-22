@@ -424,7 +424,18 @@ async function startSync() {
         const detail = await fetchOrderDetail(order.orderNumber, order.sourceUrl);
         console.log('[WM] detail done:', order.orderNumber, 'address:', detail.address.slice(0, 40) || '(none)', 'tracking:', detail.tracking, 'orderDate:', detail.orderDate);
         if (detail.address) order.shippingAddress = detail.address;
-        if (detail.tracking.length) order.trackingNumbers = detail.tracking;
+        if (detail.tracking.length) {
+          order.trackingNumbers = detail.tracking;
+        } else if (order.orderNumber) {
+          // Walmart only returns its internal `555...` tracking IDs for some
+          // orders (we filter those out in fetchOrderDetail). Buying groups
+          // need *something* to identify the shipment — fall back to the
+          // Walmart order number (digits only, no dashes) which they can
+          // look up directly on Walmart's side.
+          const fallback = order.orderNumber.replace(/-/g, '');
+          if (fallback) order.trackingNumbers = [fallback];
+          console.log('[WM] no carrier tracking — using order number as fallback:', fallback);
+        }
         if (detail.cost != null && detail.cost > 0 && order.cost === 0) order.cost = detail.cost;
         if (detail.itemDescription && !order.itemDescription) order.itemDescription = detail.itemDescription;
         // Prefer detail's full ISO (with time) over the listing's date-only.

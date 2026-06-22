@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.43
+- Walmart: when an order has no real carrier tracking number after filtering Walmart's internal `555...` IDs, fall back to using the Walmart order number (digits only, no dashes) as the tracking value. Lets buying groups identify the shipment via Walmart's own system when no UPS/FedEx/USPS tracking is available.
+
 ### 1.1.42
 - Tighten Amazon promo-card filter. 1.1.41 matched on card names anywhere in the card text, which would have false-positive on real orders paid with an Amazon Visa (payment method string contains the card name). New filter requires either an "Apply now" CTA OR cost=$0 AND a specific promo phrase (Earn X%, Get the Amazon Visa, No annual fee, Card Member, etc.) — none of which appear in the payment-method portion of real orders.
 
