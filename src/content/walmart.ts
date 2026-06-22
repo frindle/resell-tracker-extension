@@ -38,6 +38,13 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
   console.log('[WM] DOM blocks found:', blocks.length, 'url:', location.href);
   blocks.slice(0, 3).forEach((b, i) => console.log(`[WM] block[${i}] testid:`, b.getAttribute('data-testid'), 'text:', (b.textContent ?? '').replace(/\s+/g, ' ').slice(0, 300)));
 
+  // Match cancel/return/refund regardless of what follows ("Canceled today",
+  // "Canceled May 22", "Canceled · Refund issued", etc.) and also catch the
+  // Walmart explainer banner that appears when the order block itself doesn't
+  // contain the word.
+  const isCancelledOrReturned = (text: string) =>
+    /(?:\b(?:cancell?ed|cancellation|returned|refunded)\b|we had to cancel|we['’]ve canceled|cancel these items|won['’]t be charged|released the temporary hold)/i.test(text);
+
   for (const block of blocks) {
     const blockText = (block.textContent ?? '').replace(/\s+/g, ' ');
 
@@ -88,7 +95,7 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
       // No date found — fetch the detail page to get the real placement date.
       // Walmart omits dates for very recently placed orders (shows progress steps instead).
       console.log('[WM] no date found for order', orderNumber, '— will fetch detail for real date');
-      if (/\b(cancelled|canceled|cancellation|returned|refunded|order canceled|we've canceled)\b/i.test(blockText)) continue;
+      if (isCancelledOrReturned(blockText)) continue;
       const totalMatch2 = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
       const itemEl2 = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
       orders.push({
@@ -110,7 +117,7 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
     }
 
     // Skip cancelled/returned orders
-    if (/\b(cancelled|canceled|cancellation|returned|refunded|order canceled|we've canceled)\b/i.test(blockText)) continue;
+    if (isCancelledOrReturned(blockText)) continue;
 
     // Total — "Total $XX.XX"
     const totalMatch = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
@@ -120,6 +127,7 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
     const itemEl = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
     const itemDescription = (itemEl?.textContent ?? '').trim().slice(0, 120);
 
+    console.log('[WM] adding order', orderNumber, 'date:', orderDate.toISOString().split('T')[0], 'blockText snippet:', blockText.slice(0, 240));
     orders.push({
       platform: 'Walmart',
       orderNumber,
