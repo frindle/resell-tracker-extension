@@ -258,6 +258,10 @@
             continue;
           }
           if (/\b(cancelled|canceled|refunded|returned)\b/i.test(cardText)) continue;
+          if (/\b(Amazon\s+Business\s+(?:Prime\s+)?Card|Amazon\s+(?:Prime\s+)?Visa|Prime\s+Visa|Amazon\s+Store\s+Card|Amazon\s+Credit\s+Card|Apply\s+now|Get\s+the\s+Amazon)\b/i.test(cardText)) {
+            console.log("[AMZ] skipping promo card:", orderId, "\u2014 cardText:", cardText.slice(0, 200));
+            continue;
+          }
           const totalMatch = cardText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
           const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
           let shippingAddress = "";
@@ -275,6 +279,7 @@
             const productLink = card.querySelector('a[href*="/dp/"], a[href*="/gp/product/"]');
             itemDescription = (productLink?.textContent ?? "").trim().slice(0, 120);
           }
+          console.log("[AMZ] adding order", orderId, "item:", itemDescription.slice(0, 60), "cost:", cost, "cardText:", cardText.slice(0, 200));
           orders.push({
             platform: "Amazon",
             orderNumber: orderId,

@@ -51,6 +51,10 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.41
+- Amazon: skip promotional cards (Amazon Business Card, Prime Visa, Amazon Store Card, etc.) that get injected into the orders DOM with order-detail-style links. They had real-looking order IDs in `113-...` format but didn't resolve in the user's account.
+- Amazon: log every added order's cardText snippet so future false positives are easy to diagnose without rebuilding.
+
 ### 1.1.40
 - Walmart: filter out Walmart's internal tracking IDs (start with `555`, 18+ digits, e.g. `55533883340850446553`) — these aren't real carrier numbers and don't track on UPS/FedEx/USPS. Genuine FedEx numbers starting with 5 (typically 12-15 digits) are kept.
 - Walmart: also drop the order number itself if it leaked into the tracking-number list.

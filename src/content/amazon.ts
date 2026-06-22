@@ -74,6 +74,15 @@ function scrapeDoc(doc: Document, sinceDate: Date): { orders: ScrapedOrder[]; ha
 
     if (/\b(cancelled|canceled|refunded|returned)\b/i.test(cardText)) continue;
 
+    // Amazon injects credit-card / referral promo cards into the orders DOM
+    // with order-detail-style links (orderID=, order-details). They have a
+    // date (today) and look like real orders but the IDs don't resolve.
+    // Filter by known promo phrases before pushing.
+    if (/\b(Amazon\s+Business\s+(?:Prime\s+)?Card|Amazon\s+(?:Prime\s+)?Visa|Prime\s+Visa|Amazon\s+Store\s+Card|Amazon\s+Credit\s+Card|Apply\s+now|Get\s+the\s+Amazon)\b/i.test(cardText)) {
+      console.log('[AMZ] skipping promo card:', orderId, '— cardText:', cardText.slice(0, 200));
+      continue;
+    }
+
     const totalMatch = cardText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
     const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
 
@@ -95,6 +104,7 @@ function scrapeDoc(doc: Document, sinceDate: Date): { orders: ScrapedOrder[]; ha
       itemDescription = (productLink?.textContent ?? '').trim().slice(0, 120);
     }
 
+    console.log('[AMZ] adding order', orderId, 'item:', itemDescription.slice(0, 60), 'cost:', cost, 'cardText:', cardText.slice(0, 200));
     orders.push({
       platform: 'Amazon',
       orderNumber: orderId,
