@@ -222,14 +222,26 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
     }
 
     const numbers = new Set<string>();
-    const trackPatterns = [
-      /trackingNumber["\s:]+["']?([A-Z0-9]{10,25})/g,
-      /\b(1Z[A-Z0-9]{16})\b/g,
-      /\b([0-9]{20,22})\b/g,
+    const trackPatterns: Array<[string, RegExp]> = [
+      ['trackingNumber-field', /trackingNumber["\s:]+["']?([A-Z0-9]{10,25})/g],
+      ['ups-1Z',              /\b(1Z[A-Z0-9]{16})\b/g],
+      ['digits-20-22',        /\b([0-9]{20,22})\b/g],
     ];
-    for (const pat of trackPatterns) {
+    const numberOrigins = new Map<string, string>();
+    for (const [name, pat] of trackPatterns) {
       let m: RegExpExecArray | null;
-      while ((m = pat.exec(html)) !== null) numbers.add(m[1]);
+      while ((m = pat.exec(html)) !== null) {
+        numbers.add(m[1]);
+        if (!numberOrigins.has(m[1])) numberOrigins.set(m[1], name);
+      }
+    }
+    // Diagnostic: dump all candidate numbers found in the HTML plus the
+    // shipment status if NEXT_DATA carries one. Helps figure out why the
+    // 555-IDs are showing up on orders that haven't shipped.
+    if (numbers.size > 0 || ndOrder) {
+      const status = (ndOrder?.status ?? (ndOrder?.fulfillment as Record<string, unknown>)?.status) as string | undefined;
+      console.log('[WM/diag]', orderNumber, 'status:', status ?? '(none)',
+        'candidates:', Array.from(numbers).map(n => `${n}[${numberOrigins.get(n)}]`).join(', ') || '(none)');
     }
 
     // Walmart's internal tracking IDs start with "555" and are 18+ digits
@@ -449,23 +461,13 @@ async function startSync() {
         if (detail.address) order.shippingAddress = detail.address;
         if (detail.tracking.length) {
           order.trackingNumbers = detail.tracking;
-        } else if (detail.hadInternalTracking && order.orderNumber) {
-          // Walmart returned only internal `555…` tracking IDs (filtered out
-          // in fetchOrderDetail). Buying groups still need *something* to
-          // identify the shipment — fall back to the Walmart order number
-          // (digits only, no dashes) which they can look up directly on
-          // Walmart's side.
-          //
-          // Important: we only fall back when an internal-ID was actually
-          // dropped. If detail.tracking is empty because Walmart simply
-          // hasn't shipped yet / hasn't surfaced tracking, leave the order
-          // with no tracking — don't fabricate one.
-          const fallback = order.orderNumber.replace(/-/g, '');
-          if (fallback) {
-            order.trackingNumbers = [fallback];
-            console.log('[WM] internal-only tracking, using order number as fallback:', fallback);
-          }
         }
+        // The previous order-number fallback (when only Walmart-internal 555
+        // IDs were present) has been removed. Walmart embeds 555-prefixed
+        // IDs in every order's NEXT_DATA, not just shipped ones, so the
+        // fallback fired on every sync and overwrote orders with fake
+        // tracking. If you need the Walmart order number as a tracking
+        // identifier on a specific order, set it manually on the tracker.
         if (detail.cost != null && detail.cost > 0 && order.cost === 0) order.cost = detail.cost;
         if (detail.itemDescription && !order.itemDescription) order.itemDescription = detail.itemDescription;
         // Prefer detail's full ISO (with time) over the listing's date-only.

@@ -539,12 +539,6 @@
               if (detail.address) order.shippingAddress = detail.address;
               if (detail.tracking.length) {
                 order.trackingNumbers = detail.tracking;
-              } else if (detail.hadInternalTracking && order.orderNumber) {
-                const fallback = order.orderNumber.replace(/-/g, "");
-                if (fallback) {
-                  order.trackingNumbers = [fallback];
-                  console.log("[WM] internal-only tracking, using order number as fallback:", fallback);
-                }
               }
               if (detail.cost != null && detail.cost > 0 && order.cost === 0) order.cost = detail.cost;
               if (detail.itemDescription && !order.itemDescription) order.itemDescription = detail.itemDescription;

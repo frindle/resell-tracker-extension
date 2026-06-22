@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.49
+- **Removed Walmart order-number tracking fallback.** v1.1.44 added a fallback that wrote the Walmart order number as the tracking value when only internal `555…` IDs were filtered out. Walmart embeds 555-prefixed IDs in every order's NEXT_DATA — including not-yet-shipped orders — so the fallback fired on every sync and overwrote orders with fake tracking. Real carrier numbers (UPS / FedEx / USPS) still flow through unchanged. If you need the Walmart order number on a specific order, set it manually.
+
 ### 1.1.48
 - Sync-status banner: when the tracker page provides a `[data-rt-sync-target]` mount point (orders page in v1.1.48+ tracker), render the status inline there instead of floating in the bottom-right corner. Same status content; just lives next to the Sync buttons where it makes contextual sense. Falls back to floating bottom-right on pages without the mount point.
 
