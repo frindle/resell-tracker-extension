@@ -74,17 +74,23 @@ function scrapeDoc(doc: Document, sinceDate: Date): { orders: ScrapedOrder[]; ha
 
     if (/\b(cancelled|canceled|refunded|returned)\b/i.test(cardText)) continue;
 
-    // Amazon injects credit-card / referral promo cards into the orders DOM
-    // with order-detail-style links (orderID=, order-details). They have a
-    // date (today) and look like real orders but the IDs don't resolve.
-    // Filter by known promo phrases before pushing.
-    if (/\b(Amazon\s+Business\s+(?:Prime\s+)?Card|Amazon\s+(?:Prime\s+)?Visa|Prime\s+Visa|Amazon\s+Store\s+Card|Amazon\s+Credit\s+Card|Apply\s+now|Get\s+the\s+Amazon)\b/i.test(cardText)) {
-      console.log('[AMZ] skipping promo card:', orderId, '— cardText:', cardText.slice(0, 200));
-      continue;
-    }
-
     const totalMatch = cardText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
     const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
+
+    // Amazon injects credit-card referral promo cards into the orders DOM
+    // with order-detail-style links. They have a date (today) and order IDs
+    // in 113-... format but don't resolve in the user's account. Detect by:
+    //   1. "Apply now" CTA in the card text (specific to promos, not payment)
+    //   2. Total is $0 AND the card text contains specific promo wording
+    // These conditions deliberately don't fire on real orders paid with an
+    // Amazon Visa — payment method strings don't contain "Apply now" or the
+    // promo phrasing we look for.
+    const hasApplyNow = /\bApply\s+now\b/i.test(cardText);
+    const promoPhrase = /\b(?:Earn\s+(?:up\s+to\s+)?\d+%|Get\s+the\s+Amazon\s+(?:Business\s+)?(?:Prime\s+)?Visa|Get\s+a\s+\$?\d+\s+Amazon\.com\s+(?:Gift\s+Card|Credit)|No\s+annual\s+fee|Card\s+Member)\b/i.test(cardText);
+    if (hasApplyNow || (cost === 0 && promoPhrase)) {
+      console.log('[AMZ] skipping promo card:', orderId, 'hasApplyNow:', hasApplyNow, 'promoPhrase:', promoPhrase, '— cardText:', cardText.slice(0, 200));
+      continue;
+    }
 
     let shippingAddress = '';
     const addrMatch = cardText.match(/Ship to\s+(.+?)\s+United States/is);

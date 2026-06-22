@@ -258,12 +258,14 @@
             continue;
           }
           if (/\b(cancelled|canceled|refunded|returned)\b/i.test(cardText)) continue;
-          if (/\b(Amazon\s+Business\s+(?:Prime\s+)?Card|Amazon\s+(?:Prime\s+)?Visa|Prime\s+Visa|Amazon\s+Store\s+Card|Amazon\s+Credit\s+Card|Apply\s+now|Get\s+the\s+Amazon)\b/i.test(cardText)) {
-            console.log("[AMZ] skipping promo card:", orderId, "\u2014 cardText:", cardText.slice(0, 200));
-            continue;
-          }
           const totalMatch = cardText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
           const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
+          const hasApplyNow = /\bApply\s+now\b/i.test(cardText);
+          const promoPhrase = /\b(?:Earn\s+(?:up\s+to\s+)?\d+%|Get\s+the\s+Amazon\s+(?:Business\s+)?(?:Prime\s+)?Visa|Get\s+a\s+\$?\d+\s+Amazon\.com\s+(?:Gift\s+Card|Credit)|No\s+annual\s+fee|Card\s+Member)\b/i.test(cardText);
+          if (hasApplyNow || cost === 0 && promoPhrase) {
+            console.log("[AMZ] skipping promo card:", orderId, "hasApplyNow:", hasApplyNow, "promoPhrase:", promoPhrase, "\u2014 cardText:", cardText.slice(0, 200));
+            continue;
+          }
           let shippingAddress = "";
           const addrMatch = cardText.match(/Ship to\s+(.+?)\s+United States/is);
           if (addrMatch) {

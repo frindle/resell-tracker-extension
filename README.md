@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.42
+- Tighten Amazon promo-card filter. 1.1.41 matched on card names anywhere in the card text, which would have false-positive on real orders paid with an Amazon Visa (payment method string contains the card name). New filter requires either an "Apply now" CTA OR cost=$0 AND a specific promo phrase (Earn X%, Get the Amazon Visa, No annual fee, Card Member, etc.) — none of which appear in the payment-method portion of real orders.
+
 ### 1.1.41
 - Amazon: skip promotional cards (Amazon Business Card, Prime Visa, Amazon Store Card, etc.) that get injected into the orders DOM with order-detail-style links. They had real-looking order IDs in `113-...` format but didn't resolve in the user's account.
 - Amazon: log every added order's cardText snippet so future false positives are easy to diagnose without rebuilding.
