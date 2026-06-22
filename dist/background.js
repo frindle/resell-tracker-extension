@@ -152,6 +152,19 @@
           sendResponse({ ok: true });
           return;
         }
+        if (message.type === "POLL_COMMANDS_NOW") {
+          chrome.storage.local.get("lastForcedPoll").then(({ lastForcedPoll }) => {
+            const now = Date.now();
+            if (typeof lastForcedPoll === "number" && now - lastForcedPoll < 1e4) {
+              sendResponse({ ok: true, skipped: true });
+              return;
+            }
+            chrome.storage.local.set({ lastForcedPoll: now });
+            pollAndExecuteCommands().catch((e) => console.error("[BG] forced poll error", e));
+            sendResponse({ ok: true, skipped: false });
+          });
+          return true;
+        }
         if (message.type === "TRIGGER_SYNC") {
           triggerSyncInBackground(message.platform, message.activeTabId, message.activeTabUrl).catch(
             (e) => console.error("[BG] triggerSyncInBackground error", e)

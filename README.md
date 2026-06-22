@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.47
+- **Faster sync after click.** Chrome MV3 caps `chrome.alarms` at 1-minute periods, so a queued sync could wait up to 60s for the background to wake. The tracker-status content script (already running on tracker pages) now sends a `POLL_COMMANDS_NOW` message to the background every 15s, and on page load. Background rate-limits to one real poll per 10s. Net: clicking Sync in the tracker UI now fires within ~15s.
+
 ### 1.1.46
 - **Backfill: Walmart support** — the "Backfill missing data" button on the Options page now backfills Walmart orders too (was Amazon-only). Walmart detail page is parsed via `__NEXT_DATA__` for item name + shipping address; Amazon path unchanged.
 - Pairs with the tracker-side fix that respects `X-Extension-User-Id` (the previous "Nothing to backfill" message was the tracker returning 0 orders because session auth was missing).

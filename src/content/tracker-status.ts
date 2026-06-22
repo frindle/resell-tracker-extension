@@ -126,4 +126,13 @@ async function refresh() {
   });
   // Repaint every 5s so the auto-dismiss timer fires without needing a storage change
   setInterval(refresh, 5000);
+
+  // Nudge the background to poll commands every 15s while the user is here.
+  // Chrome MV3 caps alarms at 1-min, so queued SYNC_* commands would otherwise
+  // wait up to 60s for the background to wake. Background rate-limits to one
+  // real poll per 10s, so this is cheap. Also fire once on load so a Sync
+  // button click → response is near-instant.
+  const nudge = () => chrome.runtime.sendMessage({ type: 'POLL_COMMANDS_NOW' }).catch(() => null);
+  nudge();
+  setInterval(nudge, 15_000);
 })();

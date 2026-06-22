@@ -107,6 +107,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return;
   }
 
+  // Tracker-status content script pings this every ~15s while the user is on
+  // the tracker UI so queued SYNC_* commands fire well before the next 60s
+  // alarm tick. We rate-limit to one real poll per ~10s to avoid hammering.
+  if (message.type === 'POLL_COMMANDS_NOW') {
+    chrome.storage.local.get('lastForcedPoll').then(({ lastForcedPoll }) => {
+      const now = Date.now();
+      if (typeof lastForcedPoll === 'number' && now - lastForcedPoll < 10_000) {
+        sendResponse({ ok: true, skipped: true });
+        return;
+      }
+      chrome.storage.local.set({ lastForcedPoll: now });
+      pollAndExecuteCommands().catch(e => console.error('[BG] forced poll error', e));
+      sendResponse({ ok: true, skipped: false });
+    });
+    return true; // async response
+  }
+
   if (message.type === 'TRIGGER_SYNC') {
     triggerSyncInBackground(message.platform as string, message.activeTabId as number | undefined, message.activeTabUrl as string | undefined).catch(e =>
       console.error('[BG] triggerSyncInBackground error', e)

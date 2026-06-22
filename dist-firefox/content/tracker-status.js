@@ -249,6 +249,9 @@
           if (Object.keys(changes).some((k) => PLATFORMS.some((p) => p.key === k))) refresh();
         });
         setInterval(refresh, 5e3);
+        const nudge = () => chrome.runtime.sendMessage({ type: "POLL_COMMANDS_NOW" }).catch(() => null);
+        nudge();
+        setInterval(nudge, 15e3);
       })();
     }
   });
