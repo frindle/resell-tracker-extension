@@ -10,6 +10,7 @@ export interface ScrapedOrder {
   shippingAddress: string;
   trackingNumbers: string[];
   sourceUrl: string;
+  paymentLast4?: string;   // last 4 digits scraped from payment method — enables card auto-assign on import
 }
 
 export interface SyncSettings {

@@ -290,7 +290,9 @@
             console.log("[WM] rejecting generic item description, treating as empty:", itemDescription);
             itemDescription = "";
           }
-          console.log("[WM] adding order", orderNumber, "date:", orderDate.toISOString().split("T")[0], "blockText snippet:", blockText.slice(0, 240));
+          const last4Match = blockText.match(/(?:ending\s+(?:in)?|\*{2,}|\.{2,})\s*(\d{4})\b/i);
+          const paymentLast4 = last4Match?.[1];
+          console.log("[WM] adding order", orderNumber, "date:", orderDate.toISOString().split("T")[0], "paymentLast4:", paymentLast4 ?? "(none)", "blockText snippet:", blockText.slice(0, 240));
           orders.push({
             platform: "Walmart",
             orderNumber,
@@ -300,7 +302,8 @@
             shippingCost: 0,
             shippingAddress: "",
             trackingNumbers: [],
-            sourceUrl: `https://www.walmart.com/orders/${orderNumber}`
+            sourceUrl: `https://www.walmart.com/orders/${orderNumber}`,
+            paymentLast4
           });
         }
         console.log("[WM] scraped orders this page:", orders.length, "hasOlder:", hasOlder);

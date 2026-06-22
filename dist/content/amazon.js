@@ -260,6 +260,8 @@
           if (/\b(cancelled|canceled|refunded|returned)\b/i.test(cardText)) continue;
           const totalMatch = cardText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
           const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
+          const last4Match = cardText.match(/(?:ending\s+(?:in)?|\*{2,}|\.{2,})\s*(\d{4})\b/i);
+          const paymentLast4 = last4Match?.[1];
           const hasApplyNow = /\bApply\s+now\b/i.test(cardText);
           const promoPhrase = /\b(?:Earn\s+(?:up\s+to\s+)?\d+%|Get\s+the\s+Amazon\s+(?:Business\s+)?(?:Prime\s+)?Visa|Get\s+a\s+\$?\d+\s+Amazon\.com\s+(?:Gift\s+Card|Credit)|No\s+annual\s+fee|Card\s+Member)\b/i.test(cardText);
           if (hasApplyNow || cost === 0 && promoPhrase) {
@@ -291,7 +293,8 @@
             shippingCost: 0,
             shippingAddress,
             trackingNumbers: [],
-            sourceUrl: `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`
+            sourceUrl: `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`,
+            paymentLast4
           });
         }
         return { orders, hasOlder };

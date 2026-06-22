@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.45
+- Amazon + Walmart: capture payment-method last 4 digits when present in the order card text (matches `ending in 1234` / `****1234` / `..1234`) and pass as `paymentLast4` on the import payload. Tracker uses this to auto-assign one of the user's saved cards when it matches uniquely.
+
 ### 1.1.44
 - **Walmart order-number fallback bug fix.** v1.1.43 fell back to the order number whenever the tracking list was empty after filtering — even when Walmart hadn't actually returned any internal `555…` ID. Now only falls back when an internal-ID was specifically filtered. Orders that genuinely have no tracking (haven't shipped yet) are left with no tracking instead of getting the order number fabricated as one.
 - **Walmart product name** — prefer `[data-testid="productName"]` (the actual product name Walmart renders for each order row) over the more permissive selectors. Reject "Walmart.com" / "Walmart" / "Loading" generic chrome that occasionally leaked through.

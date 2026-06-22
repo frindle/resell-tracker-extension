@@ -137,7 +137,12 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
       itemDescription = '';
     }
 
-    console.log('[WM] adding order', orderNumber, 'date:', orderDate.toISOString().split('T')[0], 'blockText snippet:', blockText.slice(0, 240));
+    // Capture payment method last 4 if present in the order card for
+    // card auto-assignment on the tracker side.
+    const last4Match = blockText.match(/(?:ending\s+(?:in)?|\*{2,}|\.{2,})\s*(\d{4})\b/i);
+    const paymentLast4 = last4Match?.[1];
+
+    console.log('[WM] adding order', orderNumber, 'date:', orderDate.toISOString().split('T')[0], 'paymentLast4:', paymentLast4 ?? '(none)', 'blockText snippet:', blockText.slice(0, 240));
     orders.push({
       platform: 'Walmart',
       orderNumber,
@@ -148,6 +153,7 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
       shippingAddress: '',
       trackingNumbers: [],
       sourceUrl: `https://www.walmart.com/orders/${orderNumber}`,
+      paymentLast4,
     });
   }
 

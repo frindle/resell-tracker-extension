@@ -77,6 +77,13 @@ function scrapeDoc(doc: Document, sinceDate: Date): { orders: ScrapedOrder[]; ha
     const totalMatch = cardText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
     const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
 
+    // Capture the payment method's last 4 if present in the order card.
+    // Amazon's listing card sometimes shows "Visa ending in 1234" / "ending
+    // in 1234" / "**** 1234". The tracker uses this to auto-assign one of
+    // the user's saved cards when it matches uniquely.
+    const last4Match = cardText.match(/(?:ending\s+(?:in)?|\*{2,}|\.{2,})\s*(\d{4})\b/i);
+    const paymentLast4 = last4Match?.[1];
+
     // Amazon injects credit-card referral promo cards into the orders DOM
     // with order-detail-style links. They have a date (today) and order IDs
     // in 113-... format but don't resolve in the user's account. Detect by:
@@ -121,6 +128,7 @@ function scrapeDoc(doc: Document, sinceDate: Date): { orders: ScrapedOrder[]; ha
       shippingAddress,
       trackingNumbers: [],
       sourceUrl: `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`,
+      paymentLast4,
     });
   }
 
