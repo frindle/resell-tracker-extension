@@ -286,53 +286,82 @@
               status.textContent = `Backfilling ${filled + skipped + 1}/${orders.length}\u2026`;
               await new Promise((r) => setTimeout(r, 800));
               try {
-                const resp = await chrome.runtime.sendMessage({
-                  type: "FETCH_HTML",
-                  url: `https://www.amazon.com/gp/your-account/order-details?orderID=${order.orderNumber}`
-                });
+                const url = order.platform === "Walmart" ? order.sourceUrl ?? `https://www.walmart.com/orders/${order.orderNumber}` : `https://www.amazon.com/gp/your-account/order-details?orderID=${order.orderNumber}`;
+                const resp = await chrome.runtime.sendMessage({ type: "FETCH_HTML", url });
                 if (resp?.error || !resp?.html) {
                   skipped++;
                   continue;
                 }
                 const doc = new DOMParser().parseFromString(resp.html, "text/html");
                 let title = "";
-                if (!order.itemDescription) {
-                  const titleSelectors = [
-                    '[data-component="itemTitle"] a',
-                    ".yohtmlc-item a.a-link-normal",
-                    '.a-link-normal[href*="/dp/"]'
-                  ];
-                  for (const sel of titleSelectors) {
-                    const el = doc.querySelector(sel);
-                    const t = (el?.textContent ?? "").trim().replace(/\s+/g, " ");
-                    if (t.length > 5) {
-                      title = t.slice(0, 120);
-                      break;
+                let address = "";
+                if (order.platform === "Walmart") {
+                  if (!order.itemDescription || !order.shippingAddress) {
+                    const nextDataEl = doc.querySelector("#__NEXT_DATA__");
+                    if (nextDataEl?.textContent) {
+                      try {
+                        const nd = JSON.parse(nextDataEl.textContent);
+                        const ndOrder = nd.props?.pageProps?.initialData?.data?.order;
+                        if (ndOrder) {
+                          const groupsKey = Object.keys(ndOrder).find((k) => k.startsWith("groups_"));
+                          const firstGroup = groupsKey ? ndOrder[groupsKey]?.[0] : null;
+                          if (!order.itemDescription) {
+                            const firstItem = firstGroup?.items?.[0];
+                            const name = firstItem?.productInfo?.name;
+                            if (name) title = name.slice(0, 120);
+                          }
+                          if (!order.shippingAddress) {
+                            const addrStr = firstGroup?.deliveryAddress?.address?.addressString;
+                            if (typeof addrStr === "string" && addrStr.trim()) address = addrStr.slice(0, 200);
+                          }
+                        }
+                      } catch {
+                      }
+                    }
+                    if (!title) {
+                      const productEl = doc.querySelector('[data-testid="productName"]');
+                      const t = (productEl?.textContent ?? "").trim();
+                      if (t.length > 5) title = t.slice(0, 120);
                     }
                   }
-                  if (!title) {
-                    for (const a of Array.from(doc.querySelectorAll("a[href]"))) {
-                      if (!/\/dp\/[A-Z0-9]{10}|\/gp\/product\/[A-Z0-9]{10}/.test(a.href)) continue;
-                      const t = (a.textContent ?? "").trim().replace(/\s+/g, " ");
+                } else {
+                  if (!order.itemDescription) {
+                    const titleSelectors = [
+                      '[data-component="itemTitle"] a',
+                      ".yohtmlc-item a.a-link-normal",
+                      '.a-link-normal[href*="/dp/"]'
+                    ];
+                    for (const sel of titleSelectors) {
+                      const el = doc.querySelector(sel);
+                      const t = (el?.textContent ?? "").trim().replace(/\s+/g, " ");
                       if (t.length > 5) {
                         title = t.slice(0, 120);
                         break;
                       }
                     }
+                    if (!title) {
+                      for (const a of Array.from(doc.querySelectorAll("a[href]"))) {
+                        if (!/\/dp\/[A-Z0-9]{10}|\/gp\/product\/[A-Z0-9]{10}/.test(a.href)) continue;
+                        const t = (a.textContent ?? "").trim().replace(/\s+/g, " ");
+                        if (t.length > 5) {
+                          title = t.slice(0, 120);
+                          break;
+                        }
+                      }
+                    }
                   }
-                }
-                let address = "";
-                if (!order.shippingAddress) {
-                  const headers = Array.from(doc.querySelectorAll("h5"));
-                  for (const h of headers) {
-                    if (!/ship\s+to/i.test(h.textContent ?? "")) continue;
-                    const ul = h.nextElementSibling;
-                    if (!ul || ul.tagName !== "UL") continue;
-                    const items = Array.from(ul.querySelectorAll("li span.a-list-item")).map((el) => (el.innerHTML ?? "").replace(/<br\s*\/?>/gi, ", ").replace(/<[^>]+>/g, "").trim().replace(/\s+/g, " ")).filter((t) => t && !/^united states$/i.test(t));
-                    const addrItems = items.slice(1);
-                    if (addrItems.length > 0) {
-                      address = addrItems.join(", ").slice(0, 200);
-                      break;
+                  if (!order.shippingAddress) {
+                    const headers = Array.from(doc.querySelectorAll("h5"));
+                    for (const h of headers) {
+                      if (!/ship\s+to/i.test(h.textContent ?? "")) continue;
+                      const ul = h.nextElementSibling;
+                      if (!ul || ul.tagName !== "UL") continue;
+                      const items = Array.from(ul.querySelectorAll("li span.a-list-item")).map((el) => (el.innerHTML ?? "").replace(/<br\s*\/?>/gi, ", ").replace(/<[^>]+>/g, "").trim().replace(/\s+/g, " ")).filter((t) => t && !/^united states$/i.test(t));
+                      const addrItems = items.slice(1);
+                      if (addrItems.length > 0) {
+                        address = addrItems.join(", ").slice(0, 200);
+                        break;
+                      }
                     }
                   }
                 }

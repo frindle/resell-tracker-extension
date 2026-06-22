@@ -51,6 +51,10 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.46
+- **Backfill: Walmart support** — the "Backfill missing data" button on the Options page now backfills Walmart orders too (was Amazon-only). Walmart detail page is parsed via `__NEXT_DATA__` for item name + shipping address; Amazon path unchanged.
+- Pairs with the tracker-side fix that respects `X-Extension-User-Id` (the previous "Nothing to backfill" message was the tracker returning 0 orders because session auth was missing).
+
 ### 1.1.45
 - Amazon + Walmart: capture payment-method last 4 digits when present in the order card text (matches `ending in 1234` / `****1234` / `..1234`) and pass as `paymentLast4` on the import payload. Tracker uses this to auto-assign one of the user's saved cards when it matches uniquely.
 

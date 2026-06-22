@@ -84,7 +84,8 @@ async function init() {
         headers: { 'X-Extension-User-Id': currentSettings.userId, ...(currentSettings.apiKey ? { 'X-API-Key': currentSettings.apiKey } : {}) },
       });
       if (!res.ok) throw new Error(`API error ${res.status}`);
-      const orders: { id: number; orderNumber: string; shippingAddress: string | null; itemDescription: string | null }[] = await res.json();
+      type BackfillOrder = { id: number; platform: string; orderNumber: string; sourceUrl: string | null; shippingAddress: string | null; itemDescription: string | null };
+      const orders: BackfillOrder[] = await res.json();
 
       if (orders.length === 0) {
         status.textContent = 'Nothing to backfill.';
@@ -102,49 +103,83 @@ async function init() {
         await new Promise(r => setTimeout(r, 800));
 
         try {
-          const resp = await chrome.runtime.sendMessage({
-            type: 'FETCH_HTML',
-            url: `https://www.amazon.com/gp/your-account/order-details?orderID=${order.orderNumber}`,
-          });
+          const url = order.platform === 'Walmart'
+            ? (order.sourceUrl ?? `https://www.walmart.com/orders/${order.orderNumber}`)
+            : `https://www.amazon.com/gp/your-account/order-details?orderID=${order.orderNumber}`;
+          const resp = await chrome.runtime.sendMessage({ type: 'FETCH_HTML', url });
           if (resp?.error || !resp?.html) { skipped++; continue; }
 
           const doc = new DOMParser().parseFromString(resp.html, 'text/html');
 
-          // Extract title
           let title = '';
-          if (!order.itemDescription) {
-            const titleSelectors = [
-              '[data-component="itemTitle"] a',
-              '.yohtmlc-item a.a-link-normal',
-              '.a-link-normal[href*="/dp/"]',
-            ];
-            for (const sel of titleSelectors) {
-              const el = doc.querySelector(sel);
-              const t = (el?.textContent ?? '').trim().replace(/\s+/g, ' ');
-              if (t.length > 5) { title = t.slice(0, 120); break; }
-            }
-            if (!title) {
-              for (const a of Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href]'))) {
-                if (!/\/dp\/[A-Z0-9]{10}|\/gp\/product\/[A-Z0-9]{10}/.test(a.href)) continue;
-                const t = (a.textContent ?? '').trim().replace(/\s+/g, ' ');
-                if (t.length > 5) { title = t.slice(0, 120); break; }
+          let address = '';
+
+          if (order.platform === 'Walmart') {
+            // Walmart embeds the full order in __NEXT_DATA__ at
+            // props.pageProps.initialData.data.order. Mirrors what the
+            // walmart content script does on detail-page fetch.
+            if (!order.itemDescription || !order.shippingAddress) {
+              const nextDataEl = doc.querySelector('#__NEXT_DATA__');
+              if (nextDataEl?.textContent) {
+                try {
+                  const nd = JSON.parse(nextDataEl.textContent) as {
+                    props?: { pageProps?: { initialData?: { data?: { order?: Record<string, unknown> } } } };
+                  };
+                  const ndOrder = nd.props?.pageProps?.initialData?.data?.order;
+                  if (ndOrder) {
+                    const groupsKey = Object.keys(ndOrder).find(k => k.startsWith('groups_'));
+                    const firstGroup = groupsKey ? (ndOrder[groupsKey] as unknown[])?.[0] as Record<string, unknown> : null;
+                    if (!order.itemDescription) {
+                      const firstItem = (firstGroup?.items as unknown[])?.[0] as Record<string, unknown>;
+                      const name = (firstItem?.productInfo as Record<string, unknown>)?.name as string | undefined;
+                      if (name) title = name.slice(0, 120);
+                    }
+                    if (!order.shippingAddress) {
+                      const addrStr = ((firstGroup?.deliveryAddress as Record<string, unknown>)?.address as Record<string, unknown>)?.addressString;
+                      if (typeof addrStr === 'string' && addrStr.trim()) address = addrStr.slice(0, 200);
+                    }
+                  }
+                } catch { /* ignore */ }
+              }
+              if (!title) {
+                const productEl = doc.querySelector('[data-testid="productName"]');
+                const t = (productEl?.textContent ?? '').trim();
+                if (t.length > 5) title = t.slice(0, 120);
               }
             }
-          }
-
-          // Extract address
-          let address = '';
-          if (!order.shippingAddress) {
-            const headers = Array.from(doc.querySelectorAll('h5'));
-            for (const h of headers) {
-              if (!/ship\s+to/i.test(h.textContent ?? '')) continue;
-              const ul = h.nextElementSibling;
-              if (!ul || ul.tagName !== 'UL') continue;
-              const items = Array.from(ul.querySelectorAll('li span.a-list-item'))
-                .map(el => (el.innerHTML ?? '').replace(/<br\s*\/?>/gi, ', ').replace(/<[^>]+>/g, '').trim().replace(/\s+/g, ' '))
-                .filter(t => t && !/^united states$/i.test(t));
-              const addrItems = items.slice(1);
-              if (addrItems.length > 0) { address = addrItems.join(', ').slice(0, 200); break; }
+          } else {
+            // Amazon
+            if (!order.itemDescription) {
+              const titleSelectors = [
+                '[data-component="itemTitle"] a',
+                '.yohtmlc-item a.a-link-normal',
+                '.a-link-normal[href*="/dp/"]',
+              ];
+              for (const sel of titleSelectors) {
+                const el = doc.querySelector(sel);
+                const t = (el?.textContent ?? '').trim().replace(/\s+/g, ' ');
+                if (t.length > 5) { title = t.slice(0, 120); break; }
+              }
+              if (!title) {
+                for (const a of Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href]'))) {
+                  if (!/\/dp\/[A-Z0-9]{10}|\/gp\/product\/[A-Z0-9]{10}/.test(a.href)) continue;
+                  const t = (a.textContent ?? '').trim().replace(/\s+/g, ' ');
+                  if (t.length > 5) { title = t.slice(0, 120); break; }
+                }
+              }
+            }
+            if (!order.shippingAddress) {
+              const headers = Array.from(doc.querySelectorAll('h5'));
+              for (const h of headers) {
+                if (!/ship\s+to/i.test(h.textContent ?? '')) continue;
+                const ul = h.nextElementSibling;
+                if (!ul || ul.tagName !== 'UL') continue;
+                const items = Array.from(ul.querySelectorAll('li span.a-list-item'))
+                  .map(el => (el.innerHTML ?? '').replace(/<br\s*\/?>/gi, ', ').replace(/<[^>]+>/g, '').trim().replace(/\s+/g, ' '))
+                  .filter(t => t && !/^united states$/i.test(t));
+                const addrItems = items.slice(1);
+                if (addrItems.length > 0) { address = addrItems.join(', ').slice(0, 200); break; }
+              }
             }
           }
 
