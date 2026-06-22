@@ -340,6 +340,13 @@
             let m;
             while ((m = pat.exec(html)) !== null) numbers.add(m[1]);
           }
+          const isWalmartInternal = (n) => /^555\d{15,}$/.test(n);
+          for (const n of [...numbers]) {
+            if (isWalmartInternal(n) || n === orderNumber) {
+              console.log("[WM] dropping non-carrier number:", n, isWalmartInternal(n) ? "(walmart internal)" : "(order number)");
+              numbers.delete(n);
+            }
+          }
           let orderDate = null;
           let cost = null;
           let itemDescription = null;

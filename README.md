@@ -51,6 +51,11 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.40
+- Walmart: filter out Walmart's internal tracking IDs (start with `555`, 18+ digits, e.g. `55533883340850446553`) — these aren't real carrier numbers and don't track on UPS/FedEx/USPS. Genuine FedEx numbers starting with 5 (typically 12-15 digits) are kept.
+- Walmart: also drop the order number itself if it leaked into the tracking-number list.
+- Capture full order placed timestamp (with time) from Walmart's `__NEXT_DATA__` instead of truncating to YYYY-MM-DD. Amazon: added detail-page time-candidate probe that logs ISO/JSON/data-attribute candidates for later refinement.
+
 ### 1.1.39
 - Walmart scraper: broader cancelled-order detection. Previous regex caught only literal "cancelled/canceled" inside the order DOM block, missing Walmart's separate cancel banner ("we had to cancel these items", "won't be charged", "released the temporary hold"). Now matches all common cancel-banner phrases.
 - Log a blockText snippet on every added Walmart order so future cancel-detection failures can be diagnosed from the service worker console without code changes.

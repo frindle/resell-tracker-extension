@@ -216,6 +216,20 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
       while ((m = pat.exec(html)) !== null) numbers.add(m[1]);
     }
 
+    // Walmart's internal tracking IDs start with "555" and are 18+ digits
+    // (e.g. 55533883340850446553). These aren't real carrier tracking numbers
+    // and don't track on UPS/FedEx/USPS — drop them. We deliberately require
+    // 18+ digits so genuine FedEx numbers starting with 5 (typically 12-15
+    // digits) are still kept.
+    // Also drop the order number itself if it leaked into the tracking list.
+    const isWalmartInternal = (n: string) => /^555\d{15,}$/.test(n);
+    for (const n of [...numbers]) {
+      if (isWalmartInternal(n) || n === orderNumber) {
+        console.log('[WM] dropping non-carrier number:', n, isWalmartInternal(n) ? '(walmart internal)' : '(order number)');
+        numbers.delete(n);
+      }
+    }
+
     // Extract order date, cost, and item description from the detail page HTML
     let orderDate: string | null = null;
     let cost: number | null = null;
