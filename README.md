@@ -51,6 +51,11 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.44
+- **Walmart order-number fallback bug fix.** v1.1.43 fell back to the order number whenever the tracking list was empty after filtering — even when Walmart hadn't actually returned any internal `555…` ID. Now only falls back when an internal-ID was specifically filtered. Orders that genuinely have no tracking (haven't shipped yet) are left with no tracking instead of getting the order number fabricated as one.
+- **Walmart product name** — prefer `[data-testid="productName"]` (the actual product name Walmart renders for each order row) over the more permissive selectors. Reject "Walmart.com" / "Walmart" / "Loading" generic chrome that occasionally leaked through.
+- **Live sync-status banner on the tracker page** — new content script `tracker-status.ts` injects a small floating banner in the bottom-right of the resell-tracker UI showing per-platform sync state (Syncing… / Sync done · N new, M updated / Error: ...). Reads `*SyncStatus` from `chrome.storage.local`. Self-filters to only render on the configured trackerUrl hostname. Auto-dismisses done/error after 30s; can be dismissed manually.
+
 ### 1.1.43
 - Walmart: when an order has no real carrier tracking number after filtering Walmart's internal `555...` IDs, fall back to using the Walmart order number (digits only, no dashes) as the tracking value. Lets buying groups identify the shipment via Walmart's own system when no UPS/FedEx/USPS tracking is available.
 

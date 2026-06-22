@@ -123,9 +123,19 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
     const totalMatch = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
     const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
 
-    // Item description — first product link or heading text
-    const itemEl = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
-    const itemDescription = (itemEl?.textContent ?? '').trim().slice(0, 120);
+    // Item description — prefer the explicit productName test-id (the actual
+    // product name Walmart renders for that order row). Fall back to a
+    // product link or item element. The text is then sanity-checked to
+    // reject generic page chrome like "Walmart.com" that occasionally
+    // leaked through the more permissive selectors.
+    const productNameEl = block.querySelector('[data-testid="productName"]');
+    const fallbackItemEl = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
+    let itemDescription = (productNameEl?.textContent ?? fallbackItemEl?.textContent ?? '').trim().slice(0, 120);
+    // Reject obvious site-chrome / generic strings — these aren't real products.
+    if (/^(Walmart\.com|Walmart|Loading|—|—\s*—)$/i.test(itemDescription)) {
+      console.log('[WM] rejecting generic item description, treating as empty:', itemDescription);
+      itemDescription = '';
+    }
 
     console.log('[WM] adding order', orderNumber, 'date:', orderDate.toISOString().split('T')[0], 'blockText snippet:', blockText.slice(0, 240));
     orders.push({
@@ -167,7 +177,7 @@ function getNextPageUrl(): string | null {
 // Enrich order detail pages for tracking + address
 // ---------------------------------------------------------------------------
 
-async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<{ address: string; tracking: string[]; orderDate: string | null; cost: number | null; itemDescription: string | null }> {
+async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<{ address: string; tracking: string[]; orderDate: string | null; cost: number | null; itemDescription: string | null; hadInternalTracking: boolean }> {
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 5000);
@@ -222,10 +232,17 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
     // 18+ digits so genuine FedEx numbers starting with 5 (typically 12-15
     // digits) are still kept.
     // Also drop the order number itself if it leaked into the tracking list.
+    // Track whether at least one internal-ID was dropped so the caller can
+    // decide whether to fall back to the order number as the tracking value.
     const isWalmartInternal = (n: string) => /^555\d{15,}$/.test(n);
+    let hadInternalTracking = false;
     for (const n of [...numbers]) {
-      if (isWalmartInternal(n) || n === orderNumber) {
-        console.log('[WM] dropping non-carrier number:', n, isWalmartInternal(n) ? '(walmart internal)' : '(order number)');
+      if (isWalmartInternal(n)) {
+        console.log('[WM] dropping walmart internal number:', n);
+        numbers.delete(n);
+        hadInternalTracking = true;
+      } else if (n === orderNumber) {
+        console.log('[WM] dropping order number from tracking:', n);
         numbers.delete(n);
       }
     }
@@ -304,10 +321,10 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
 
     console.log('[WM] detail:', orderNumber, 'date:', orderDate, 'cost:', cost, 'item:', itemDescription?.slice(0, 40));
 
-    return { address, tracking: [...numbers], orderDate, cost, itemDescription };
+    return { address, tracking: [...numbers], orderDate, cost, itemDescription, hadInternalTracking };
   } catch (e) {
     console.log('[WM] detail fetch failed:', orderNumber, String(e));
-    return { address: '', tracking: [], orderDate: null, cost: null, itemDescription: null };
+    return { address: '', tracking: [], orderDate: null, cost: null, itemDescription: null, hadInternalTracking: false };
   }
 }
 
@@ -426,15 +443,22 @@ async function startSync() {
         if (detail.address) order.shippingAddress = detail.address;
         if (detail.tracking.length) {
           order.trackingNumbers = detail.tracking;
-        } else if (order.orderNumber) {
-          // Walmart only returns its internal `555...` tracking IDs for some
-          // orders (we filter those out in fetchOrderDetail). Buying groups
-          // need *something* to identify the shipment — fall back to the
-          // Walmart order number (digits only, no dashes) which they can
-          // look up directly on Walmart's side.
+        } else if (detail.hadInternalTracking && order.orderNumber) {
+          // Walmart returned only internal `555…` tracking IDs (filtered out
+          // in fetchOrderDetail). Buying groups still need *something* to
+          // identify the shipment — fall back to the Walmart order number
+          // (digits only, no dashes) which they can look up directly on
+          // Walmart's side.
+          //
+          // Important: we only fall back when an internal-ID was actually
+          // dropped. If detail.tracking is empty because Walmart simply
+          // hasn't shipped yet / hasn't surfaced tracking, leave the order
+          // with no tracking — don't fabricate one.
           const fallback = order.orderNumber.replace(/-/g, '');
-          if (fallback) order.trackingNumbers = [fallback];
-          console.log('[WM] no carrier tracking — using order number as fallback:', fallback);
+          if (fallback) {
+            order.trackingNumbers = [fallback];
+            console.log('[WM] internal-only tracking, using order number as fallback:', fallback);
+          }
         }
         if (detail.cost != null && detail.cost > 0 && order.cost === 0) order.cost = detail.cost;
         if (detail.itemDescription && !order.itemDescription) order.itemDescription = detail.itemDescription;

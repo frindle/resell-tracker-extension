@@ -283,8 +283,13 @@
           if (isCancelledOrReturned(blockText)) continue;
           const totalMatch = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
           const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
-          const itemEl = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
-          const itemDescription = (itemEl?.textContent ?? "").trim().slice(0, 120);
+          const productNameEl = block.querySelector('[data-testid="productName"]');
+          const fallbackItemEl = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
+          let itemDescription = (productNameEl?.textContent ?? fallbackItemEl?.textContent ?? "").trim().slice(0, 120);
+          if (/^(Walmart\.com|Walmart|Loading|—|—\s*—)$/i.test(itemDescription)) {
+            console.log("[WM] rejecting generic item description, treating as empty:", itemDescription);
+            itemDescription = "";
+          }
           console.log("[WM] adding order", orderNumber, "date:", orderDate.toISOString().split("T")[0], "blockText snippet:", blockText.slice(0, 240));
           orders.push({
             platform: "Walmart",
@@ -341,9 +346,14 @@
             while ((m = pat.exec(html)) !== null) numbers.add(m[1]);
           }
           const isWalmartInternal = (n) => /^555\d{15,}$/.test(n);
+          let hadInternalTracking = false;
           for (const n of [...numbers]) {
-            if (isWalmartInternal(n) || n === orderNumber) {
-              console.log("[WM] dropping non-carrier number:", n, isWalmartInternal(n) ? "(walmart internal)" : "(order number)");
+            if (isWalmartInternal(n)) {
+              console.log("[WM] dropping walmart internal number:", n);
+              numbers.delete(n);
+              hadInternalTracking = true;
+            } else if (n === orderNumber) {
+              console.log("[WM] dropping order number from tracking:", n);
               numbers.delete(n);
             }
           }
@@ -417,10 +427,10 @@
             if (itemEl) itemDescription = (itemEl.textContent ?? "").trim().slice(0, 120) || null;
           }
           console.log("[WM] detail:", orderNumber, "date:", orderDate, "cost:", cost, "item:", itemDescription?.slice(0, 40));
-          return { address, tracking: [...numbers], orderDate, cost, itemDescription };
+          return { address, tracking: [...numbers], orderDate, cost, itemDescription, hadInternalTracking };
         } catch (e) {
           console.log("[WM] detail fetch failed:", orderNumber, String(e));
-          return { address: "", tracking: [], orderDate: null, cost: null, itemDescription: null };
+          return { address: "", tracking: [], orderDate: null, cost: null, itemDescription: null, hadInternalTracking: false };
         }
       }
       var syncing = false;
@@ -526,10 +536,12 @@
               if (detail.address) order.shippingAddress = detail.address;
               if (detail.tracking.length) {
                 order.trackingNumbers = detail.tracking;
-              } else if (order.orderNumber) {
+              } else if (detail.hadInternalTracking && order.orderNumber) {
                 const fallback = order.orderNumber.replace(/-/g, "");
-                if (fallback) order.trackingNumbers = [fallback];
-                console.log("[WM] no carrier tracking \u2014 using order number as fallback:", fallback);
+                if (fallback) {
+                  order.trackingNumbers = [fallback];
+                  console.log("[WM] internal-only tracking, using order number as fallback:", fallback);
+                }
               }
               if (detail.cost != null && detail.cost > 0 && order.cost === 0) order.cost = detail.cost;
               if (detail.itemDescription && !order.itemDescription) order.itemDescription = detail.itemDescription;
