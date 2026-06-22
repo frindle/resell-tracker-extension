@@ -222,6 +222,7 @@
         const blocks = Array.from(document.querySelectorAll('[data-testid*="orderGroup"], [data-testid*="order-card"], [data-testid*="orderCard"]'));
         console.log("[WM] DOM blocks found:", blocks.length, "url:", location.href);
         blocks.slice(0, 3).forEach((b, i) => console.log(`[WM] block[${i}] testid:`, b.getAttribute("data-testid"), "text:", (b.textContent ?? "").replace(/\s+/g, " ").slice(0, 300)));
+        const isCancelledOrReturned = (text) => /(?:\b(?:cancell?ed|cancellation|returned|refunded)\b|we had to cancel|we['’]ve canceled|cancel these items|won['’]t be charged|released the temporary hold)/i.test(text);
         for (const block of blocks) {
           const blockText = (block.textContent ?? "").replace(/\s+/g, " ");
           let orderNumber = "";
@@ -258,7 +259,7 @@
             }
           } else {
             console.log("[WM] no date found for order", orderNumber, "\u2014 will fetch detail for real date");
-            if (/\b(cancelled|canceled|cancellation|returned|refunded|order canceled|we've canceled)\b/i.test(blockText)) continue;
+            if (isCancelledOrReturned(blockText)) continue;
             const totalMatch2 = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
             const itemEl2 = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
             orders.push({
@@ -279,11 +280,12 @@
             hasOlder = true;
             continue;
           }
-          if (/\b(cancelled|canceled|cancellation|returned|refunded|order canceled|we've canceled)\b/i.test(blockText)) continue;
+          if (isCancelledOrReturned(blockText)) continue;
           const totalMatch = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
           const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
           const itemEl = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
           const itemDescription = (itemEl?.textContent ?? "").trim().slice(0, 120);
+          console.log("[WM] adding order", orderNumber, "date:", orderDate.toISOString().split("T")[0], "blockText snippet:", blockText.slice(0, 240));
           orders.push({
             platform: "Walmart",
             orderNumber,

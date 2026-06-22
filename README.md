@@ -51,6 +51,10 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.39
+- Walmart scraper: broader cancelled-order detection. Previous regex caught only literal "cancelled/canceled" inside the order DOM block, missing Walmart's separate cancel banner ("we had to cancel these items", "won't be charged", "released the temporary hold"). Now matches all common cancel-banner phrases.
+- Log a blockText snippet on every added Walmart order so future cancel-detection failures can be diagnosed from the service worker console without code changes.
+
 ### 1.1.37
 - Bump dev mode API spy response capture limit from 1000 to 2500 chars to avoid truncating larger API responses (e.g. CardCenter Submissions)
 
