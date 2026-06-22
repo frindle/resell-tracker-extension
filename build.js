@@ -14,6 +14,7 @@ const contentEntries = {
   'content/bigskybuyers': 'src/content/bigskybuyers.ts',
   'content/cashbackmonitor': 'src/content/cashbackmonitor.ts',
   'content/api-spy-bridge': 'src/content/api-spy-bridge.ts',
+  'content/tracker-status': 'src/content/tracker-status.ts',
   'options/options': 'src/options/options.ts',
   'popup/popup': 'src/popup/popup.ts',
 };
