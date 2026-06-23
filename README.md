@@ -51,6 +51,10 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.52
+- **Side-by-side sync banners.** When Amazon + Walmart finish around the same time the status cards now lay out horizontally (wrap to a second row if there's no room) instead of stacking on top of each other.
+- **Clickable sync banners.** Done cards include the import's `eventId`, so clicking the card jumps to `/sync-history?event=<id>` on the tracker — the new history page shows per-order field diffs for that scrape.
+
 ### 1.1.51
 - **Walmart item descriptions: stop polluting with "Walmart.com".** The detail-page script-tag scan used to match any `"name": "..."` JSON field, which on Walmart pages often landed on a seller/brand/category name rather than the product. Dropped bare `name` from the regex (productInfo.name is still reached via the direct NEXT_DATA path), and added a final sanity check that rejects `Walmart.com` / `Walmart` / `Loading` if they leak through any path.
 - **Walmart payment last-4 from detail page.** The order list rarely shows the card; capture the `ending in 1234` / `••1234` / `**1234` line from the detail HTML too. Enables card auto-assign on import to actually work for Walmart.

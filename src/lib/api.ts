@@ -4,6 +4,7 @@ export interface ImportResult {
   imported: number;
   updated: number;
   skipped: number;
+  eventId?: number | null;
 }
 
 export async function fetchUsers(trackerUrl: string): Promise<TrackerUser[]> {

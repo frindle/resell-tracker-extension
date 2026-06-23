@@ -557,7 +557,7 @@ async function startSync() {
   }
 })();
 
-async function scrapeAmazonOrders(orderNumbers: string[]): Promise<{ scraped: number; imported: number; updated: number }> {
+async function scrapeAmazonOrders(orderNumbers: string[]): Promise<{ scraped: number; imported: number; updated: number; eventId?: number | null }> {
   const settings = await getSettings();
   if (!settings.trackerUrl || !settings.userId) {
     throw new Error('Tracker URL or user not configured — open Settings.');
@@ -585,10 +585,10 @@ async function scrapeAmazonOrders(orderNumbers: string[]): Promise<{ scraped: nu
     await new Promise(r => setTimeout(r, 800));
   }
 
-  if (orders.length === 0) return { scraped: 0, imported: 0, updated: 0 };
+  if (orders.length === 0) return { scraped: 0, imported: 0, updated: 0, eventId: null };
 
   const result = await pushOrders(settings.trackerUrl, settings.apiKey ?? '', settings.userId, orders);
-  return { scraped: orders.length, imported: result.imported ?? 0, updated: result.updated ?? 0 };
+  return { scraped: orders.length, imported: result.imported ?? 0, updated: result.updated ?? 0, eventId: result.eventId ?? null };
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

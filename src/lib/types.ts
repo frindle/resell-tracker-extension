@@ -34,6 +34,7 @@ export interface SyncResult {
   scraped: number;
   imported: number;
   updated: number;
+  eventId?: number | null;
   error?: string;
 }
 

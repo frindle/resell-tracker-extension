@@ -12,7 +12,7 @@
 type SyncStatus = {
   type: 'SYNC_STARTED' | 'SYNC_PROGRESS' | 'SYNC_DONE' | 'SYNC_ERROR';
   message?: string;
-  result?: { platform: string; scraped?: number; imported?: number; updated?: number; skipped?: number };
+  result?: { platform: string; scraped?: number; imported?: number; updated?: number; skipped?: number; eventId?: number | null };
   error?: string;
   ts: number;
 };
@@ -46,17 +46,19 @@ function renderStatus(statuses: Record<string, SyncStatus | undefined>) {
     d.id = 'rt-sync-banner';
     if (mountTarget) {
       d.style.cssText = [
-        'display:flex', 'flex-direction:column', 'gap:6px',
+        'display:flex', 'flex-direction:row', 'flex-wrap:wrap', 'gap:6px',
         'font-family:system-ui,-apple-system,sans-serif', 'font-size:13px',
-        'align-items:flex-end',
+        'align-items:flex-start', 'justify-content:flex-end',
       ].join(';');
       mountTarget.appendChild(d);
     } else {
       d.style.cssText = [
         'position:fixed', 'bottom:16px', 'right:16px', 'z-index:2147483647',
-        'display:flex', 'flex-direction:column', 'gap:8px',
+        'display:flex', 'flex-direction:row', 'flex-wrap:wrap', 'gap:8px',
         'font-family:system-ui,-apple-system,sans-serif', 'font-size:13px',
         'pointer-events:none', // children re-enable
+        'align-items:flex-start', 'justify-content:flex-end',
+        'max-width:calc(100vw - 32px)',
       ].join(';');
       document.body.appendChild(d);
     }
@@ -83,11 +85,13 @@ function renderStatus(statuses: Record<string, SyncStatus | undefined>) {
       : s.type;
     const spinner = isActive ? '<span class="rt-spin">⟳</span>' : '';
 
+    const eventId = isDone ? s.result?.eventId ?? null : null;
+    const clickable = eventId != null;
     cards.push(`
-      <div style="pointer-events:auto;background:#111827;color:#e5e7eb;border:1px solid #374151;border-left:3px solid ${accent};border-radius:6px;padding:8px 12px;box-shadow:0 4px 12px rgba(0,0,0,.4);max-width:320px;display:flex;align-items:center;gap:8px;">
+      <div data-rt-card="${p.key}" data-rt-event="${eventId ?? ''}" style="pointer-events:auto;background:#111827;color:#e5e7eb;border:1px solid #374151;border-left:3px solid ${accent};border-radius:6px;padding:8px 12px;box-shadow:0 4px 12px rgba(0,0,0,.4);max-width:320px;display:flex;align-items:center;gap:8px;${clickable ? 'cursor:pointer;' : ''}">
         ${spinner}
         <div style="flex:1;min-width:0;">
-          <div style="font-weight:600;color:${accent}">${p.name}</div>
+          <div style="font-weight:600;color:${accent}">${p.name}${clickable ? ' <span style="color:#6b7280;font-weight:400;font-size:10px;">view →</span>' : ''}</div>
           <div style="font-size:11px;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(label)}</div>
         </div>
         ${isDone || isError ? `<button data-rt-dismiss="${p.key}" style="background:none;border:none;color:#6b7280;cursor:pointer;padding:0 4px;font-size:14px;line-height:1;">×</button>` : ''}
@@ -104,10 +108,16 @@ function renderStatus(statuses: Record<string, SyncStatus | undefined>) {
   `;
 
   container.querySelectorAll<HTMLButtonElement>('[data-rt-dismiss]').forEach(btn => {
-    btn.onclick = () => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
       const key = btn.getAttribute('data-rt-dismiss');
       if (key) chrome.storage.local.remove(key);
     };
+  });
+  container.querySelectorAll<HTMLElement>('[data-rt-card]').forEach(card => {
+    const eventId = card.getAttribute('data-rt-event');
+    if (!eventId) return;
+    card.onclick = () => { window.location.href = `/sync-history?event=${eventId}`; };
   });
 }
 
