@@ -761,7 +761,13 @@
             shippingCost: o.shippingCost,
             shippingAddress: o.shippingAddress,
             trackingNumbers: o.trackingNumbers,
-            sourceUrl: o.sourceUrl || null
+            sourceUrl: o.sourceUrl || null,
+            // Forward paymentLast4 so the server can auto-assign a saved card
+            // when exactly one card matches. The content scripts scrape this
+            // from Amazon/Walmart payment-method markup; the previous projection
+            // here silently dropped it, which is why card auto-assign never fired
+            // even when last4 was visible in extension logs.
+            ...o.paymentLast4 ? { paymentLast4: o.paymentLast4 } : {}
           })))
         });
         if (!res.ok) {

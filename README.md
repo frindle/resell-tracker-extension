@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.57
+- **Critical: forward `paymentLast4` to the server.** Content scripts have been scraping last-4 since v1.1.51 and showing it in `[AMZ]` / `[WM] detail` logs, but `handlePushOrders` in the background script projected the order body for `POST /api/import` and silently dropped the field. Server logs confirmed: `[import] no paymentLast4 scraped for Amazon #114-0396526-8799400` even though the extension's content-script log line for that same order said `last4: 1007`. Card auto-assignment has been broken since the feature was added. Now passes through when scraped.
+
 ### 1.1.56
 - **Scrape tabs open in your current window now.** The old behavior queried for any existing Amazon/Walmart tab (in any window) and hijacked it — a problem when you have product tabs open in other windows you're actively tracking. Now: if your active tab is already on the right host, scrape in place; otherwise open a fresh tab in your current window. Never reuses tabs in other windows.
 - **Scrape tab auto-closes when done.** Background tracks tabs it opened and closes them ~2s after `SYNC_DONE` / `SYNC_ERROR` (delay so the toast is briefly visible).
