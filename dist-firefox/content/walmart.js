@@ -613,7 +613,7 @@
           console.log("[WM] push result:", JSON.stringify(result));
           await setLastSync("walmart", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
           setBadge(`+${result.imported ?? 0}`, "#22c55e");
-          sendMessage({ type: "SYNC_DONE", result: { platform: "Walmart", scraped: filteredOrders.length, imported: result.imported ?? 0, updated: result.updated ?? 0, eventId: result.eventId ?? null } });
+          sendMessage({ type: "SYNC_DONE", result: { platform: "Walmart", scraped: filteredOrders.length, imported: result.imported ?? 0, updated: result.updated ?? 0, verified: result.verified ?? 0, eventId: result.eventId ?? null } });
         } catch (err) {
           console.error("[WM] sync error:", err);
           sendMessage({ type: "SYNC_ERROR", platform: "Walmart", error: String(err) });

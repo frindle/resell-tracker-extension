@@ -12,7 +12,7 @@
 type SyncStatus = {
   type: 'SYNC_STARTED' | 'SYNC_PROGRESS' | 'SYNC_DONE' | 'SYNC_ERROR';
   message?: string;
-  result?: { platform: string; scraped?: number; imported?: number; updated?: number; skipped?: number; eventId?: number | null };
+  result?: { platform: string; scraped?: number; imported?: number; updated?: number; verified?: number; skipped?: number; eventId?: number | null };
   error?: string;
   ts: number;
 };
@@ -36,34 +36,30 @@ async function isOnTrackerPage(): Promise<boolean> {
 }
 
 function renderStatus(statuses: Record<string, SyncStatus | undefined>) {
-  // Prefer an in-page mount point if the tracker UI provided one
-  // (data-rt-sync-target). Falls back to a floating bottom-right card so the
-  // banner still shows up on pages that don't have the mount point (e.g.
-  // older deploys of the tracker).
-  const mountTarget = document.querySelector<HTMLElement>('[data-rt-sync-target]');
-  const container = document.getElementById('rt-sync-banner') ?? (() => {
-    const d = document.createElement('div');
-    d.id = 'rt-sync-banner';
-    if (mountTarget) {
-      d.style.cssText = [
-        'display:flex', 'flex-direction:row', 'flex-wrap:wrap', 'gap:6px',
-        'font-family:system-ui,-apple-system,sans-serif', 'font-size:13px',
-        'align-items:flex-start', 'justify-content:flex-end',
-      ].join(';');
-      mountTarget.appendChild(d);
-    } else {
-      d.style.cssText = [
-        'position:fixed', 'bottom:16px', 'right:16px', 'z-index:2147483647',
-        'display:flex', 'flex-direction:row', 'flex-wrap:wrap', 'gap:8px',
-        'font-family:system-ui,-apple-system,sans-serif', 'font-size:13px',
-        'pointer-events:none', // children re-enable
-        'align-items:flex-start', 'justify-content:flex-end',
-        'max-width:calc(100vw - 32px)',
-      ].join(';');
-      document.body.appendChild(d);
-    }
-    return d;
-  })();
+  // Always pin to body bottom-right. We previously tried to mount inline
+  // under [data-rt-sync-target] when present, but Next.js client re-renders
+  // can detach/re-create that element, which made the banner relocate
+  // (e.g. drift under the "New Order" button) when the user refreshed
+  // /orders mid-scrape. Body-attached fixed positioning is stable across
+  // all re-renders.
+  let container = document.getElementById('rt-sync-banner');
+  if (container && container.parentElement !== document.body) {
+    container.remove();
+    container = null;
+  }
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'rt-sync-banner';
+    container.style.cssText = [
+      'position:fixed', 'bottom:16px', 'right:16px', 'z-index:2147483647',
+      'display:flex', 'flex-direction:row', 'flex-wrap:wrap', 'gap:8px',
+      'font-family:system-ui,-apple-system,sans-serif', 'font-size:13px',
+      'pointer-events:none', // children re-enable
+      'align-items:flex-start', 'justify-content:flex-end',
+      'max-width:calc(100vw - 32px)',
+    ].join(';');
+    document.body.appendChild(container);
+  }
 
   // Cap the display window — anything older than 30s for DONE/ERROR drops off.
   const now = Date.now();
@@ -124,10 +120,11 @@ function renderStatus(statuses: Record<string, SyncStatus | undefined>) {
 function formatResult(r?: SyncStatus['result']): string {
   if (!r) return 'done';
   const parts: string[] = [];
-  if (typeof r.imported === 'number') parts.push(`${r.imported} new`);
-  if (typeof r.updated === 'number') parts.push(`${r.updated} updated`);
+  if (typeof r.imported === 'number' && r.imported > 0) parts.push(`${r.imported} new`);
+  if (typeof r.updated === 'number' && r.updated > 0) parts.push(`${r.updated} updated`);
+  if (typeof r.verified === 'number' && r.verified > 0) parts.push(`${r.verified} verified`);
   if (typeof r.skipped === 'number' && r.skipped > 0) parts.push(`${r.skipped} skipped`);
-  if (typeof r.scraped === 'number' && parts.length === 0) parts.push(`${r.scraped} scraped`);
+  if (parts.length === 0 && typeof r.scraped === 'number') parts.push(`${r.scraped} scraped`);
   return parts.length ? `done · ${parts.join(', ')}` : 'done';
 }
 

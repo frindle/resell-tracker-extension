@@ -189,13 +189,9 @@
           ]);
           const latestExt = extTags.find((t) => /^v?\d/.test(t.name))?.name.replace(/^v/, "");
           const extOutdated = latestExt && latestExt !== extVersion;
-          const appOutdated = appVersion?.outdated;
-          if (extOutdated || appOutdated) {
+          if (extOutdated) {
             document.getElementById("versionUpdate").style.display = "inline";
-            const parts = [];
-            if (extOutdated) parts.push(`ext v${latestExt}`);
-            if (appOutdated) parts.push(`app v${appVersion.latest}`);
-            document.getElementById("versionUpdate").textContent = `update available: ${parts.join(", ")}`;
+            document.getElementById("versionUpdate").textContent = `update available: ext v${latestExt}`;
           }
         } catch {
         }

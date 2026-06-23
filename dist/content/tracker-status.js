@@ -168,44 +168,33 @@
         }
       }
       function renderStatus(statuses) {
-        const mountTarget = document.querySelector("[data-rt-sync-target]");
-        const container = document.getElementById("rt-sync-banner") ?? (() => {
-          const d = document.createElement("div");
-          d.id = "rt-sync-banner";
-          if (mountTarget) {
-            d.style.cssText = [
-              "display:flex",
-              "flex-direction:row",
-              "flex-wrap:wrap",
-              "gap:6px",
-              "font-family:system-ui,-apple-system,sans-serif",
-              "font-size:13px",
-              "align-items:flex-start",
-              "justify-content:flex-end"
-            ].join(";");
-            mountTarget.appendChild(d);
-          } else {
-            d.style.cssText = [
-              "position:fixed",
-              "bottom:16px",
-              "right:16px",
-              "z-index:2147483647",
-              "display:flex",
-              "flex-direction:row",
-              "flex-wrap:wrap",
-              "gap:8px",
-              "font-family:system-ui,-apple-system,sans-serif",
-              "font-size:13px",
-              "pointer-events:none",
-              // children re-enable
-              "align-items:flex-start",
-              "justify-content:flex-end",
-              "max-width:calc(100vw - 32px)"
-            ].join(";");
-            document.body.appendChild(d);
-          }
-          return d;
-        })();
+        let container = document.getElementById("rt-sync-banner");
+        if (container && container.parentElement !== document.body) {
+          container.remove();
+          container = null;
+        }
+        if (!container) {
+          container = document.createElement("div");
+          container.id = "rt-sync-banner";
+          container.style.cssText = [
+            "position:fixed",
+            "bottom:16px",
+            "right:16px",
+            "z-index:2147483647",
+            "display:flex",
+            "flex-direction:row",
+            "flex-wrap:wrap",
+            "gap:8px",
+            "font-family:system-ui,-apple-system,sans-serif",
+            "font-size:13px",
+            "pointer-events:none",
+            // children re-enable
+            "align-items:flex-start",
+            "justify-content:flex-end",
+            "max-width:calc(100vw - 32px)"
+          ].join(";");
+          document.body.appendChild(container);
+        }
         const now = Date.now();
         const cards = [];
         for (const p of PLATFORMS) {
@@ -256,10 +245,11 @@
       function formatResult(r) {
         if (!r) return "done";
         const parts = [];
-        if (typeof r.imported === "number") parts.push(`${r.imported} new`);
-        if (typeof r.updated === "number") parts.push(`${r.updated} updated`);
+        if (typeof r.imported === "number" && r.imported > 0) parts.push(`${r.imported} new`);
+        if (typeof r.updated === "number" && r.updated > 0) parts.push(`${r.updated} updated`);
+        if (typeof r.verified === "number" && r.verified > 0) parts.push(`${r.verified} verified`);
         if (typeof r.skipped === "number" && r.skipped > 0) parts.push(`${r.skipped} skipped`);
-        if (typeof r.scraped === "number" && parts.length === 0) parts.push(`${r.scraped} scraped`);
+        if (parts.length === 0 && typeof r.scraped === "number") parts.push(`${r.scraped} scraped`);
         return parts.length ? `done \xB7 ${parts.join(", ")}` : "done";
       }
       function escapeHtml(s) {

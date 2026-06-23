@@ -84,10 +84,12 @@
         Costco: { host: "www.costco.com", url: "https://www.costco.com/myaccount/", script: "content/costco.js" },
         BigSkyBuyers: { host: "www.bigskybuyers.com", url: "https://www.bigskybuyers.com/main", script: "content/bigskybuyers.js" }
       };
+      var openedScrapeTabs = /* @__PURE__ */ new Map();
       async function triggerSyncInBackground(platform, activeTabId, activeTabUrl) {
         const config = PLATFORM_CONFIG[platform];
         if (!config) return;
         let targetTabId;
+        let weOpenedIt = false;
         if (activeTabId && activeTabUrl) {
           try {
             if (new URL(activeTabUrl).hostname === config.host) {
@@ -97,42 +99,37 @@
           }
         }
         if (!targetTabId) {
-          let existingTabs = [];
+          let currentWindowId;
           try {
-            existingTabs = await chrome.tabs.query({ url: `https://${config.host}/*` });
+            currentWindowId = (await chrome.windows.getCurrent()).id;
           } catch {
           }
-          if (existingTabs.length > 0 && existingTabs[0].id) {
-            targetTabId = existingTabs[0].id;
-            await chrome.tabs.update(targetTabId, { active: true });
+          if (currentWindowId === void 0) {
             try {
-              if (existingTabs[0].windowId) await chrome.windows.update(existingTabs[0].windowId, { focused: true });
+              currentWindowId = (await chrome.windows.getLastFocused()).id;
             } catch {
             }
-          } else {
-            const newTab = await chrome.tabs.create({ url: config.url, active: true });
-            if (!newTab.id) return;
-            targetTabId = newTab.id;
-            try {
-              if (newTab.windowId) await chrome.windows.update(newTab.windowId, { focused: true });
-            } catch {
-            }
-            await new Promise((resolve) => {
-              let tabListener;
-              const timeout = setTimeout(() => {
-                chrome.tabs.onUpdated.removeListener(tabListener);
-                resolve();
-              }, 1e4);
-              tabListener = (tabId, info) => {
-                if (tabId === targetTabId && info.status === "complete") {
-                  chrome.tabs.onUpdated.removeListener(tabListener);
-                  clearTimeout(timeout);
-                  resolve();
-                }
-              };
-              chrome.tabs.onUpdated.addListener(tabListener);
-            });
           }
+          const newTab = await chrome.tabs.create({ url: config.url, active: true, windowId: currentWindowId });
+          if (!newTab.id) return;
+          targetTabId = newTab.id;
+          weOpenedIt = true;
+          openedScrapeTabs.set(newTab.id, { platform, openedAt: Date.now() });
+          await new Promise((resolve) => {
+            let tabListener;
+            const timeout = setTimeout(() => {
+              chrome.tabs.onUpdated.removeListener(tabListener);
+              resolve();
+            }, 1e4);
+            tabListener = (tabId, info) => {
+              if (tabId === targetTabId && info.status === "complete") {
+                chrome.tabs.onUpdated.removeListener(tabListener);
+                clearTimeout(timeout);
+                resolve();
+              }
+            };
+            chrome.tabs.onUpdated.addListener(tabListener);
+          });
         }
         const alive = await chrome.tabs.sendMessage(targetTabId, { type: "PING" }).catch(() => null);
         if (!alive) {
@@ -140,6 +137,11 @@
             await chrome.scripting.executeScript({ target: { tabId: targetTabId }, files: [config.script] });
           } catch (e) {
             console.error("[BG] injection failed", e);
+            if (weOpenedIt && targetTabId) {
+              openedScrapeTabs.delete(targetTabId);
+              chrome.tabs.remove(targetTabId).catch(() => {
+              });
+            }
             return;
           }
         }
@@ -147,10 +149,43 @@
           (e) => console.error("[BG] START_SYNC failed", e)
         );
       }
+      var STATUS_KEY_BY_PLATFORM = {
+        Amazon: "amazonSyncStatus",
+        Walmart: "walmartSyncStatus",
+        Costco: "costcoSyncStatus",
+        BigSkyBuyers: "bigskySyncStatus"
+      };
+      chrome.tabs.onRemoved.addListener((tabId) => {
+        const opened = openedScrapeTabs.get(tabId);
+        if (!opened) return;
+        openedScrapeTabs.delete(tabId);
+        const key = STATUS_KEY_BY_PLATFORM[opened.platform];
+        if (!key) return;
+        chrome.storage.local.get(key).then((stored) => {
+          const current = stored[key];
+          if (!current || current.type === "SYNC_STARTED" || current.type === "SYNC_PROGRESS") {
+            chrome.storage.local.set({
+              [key]: { type: "SYNC_ERROR", error: "tab closed before scan finished", ts: Date.now() }
+            }).catch(() => {
+            });
+          }
+        }).catch(() => {
+        });
+      });
       chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.type === "PING") {
           sendResponse({ ok: true });
           return;
+        }
+        if (message.type === "SYNC_DONE" || message.type === "SYNC_ERROR") {
+          const tabId = sender.tab?.id;
+          if (tabId != null && openedScrapeTabs.has(tabId)) {
+            openedScrapeTabs.delete(tabId);
+            setTimeout(() => {
+              chrome.tabs.remove(tabId).catch(() => {
+              });
+            }, 2e3);
+          }
         }
         if (message.type === "POLL_COMMANDS_NOW") {
           chrome.storage.local.get("lastForcedPoll").then(({ lastForcedPoll }) => {

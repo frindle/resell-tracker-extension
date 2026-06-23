@@ -13,14 +13,14 @@ async function checkVersions(trackerUrl: string | undefined) {
     ]);
     const latestExt = (extTags as { name: string }[]).find(t => /^v?\d/.test(t.name))?.name.replace(/^v/, '');
     const extOutdated = latestExt && latestExt !== extVersion;
-    const appOutdated = appVersion?.outdated;
 
-    if (extOutdated || appOutdated) {
+    // The popup is the extension's surface — only flag extension updates
+    // here. Tracker/dashboard updates surface inside the tracker app
+    // itself; flagging them in the extension popup is confusing because
+    // the user can't act on them from here.
+    if (extOutdated) {
       document.getElementById('versionUpdate')!.style.display = 'inline';
-      const parts = [];
-      if (extOutdated) parts.push(`ext v${latestExt}`);
-      if (appOutdated) parts.push(`app v${appVersion.latest}`);
-      document.getElementById('versionUpdate')!.textContent = `update available: ${parts.join(', ')}`;
+      document.getElementById('versionUpdate')!.textContent = `update available: ext v${latestExt}`;
     }
   } catch { /* ignore */ }
 }

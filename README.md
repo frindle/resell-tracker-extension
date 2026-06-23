@@ -51,6 +51,14 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.56
+- **Scrape tabs open in your current window now.** The old behavior queried for any existing Amazon/Walmart tab (in any window) and hijacked it — a problem when you have product tabs open in other windows you're actively tracking. Now: if your active tab is already on the right host, scrape in place; otherwise open a fresh tab in your current window. Never reuses tabs in other windows.
+- **Scrape tab auto-closes when done.** Background tracks tabs it opened and closes them ~2s after `SYNC_DONE` / `SYNC_ERROR` (delay so the toast is briefly visible).
+- **Closed-mid-scrape recovery.** If you close a tab the extension opened before the scan finishes, background broadcasts a `SYNC_ERROR` ("tab closed before scan finished") so the tracker banner doesn't hang.
+- **Sync banner pinned to bottom-right.** Previously the banner would mount inside an in-page `[data-rt-sync-target]` element when present. Next.js client re-renders could detach/re-create that element, causing the banner to drift (e.g. under the "New Order" button on `/orders` refresh). Now always pinned to `document.body` with `position:fixed` so it can't relocate.
+- **"verified" instead of "updated" when nothing changed.** Result summary now distinguishes `N updated` (orders with field changes) from `N verified` (orders re-checked with no changes). Requires tracker 2026-06-23+ which returns the new `verified` count.
+- **Popup only flags extension updates.** The popup used to show "update available: app v…" when the tracker dashboard had a newer version. Per separation of concerns, the popup is the extension's surface — it now only flags extension updates. Dashboard updates surface inside the dashboard itself.
+
 ### 1.1.55
 - **Amazon last-4 actually works now.** v1.1.54 extracted from `detailDoc.body.innerText`, but DOMParser-created docs have no layout — `innerText` is `""`, and `??` only falls through to `textContent` on null/undefined, so the empty string silently won the chain. Switched to scanning `documentElement.outerHTML` (same approach as Walmart). The `<span class="a-color-base">ending in 1007</span>` Amazon emits in the Payment Method section now matches the first pattern cleanly.
 

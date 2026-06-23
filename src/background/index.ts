@@ -38,13 +38,28 @@ const PLATFORM_CONFIG: Record<string, { host: string; url: string; script: strin
   BigSkyBuyers: { host: 'www.bigskybuyers.com', url: 'https://www.bigskybuyers.com/main', script: 'content/bigskybuyers.js' },
 };
 
+// Tabs we opened to do a scrape. We track them so we can:
+//   1. Close them automatically when SYNC_DONE / SYNC_ERROR fires.
+//   2. Broadcast a SYNC_CANCELLED status if the user closes the tab
+//      mid-scrape so the tracker-status banner doesn't hang.
+// We never reuse the user's existing retailer tabs for scraping anymore —
+// they often have product tabs open in other windows that they're tracking
+// and the old "reuse first matching tab in any window" behavior would
+// hijack them.
+type OpenedScrapeTab = { platform: string; openedAt: number };
+const openedScrapeTabs = new Map<number, OpenedScrapeTab>();
+
 async function triggerSyncInBackground(platform: string, activeTabId?: number, activeTabUrl?: string) {
   const config = PLATFORM_CONFIG[platform];
   if (!config) return;
 
   let targetTabId: number | undefined;
+  let weOpenedIt = false;
 
-  // If the active tab is already on the right host, use it directly
+  // If the user's active tab is already on the right host, scrape in place
+  // (the user is intentionally there). Otherwise always open a new tab in
+  // the current window — never reuse existing retailer tabs in other
+  // windows, since those are typically product pages the user is tracking.
   if (activeTabId && activeTabUrl) {
     try {
       if (new URL(activeTabUrl).hostname === config.host) {
@@ -54,35 +69,33 @@ async function triggerSyncInBackground(platform: string, activeTabId?: number, a
   }
 
   if (!targetTabId) {
-    // Look for an existing tab on the right host
-    let existingTabs: chrome.tabs.Tab[] = [];
-    try { existingTabs = await chrome.tabs.query({ url: `https://${config.host}/*` }); } catch { /* Firefox may not support url filter */ }
-    if (existingTabs.length > 0 && existingTabs[0].id) {
-      targetTabId = existingTabs[0].id;
-      await chrome.tabs.update(targetTabId, { active: true });
-      try { if (existingTabs[0].windowId) await chrome.windows.update(existingTabs[0].windowId, { focused: true }); } catch { /* ignore */ }
-    } else {
-      // Open a new tab and wait for it to load
-      const newTab = await chrome.tabs.create({ url: config.url, active: true });
-      if (!newTab.id) return;
-      targetTabId = newTab.id;
-      try { if (newTab.windowId) await chrome.windows.update(newTab.windowId, { focused: true }); } catch { /* ignore */ }
-      await new Promise<void>(resolve => {
-        let tabListener: (tabId: number, info: chrome.tabs.TabChangeInfo) => void;
-        const timeout = setTimeout(() => {
-          chrome.tabs.onUpdated.removeListener(tabListener);
-          resolve();
-        }, 10000);
-        tabListener = (tabId: number, info: chrome.tabs.TabChangeInfo) => {
-          if (tabId === targetTabId && info.status === 'complete') {
-            chrome.tabs.onUpdated.removeListener(tabListener);
-            clearTimeout(timeout);
-            resolve();
-          }
-        };
-        chrome.tabs.onUpdated.addListener(tabListener);
-      });
+    let currentWindowId: number | undefined;
+    try { currentWindowId = (await chrome.windows.getCurrent()).id; } catch { /* fall back to last-focused */ }
+    if (currentWindowId === undefined) {
+      try { currentWindowId = (await chrome.windows.getLastFocused()).id; } catch { /* leave undefined → new window */ }
     }
+
+    const newTab = await chrome.tabs.create({ url: config.url, active: true, windowId: currentWindowId });
+    if (!newTab.id) return;
+    targetTabId = newTab.id;
+    weOpenedIt = true;
+    openedScrapeTabs.set(newTab.id, { platform, openedAt: Date.now() });
+
+    await new Promise<void>(resolve => {
+      let tabListener: (tabId: number, info: chrome.tabs.TabChangeInfo) => void;
+      const timeout = setTimeout(() => {
+        chrome.tabs.onUpdated.removeListener(tabListener);
+        resolve();
+      }, 10000);
+      tabListener = (tabId: number, info: chrome.tabs.TabChangeInfo) => {
+        if (tabId === targetTabId && info.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(tabListener);
+          clearTimeout(timeout);
+          resolve();
+        }
+      };
+      chrome.tabs.onUpdated.addListener(tabListener);
+    });
   }
 
   // Ping to check if content script is already loaded
@@ -92,6 +105,10 @@ async function triggerSyncInBackground(platform: string, activeTabId?: number, a
       await chrome.scripting.executeScript({ target: { tabId: targetTabId }, files: [config.script] });
     } catch (e) {
       console.error('[BG] injection failed', e);
+      if (weOpenedIt && targetTabId) {
+        openedScrapeTabs.delete(targetTabId);
+        chrome.tabs.remove(targetTabId).catch(() => {});
+      }
       return;
     }
   }
@@ -101,10 +118,50 @@ async function triggerSyncInBackground(platform: string, activeTabId?: number, a
   );
 }
 
+// Storage-status keys per platform — used to broadcast SYNC_CANCELLED when
+// the user closes a scrape tab mid-flight. Mirrors the lowercased prefix
+// used by the content scripts when they write SYNC_STARTED / SYNC_PROGRESS.
+const STATUS_KEY_BY_PLATFORM: Record<string, string> = {
+  Amazon: 'amazonSyncStatus',
+  Walmart: 'walmartSyncStatus',
+  Costco: 'costcoSyncStatus',
+  BigSkyBuyers: 'bigskySyncStatus',
+};
+
+chrome.tabs.onRemoved.addListener(tabId => {
+  const opened = openedScrapeTabs.get(tabId);
+  if (!opened) return;
+  openedScrapeTabs.delete(tabId);
+  const key = STATUS_KEY_BY_PLATFORM[opened.platform];
+  if (!key) return;
+  chrome.storage.local.get(key).then(stored => {
+    const current = (stored[key] as { type?: string } | undefined);
+    // Only flip to CANCELLED if the scrape was still active. If it already
+    // ended (DONE / ERROR) the close was a normal cleanup.
+    if (!current || current.type === 'SYNC_STARTED' || current.type === 'SYNC_PROGRESS') {
+      chrome.storage.local.set({
+        [key]: { type: 'SYNC_ERROR', error: 'tab closed before scan finished', ts: Date.now() },
+      }).catch(() => {});
+    }
+  }).catch(() => {});
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'PING') {
     sendResponse({ ok: true });
     return;
+  }
+
+  // When a scrape tab we opened finishes, close it. Small delay so the
+  // user can see the result toast in the tab before it disappears.
+  if (message.type === 'SYNC_DONE' || message.type === 'SYNC_ERROR') {
+    const tabId = sender.tab?.id;
+    if (tabId != null && openedScrapeTabs.has(tabId)) {
+      openedScrapeTabs.delete(tabId);
+      setTimeout(() => { chrome.tabs.remove(tabId).catch(() => {}); }, 2000);
+    }
+    // fall through — no sendResponse expected; content scripts also write
+    // status directly to chrome.storage.local for the tracker banner.
   }
 
   // Tracker-status content script pings this every ~15s while the user is on
