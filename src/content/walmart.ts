@@ -363,11 +363,21 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
       if (m) { paymentLast4 = m[1]; last4Source = `json:${name}`; break; }
     }
     if (!paymentLast4) {
-      // Text fallback. Bullets render as a variety of glyphs (• ● · ․ ⋅) and
-      // HTML entities (&bull;, &middot;). \W{2,} catches stretches of any
-      // non-alphanumeric run before a 4-digit number.
-      const pmMatch = html.match(/(?:ending\s+(?:in\s+)?|x{2,}\s*|\*{2,}\s*|\W{2,}\s*)(\d{4})\b/i);
-      if (pmMatch) { paymentLast4 = pmMatch[1]; last4Source = 'text'; }
+      // Text fallback. Only match patterns that are CLEARLY card-related —
+      // earlier "any non-alnum run + 4 digits" pattern was matching years.
+      // Order matters: try the most specific first.
+      const textPats: Array<[string, RegExp]> = [
+        ['ending-in',    /\bending\s+in\s+(\d{4})\b/i],
+        ['ending',       /\bending\s+(\d{4})\b/i],
+        ['asterisks',    /\*{2,}\s*(\d{4})\b/],
+        ['xs',           /\bx{4,}\s*(\d{4})\b/i],
+        ['bullets',      /[•·․⋅●]{2,}\s*(\d{4})\b/],
+        ['html-bullet',  /(?:&bull;|&middot;|&#x2022;|&#8226;){2,}\s*(\d{4})\b/i],
+      ];
+      for (const [name, pat] of textPats) {
+        const m = html.match(pat);
+        if (m) { paymentLast4 = m[1]; last4Source = `text:${name}`; break; }
+      }
     }
 
     console.log('[WM] detail:', orderNumber, 'date:', orderDate, 'cost:', cost, 'item:', itemDescription?.slice(0, 40), 'last4:', paymentLast4 ?? '(none)', `[${last4Source}]`);

@@ -51,6 +51,10 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.54
+- **Walmart + Amazon last-4: tighter text regex.** v1.1.53's catch-all `\W{2,}\s*(\d{4})` matched four-digit years (real example: extension captured `2026` from an order placed on `2026-06-22`). Replaced with a fixed list of explicit card patterns (`ending in 1234`, `**1234`, `xxxx1234`, unicode bullets, HTML entities) tried in order.
+- **Amazon last-4 from detail page too.** List card often omits the payment method; detail page reliably shows "Visa ending in 1234". Detail extraction added, propagated to ScrapedOrder, logged on `[AMZ] tracking for` line.
+
 ### 1.1.53
 - **Walmart last-4: pull from NEXT_DATA JSON first.** v1.1.51's visible-text regex never fired because Walmart embeds the card under JSON keys (`lastFour`, `lastFourDigits`, `cardLast4`, `last4`, `cardNumberLast4`, `accountNumberLast4`) in NEXT_DATA, not in user-facing text. Try each of those keys before falling back to a broader text regex. Detail log line now ends with `last4: 1234 [json:lastFour]` or `[text]` so we can verify the path.
 - **Amazon last-4 regex broadened** to cover unicode bullets / x-runs (`Visa ••1234`, `xxxx1234`). Adding-order log line now includes `last4: 1234` so we can spot missed captures.

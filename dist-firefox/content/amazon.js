@@ -260,8 +260,21 @@
           if (/\b(cancelled|canceled|refunded|returned)\b/i.test(cardText)) continue;
           const totalMatch = cardText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
           const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
-          const last4Match = cardText.match(/(?:ending\s+(?:in\s+)?|x{2,}\s*|\*{2,}\s*|\W{2,}\s*)(\d{4})\b/i);
-          const paymentLast4 = last4Match?.[1];
+          let paymentLast4;
+          const textPats = [
+            /\bending\s+in\s+(\d{4})\b/i,
+            /\bending\s+(\d{4})\b/i,
+            /\*{2,}\s*(\d{4})\b/,
+            /\bx{4,}\s*(\d{4})\b/i,
+            /[•·․⋅●]{2,}\s*(\d{4})\b/
+          ];
+          for (const pat of textPats) {
+            const m = cardText.match(pat);
+            if (m) {
+              paymentLast4 = m[1];
+              break;
+            }
+          }
           const hasApplyNow = /\bApply\s+now\b/i.test(cardText);
           const promoPhrase = /\b(?:Earn\s+(?:up\s+to\s+)?\d+%|Get\s+the\s+Amazon\s+(?:Business\s+)?(?:Prime\s+)?Visa|Get\s+a\s+\$?\d+\s+Amazon\.com\s+(?:Gift\s+Card|Credit)|No\s+annual\s+fee|Card\s+Member)\b/i.test(cardText);
           if (hasApplyNow || cost === 0 && promoPhrase) {
@@ -394,6 +407,22 @@
         const address = extractAddressFromDoc(detailDoc);
         const cost = extractCostFromDoc(detailDoc);
         const orderDate = extractOrderDateFromDoc(detailDoc, orderId);
+        let paymentLast4;
+        const detailText = (detailDoc.body ? detailDoc.body.innerText ?? detailDoc.body.textContent ?? "" : "").replace(/\s+/g, " ");
+        const detailPats = [
+          /\bending\s+in\s+(\d{4})\b/i,
+          /\bending\s+(\d{4})\b/i,
+          /\*{2,}\s*(\d{4})\b/,
+          /\bx{4,}\s*(\d{4})\b/i,
+          /[•·․⋅●]{2,}\s*(\d{4})\b/
+        ];
+        for (const pat of detailPats) {
+          const m = detailText.match(pat);
+          if (m) {
+            paymentLast4 = m[1];
+            break;
+          }
+        }
         const shipTrackUrls = Array.from(detailDoc.querySelectorAll('a[href*="ship-track"]')).map((a) => a.href).filter((href, i, arr) => arr.indexOf(href) === i);
         if (shipTrackUrls.length === 0) {
           console.log("[AMZ] no ship-track links for", orderId, "| title:", title || "(none)", "| addr:", address || "(none)", "| cost:", cost);
@@ -410,8 +439,8 @@
         }
         const cleaned = [...new Set(tracking)].map((t) => t.replace(/[A-Za-z]+$/, ""));
         const unique = [...new Set(cleaned)].filter((t) => !cleaned.some((other) => other !== t && t.startsWith(other))).slice(0, 5);
-        console.log("[AMZ] tracking for", orderId, ":", unique, "| title:", title || "(none)", "| addr:", address || "(none)", "| cost:", cost, "| orderDate:", orderDate);
-        return { tracking: unique, title, address, cost, orderDate };
+        console.log("[AMZ] tracking for", orderId, ":", unique, "| title:", title || "(none)", "| addr:", address || "(none)", "| cost:", cost, "| orderDate:", orderDate, "| last4:", paymentLast4 ?? "(none)");
+        return { tracking: unique, title, address, cost, orderDate, paymentLast4 };
       }
       function extractOrderDateFromDoc(doc, orderId) {
         const html = doc.documentElement.outerHTML;
@@ -547,11 +576,12 @@
               const timeout = new Promise(
                 (r) => setTimeout(() => r({ tracking: [], title: "", address: "", cost: 0, orderDate: null }), 12e3)
               );
-              const { tracking, title, address, cost, orderDate } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
+              const { tracking, title, address, cost, orderDate, paymentLast4 } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
               if (tracking.length > 0) order.trackingNumbers = tracking;
               if (!order.itemDescription && title) order.itemDescription = title;
               if (!order.shippingAddress && address) order.shippingAddress = address;
               if (!order.cost && cost) order.cost = cost;
+              if (!order.paymentLast4 && paymentLast4) order.paymentLast4 = paymentLast4;
               if (orderDate && /T\d{2}:\d{2}/.test(orderDate)) order.orderDate = orderDate;
             }
           }
@@ -630,7 +660,7 @@
           const timeout = new Promise(
             (r) => setTimeout(() => r({ tracking: [], title: "", address: "", cost: 0, orderDate: null }), 2e4)
           );
-          const { tracking, title, address, cost, orderDate } = await Promise.race([fetchOrderDetails(orderId), timeout]);
+          const { tracking, title, address, cost, orderDate, paymentLast4 } = await Promise.race([fetchOrderDetails(orderId), timeout]);
           const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
           orders.push({
             platform: "Amazon",
@@ -641,7 +671,8 @@
             shippingCost: 0,
             shippingAddress: address,
             trackingNumbers: tracking,
-            sourceUrl: `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`
+            sourceUrl: `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`,
+            paymentLast4
           });
           await new Promise((r) => setTimeout(r, 800));
         }

@@ -78,11 +78,20 @@ function scrapeDoc(doc: Document, sinceDate: Date): { orders: ScrapedOrder[]; ha
     const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
 
     // Capture the payment method's last 4 if present in the order card.
-    // Amazon's listing card sometimes shows "Visa ending in 1234",
-    // "ending in 1234", "**** 1234", or unicode bullets "••1234". Broadened
-    // the prefix class to cover any non-alphanumeric run.
-    const last4Match = cardText.match(/(?:ending\s+(?:in\s+)?|x{2,}\s*|\*{2,}\s*|\W{2,}\s*)(\d{4})\b/i);
-    const paymentLast4 = last4Match?.[1];
+    // Match only clearly card-related patterns — earlier "any non-alnum run"
+    // pattern was false-positive on years and similar 4-digit runs.
+    let paymentLast4: string | undefined;
+    const textPats: Array<RegExp> = [
+      /\bending\s+in\s+(\d{4})\b/i,
+      /\bending\s+(\d{4})\b/i,
+      /\*{2,}\s*(\d{4})\b/,
+      /\bx{4,}\s*(\d{4})\b/i,
+      /[•·․⋅●]{2,}\s*(\d{4})\b/,
+    ];
+    for (const pat of textPats) {
+      const m = cardText.match(pat);
+      if (m) { paymentLast4 = m[1]; break; }
+    }
 
     // Amazon injects credit-card referral promo cards into the orders DOM
     // with order-detail-style links. They have a date (today) and order IDs
@@ -248,7 +257,7 @@ function extractCostFromDoc(doc: Document): number {
   return 0;
 }
 
-async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null }> {
+async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string }> {
   console.log('[AMZ] fetchOrderDetails', orderId);
   const detailDoc = await fetchHtml(`https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`);
   if (!detailDoc) { console.warn('[AMZ] fetchOrderDetails: no doc for', orderId); return { tracking: [], title: '', address: '', cost: 0, orderDate: null }; }
@@ -257,6 +266,23 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
   const address = extractAddressFromDoc(detailDoc);
   const cost = extractCostFromDoc(detailDoc);
   const orderDate = extractOrderDateFromDoc(detailDoc, orderId);
+
+  // Last-4 extraction from the detail page. The Payment Method section
+  // usually says "Visa ending in 1234" / "Mastercard ending in 1234". List
+  // cards often hide this, so the detail page is the more reliable source.
+  let paymentLast4: string | undefined;
+  const detailText = (detailDoc.body ? (detailDoc.body as HTMLElement).innerText ?? detailDoc.body.textContent ?? '' : '').replace(/\s+/g, ' ');
+  const detailPats: Array<RegExp> = [
+    /\bending\s+in\s+(\d{4})\b/i,
+    /\bending\s+(\d{4})\b/i,
+    /\*{2,}\s*(\d{4})\b/,
+    /\bx{4,}\s*(\d{4})\b/i,
+    /[•·․⋅●]{2,}\s*(\d{4})\b/,
+  ];
+  for (const pat of detailPats) {
+    const m = detailText.match(pat);
+    if (m) { paymentLast4 = m[1]; break; }
+  }
 
   // Extract ship-track URLs — each has a unique shipmentId
   const shipTrackUrls = Array.from(detailDoc.querySelectorAll<HTMLAnchorElement>('a[href*="ship-track"]'))
@@ -286,8 +312,8 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
   const cleaned = [...new Set(tracking)].map(t => t.replace(/[A-Za-z]+$/, ''));
   // Drop any entry that is a superstring of another (keep the shorter canonical form)
   const unique = [...new Set(cleaned)].filter(t => !cleaned.some(other => other !== t && t.startsWith(other))).slice(0, 5);
-  console.log('[AMZ] tracking for', orderId, ':', unique, '| title:', title || '(none)', '| addr:', address || '(none)', '| cost:', cost, '| orderDate:', orderDate);
-  return { tracking: unique, title, address, cost, orderDate };
+  console.log('[AMZ] tracking for', orderId, ':', unique, '| title:', title || '(none)', '| addr:', address || '(none)', '| cost:', cost, '| orderDate:', orderDate, '| last4:', paymentLast4 ?? '(none)');
+  return { tracking: unique, title, address, cost, orderDate, paymentLast4 };
 }
 
 // Probe Amazon's order detail page for a placed timestamp. Amazon's UI usually
@@ -465,14 +491,15 @@ async function runSync(state: SyncState) {
       const order = allOrders[i];
       sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Fetching details for order ${i + 1} of ${allOrders.length}…` });
       await new Promise(r => setTimeout(r, 800));
-      const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null }>(
+      const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string }>(
         r => setTimeout(() => r({ tracking: [], title: '', address: '', cost: 0, orderDate: null }), 12000)
       );
-      const { tracking, title, address, cost, orderDate } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
+      const { tracking, title, address, cost, orderDate, paymentLast4 } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
       if (tracking.length > 0) order.trackingNumbers = tracking;
       if (!order.itemDescription && title) order.itemDescription = title;
       if (!order.shippingAddress && address) order.shippingAddress = address;
       if (!order.cost && cost) order.cost = cost;
+      if (!order.paymentLast4 && paymentLast4) order.paymentLast4 = paymentLast4;
       // Prefer detail's orderDate if it has a time component (T...:); otherwise
       // keep the listing's date-only value.
       if (orderDate && /T\d{2}:\d{2}/.test(orderDate)) order.orderDate = orderDate;
@@ -566,10 +593,10 @@ async function scrapeAmazonOrders(orderNumbers: string[]): Promise<{ scraped: nu
   const orders: ScrapedOrder[] = [];
   for (const orderId of orderNumbers) {
     console.log('[AMZ] SCRAPE_AMAZON_ORDER: fetching', orderId);
-    const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null }>(
+    const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string }>(
       r => setTimeout(() => r({ tracking: [], title: '', address: '', cost: 0, orderDate: null }), 20000)
     );
-    const { tracking, title, address, cost, orderDate } = await Promise.race([fetchOrderDetails(orderId), timeout]);
+    const { tracking, title, address, cost, orderDate, paymentLast4 } = await Promise.race([fetchOrderDetails(orderId), timeout]);
     const today = new Date().toISOString().split('T')[0];
     orders.push({
       platform: 'Amazon',
@@ -581,6 +608,7 @@ async function scrapeAmazonOrders(orderNumbers: string[]): Promise<{ scraped: nu
       shippingAddress: address,
       trackingNumbers: tracking,
       sourceUrl: `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`,
+      paymentLast4,
     });
     await new Promise(r => setTimeout(r, 800));
   }
