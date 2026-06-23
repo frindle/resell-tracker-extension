@@ -169,37 +169,42 @@
       }
       function renderStatus(statuses) {
         const mountTarget = document.querySelector("[data-rt-sync-target]");
-        const container = document.getElementById("rt-sync-banner") ?? (() => {
-          const d = document.createElement("div");
-          d.id = "rt-sync-banner";
+        let container = document.getElementById("rt-sync-banner");
+        const mountedStyle = [
+          "display:flex",
+          "flex-direction:column",
+          "gap:6px",
+          "font-family:system-ui,-apple-system,sans-serif",
+          "font-size:13px",
+          "align-items:flex-end"
+        ].join(";");
+        const floatingStyle = [
+          "position:fixed",
+          "bottom:16px",
+          "right:16px",
+          "z-index:2147483647",
+          "display:flex",
+          "flex-direction:column",
+          "gap:8px",
+          "font-family:system-ui,-apple-system,sans-serif",
+          "font-size:13px",
+          "pointer-events:none"
+        ].join(";");
+        if (container && mountTarget && !mountTarget.contains(container)) {
+          container.style.cssText = mountedStyle;
+          mountTarget.appendChild(container);
+        }
+        if (!container) {
+          container = document.createElement("div");
+          container.id = "rt-sync-banner";
           if (mountTarget) {
-            d.style.cssText = [
-              "display:flex",
-              "flex-direction:column",
-              "gap:6px",
-              "font-family:system-ui,-apple-system,sans-serif",
-              "font-size:13px",
-              "align-items:flex-end"
-            ].join(";");
-            mountTarget.appendChild(d);
+            container.style.cssText = mountedStyle;
+            mountTarget.appendChild(container);
           } else {
-            d.style.cssText = [
-              "position:fixed",
-              "bottom:16px",
-              "right:16px",
-              "z-index:2147483647",
-              "display:flex",
-              "flex-direction:column",
-              "gap:8px",
-              "font-family:system-ui,-apple-system,sans-serif",
-              "font-size:13px",
-              "pointer-events:none"
-              // children re-enable
-            ].join(";");
-            document.body.appendChild(d);
+            container.style.cssText = floatingStyle;
+            document.body.appendChild(container);
           }
-          return d;
-        })();
+        }
         const now = Date.now();
         const cards = [];
         for (const p of PLATFORMS) {
