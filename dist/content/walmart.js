@@ -449,9 +449,31 @@
             itemDescription = null;
           }
           let paymentLast4;
-          const pmMatch = html.match(/(?:ending\s+(?:in)?|\*{2,}|\.{2,}|•{2,})\s*(\d{4})\b/i);
-          if (pmMatch) paymentLast4 = pmMatch[1];
-          console.log("[WM] detail:", orderNumber, "date:", orderDate, "cost:", cost, "item:", itemDescription?.slice(0, 40), "last4:", paymentLast4 ?? "(none)");
+          let last4Source = "none";
+          const jsonFieldPats = [
+            ["lastFour", /"lastFour"\s*:\s*"?(\d{4})"?/],
+            ["lastFourDigits", /"lastFourDigits"\s*:\s*"?(\d{4})"?/],
+            ["cardLast4", /"cardLast4"\s*:\s*"?(\d{4})"?/],
+            ["last4", /"last4"\s*:\s*"?(\d{4})"?/],
+            ["cardNumberLast4", /"cardNumberLast4"\s*:\s*"?(\d{4})"?/],
+            ["accountNumberLast4", /"accountNumberLast4"\s*:\s*"?(\d{4})"?/]
+          ];
+          for (const [name, pat] of jsonFieldPats) {
+            const m = html.match(pat);
+            if (m) {
+              paymentLast4 = m[1];
+              last4Source = `json:${name}`;
+              break;
+            }
+          }
+          if (!paymentLast4) {
+            const pmMatch = html.match(/(?:ending\s+(?:in\s+)?|x{2,}\s*|\*{2,}\s*|\W{2,}\s*)(\d{4})\b/i);
+            if (pmMatch) {
+              paymentLast4 = pmMatch[1];
+              last4Source = "text";
+            }
+          }
+          console.log("[WM] detail:", orderNumber, "date:", orderDate, "cost:", cost, "item:", itemDescription?.slice(0, 40), "last4:", paymentLast4 ?? "(none)", `[${last4Source}]`);
           return { address, tracking: [...numbers], orderDate, cost, itemDescription, hadInternalTracking, paymentLast4 };
         } catch (e) {
           console.log("[WM] detail fetch failed:", orderNumber, String(e));

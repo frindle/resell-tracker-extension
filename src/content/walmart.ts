@@ -344,14 +344,33 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
       itemDescription = null;
     }
 
-    // Payment last-4: the order list page rarely shows the card, so capture
-    // it from the detail page when we can. Used by the tracker to auto-assign
-    // a saved card on import.
+    // Payment last-4 detection. The order list page rarely shows the card,
+    // so we extract from the detail page. Walmart embeds the card in NEXT_DATA
+    // JSON under one of several field names; only when JSON doesn't carry
+    // it do we fall back to scanning visible text.
     let paymentLast4: string | undefined;
-    const pmMatch = html.match(/(?:ending\s+(?:in)?|\*{2,}|\.{2,}|•{2,})\s*(\d{4})\b/i);
-    if (pmMatch) paymentLast4 = pmMatch[1];
+    let last4Source = 'none';
+    const jsonFieldPats: Array<[string, RegExp]> = [
+      ['lastFour',  /"lastFour"\s*:\s*"?(\d{4})"?/],
+      ['lastFourDigits', /"lastFourDigits"\s*:\s*"?(\d{4})"?/],
+      ['cardLast4', /"cardLast4"\s*:\s*"?(\d{4})"?/],
+      ['last4',     /"last4"\s*:\s*"?(\d{4})"?/],
+      ['cardNumberLast4', /"cardNumberLast4"\s*:\s*"?(\d{4})"?/],
+      ['accountNumberLast4', /"accountNumberLast4"\s*:\s*"?(\d{4})"?/],
+    ];
+    for (const [name, pat] of jsonFieldPats) {
+      const m = html.match(pat);
+      if (m) { paymentLast4 = m[1]; last4Source = `json:${name}`; break; }
+    }
+    if (!paymentLast4) {
+      // Text fallback. Bullets render as a variety of glyphs (• ● · ․ ⋅) and
+      // HTML entities (&bull;, &middot;). \W{2,} catches stretches of any
+      // non-alphanumeric run before a 4-digit number.
+      const pmMatch = html.match(/(?:ending\s+(?:in\s+)?|x{2,}\s*|\*{2,}\s*|\W{2,}\s*)(\d{4})\b/i);
+      if (pmMatch) { paymentLast4 = pmMatch[1]; last4Source = 'text'; }
+    }
 
-    console.log('[WM] detail:', orderNumber, 'date:', orderDate, 'cost:', cost, 'item:', itemDescription?.slice(0, 40), 'last4:', paymentLast4 ?? '(none)');
+    console.log('[WM] detail:', orderNumber, 'date:', orderDate, 'cost:', cost, 'item:', itemDescription?.slice(0, 40), 'last4:', paymentLast4 ?? '(none)', `[${last4Source}]`);
 
     return { address, tracking: [...numbers], orderDate, cost, itemDescription, hadInternalTracking, paymentLast4 };
   } catch (e) {

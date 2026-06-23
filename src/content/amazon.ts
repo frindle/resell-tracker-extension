@@ -78,10 +78,10 @@ function scrapeDoc(doc: Document, sinceDate: Date): { orders: ScrapedOrder[]; ha
     const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
 
     // Capture the payment method's last 4 if present in the order card.
-    // Amazon's listing card sometimes shows "Visa ending in 1234" / "ending
-    // in 1234" / "**** 1234". The tracker uses this to auto-assign one of
-    // the user's saved cards when it matches uniquely.
-    const last4Match = cardText.match(/(?:ending\s+(?:in)?|\*{2,}|\.{2,})\s*(\d{4})\b/i);
+    // Amazon's listing card sometimes shows "Visa ending in 1234",
+    // "ending in 1234", "**** 1234", or unicode bullets "••1234". Broadened
+    // the prefix class to cover any non-alphanumeric run.
+    const last4Match = cardText.match(/(?:ending\s+(?:in\s+)?|x{2,}\s*|\*{2,}\s*|\W{2,}\s*)(\d{4})\b/i);
     const paymentLast4 = last4Match?.[1];
 
     // Amazon injects credit-card referral promo cards into the orders DOM
@@ -117,7 +117,7 @@ function scrapeDoc(doc: Document, sinceDate: Date): { orders: ScrapedOrder[]; ha
       itemDescription = (productLink?.textContent ?? '').trim().slice(0, 120);
     }
 
-    console.log('[AMZ] adding order', orderId, 'item:', itemDescription.slice(0, 60), 'cost:', cost, 'cardText:', cardText.slice(0, 200));
+    console.log('[AMZ] adding order', orderId, 'item:', itemDescription.slice(0, 60), 'cost:', cost, 'last4:', paymentLast4 ?? '(none)', 'cardText:', cardText.slice(0, 200));
     orders.push({
       platform: 'Amazon',
       orderNumber: orderId,

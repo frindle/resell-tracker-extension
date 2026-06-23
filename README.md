@@ -51,6 +51,10 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.53
+- **Walmart last-4: pull from NEXT_DATA JSON first.** v1.1.51's visible-text regex never fired because Walmart embeds the card under JSON keys (`lastFour`, `lastFourDigits`, `cardLast4`, `last4`, `cardNumberLast4`, `accountNumberLast4`) in NEXT_DATA, not in user-facing text. Try each of those keys before falling back to a broader text regex. Detail log line now ends with `last4: 1234 [json:lastFour]` or `[text]` so we can verify the path.
+- **Amazon last-4 regex broadened** to cover unicode bullets / x-runs (`Visa ••1234`, `xxxx1234`). Adding-order log line now includes `last4: 1234` so we can spot missed captures.
+
 ### 1.1.52
 - **Side-by-side sync banners.** When Amazon + Walmart finish around the same time the status cards now lay out horizontally (wrap to a second row if there's no room) instead of stacking on top of each other.
 - **Clickable sync banners.** Done cards include the import's `eventId`, so clicking the card jumps to `/sync-history?event=<id>` on the tracker — the new history page shows per-order field diffs for that scrape.
