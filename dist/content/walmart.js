@@ -399,8 +399,8 @@
                 if (m) cost = parseFloat(m[1]);
               }
               if (!itemDescription) {
-                const m = str.match(/"(?:productName|itemDescription|name)"\s*:\s*"([^"]{5,120})"/);
-                if (m) itemDescription = m[1];
+                const m = str.match(/"(?:productName|itemDescription)"\s*:\s*"([^"]{5,120})"/);
+                if (m && !/^(Walmart\.com|Walmart|Loading)$/i.test(m[1])) itemDescription = m[1];
               }
             } catch {
             }
@@ -444,8 +444,15 @@
             const itemEl = doc.querySelector('[data-automation-id*="product-title"], [class*="product-title"], h2[class*="item"]');
             if (itemEl) itemDescription = (itemEl.textContent ?? "").trim().slice(0, 120) || null;
           }
-          console.log("[WM] detail:", orderNumber, "date:", orderDate, "cost:", cost, "item:", itemDescription?.slice(0, 40));
-          return { address, tracking: [...numbers], orderDate, cost, itemDescription, hadInternalTracking };
+          if (itemDescription && /^(Walmart\.com|Walmart|Loading|—|—\s*—)$/i.test(itemDescription.trim())) {
+            console.log("[WM] rejecting generic detail item description:", itemDescription);
+            itemDescription = null;
+          }
+          let paymentLast4;
+          const pmMatch = html.match(/(?:ending\s+(?:in)?|\*{2,}|\.{2,}|•{2,})\s*(\d{4})\b/i);
+          if (pmMatch) paymentLast4 = pmMatch[1];
+          console.log("[WM] detail:", orderNumber, "date:", orderDate, "cost:", cost, "item:", itemDescription?.slice(0, 40), "last4:", paymentLast4 ?? "(none)");
+          return { address, tracking: [...numbers], orderDate, cost, itemDescription, hadInternalTracking, paymentLast4 };
         } catch (e) {
           console.log("[WM] detail fetch failed:", orderNumber, String(e));
           return { address: "", tracking: [], orderDate: null, cost: null, itemDescription: null, hadInternalTracking: false };
@@ -557,6 +564,7 @@
               }
               if (detail.cost != null && detail.cost > 0 && order.cost === 0) order.cost = detail.cost;
               if (detail.itemDescription && !order.itemDescription) order.itemDescription = detail.itemDescription;
+              if (detail.paymentLast4 && !order.paymentLast4) order.paymentLast4 = detail.paymentLast4;
               if (detail.orderDate) {
                 order.orderDate = detail.orderDate;
               } else if (!order.orderDate) {

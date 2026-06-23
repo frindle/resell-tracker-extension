@@ -51,6 +51,10 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.51
+- **Walmart item descriptions: stop polluting with "Walmart.com".** The detail-page script-tag scan used to match any `"name": "..."` JSON field, which on Walmart pages often landed on a seller/brand/category name rather than the product. Dropped bare `name` from the regex (productInfo.name is still reached via the direct NEXT_DATA path), and added a final sanity check that rejects `Walmart.com` / `Walmart` / `Loading` if they leak through any path.
+- **Walmart payment last-4 from detail page.** The order list rarely shows the card; capture the `ending in 1234` / `••1234` / `**1234` line from the detail HTML too. Enables card auto-assign on import to actually work for Walmart.
+
 ### 1.1.50
 - Diagnostic logging on Walmart sync: `[WM/diag] <orderNumber> status: <status> candidates: <n1>[origin], <n2>[origin], ...` for every order whose detail-fetch ran. Lets us see exactly which tracking-shaped numbers are in Walmart's HTML and where each came from (NEXT_DATA trackingNumber field, a stray 20-22 digit run in some other JSON blob, etc.). Will use this to design a smarter filter.
 
