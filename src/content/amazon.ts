@@ -260,7 +260,7 @@ function extractCostFromDoc(doc: Document): number {
 async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string }> {
   console.log('[AMZ] fetchOrderDetails', orderId);
   const detailDoc = await fetchHtml(`https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`);
-  if (!detailDoc) { console.warn('[AMZ] fetchOrderDetails: no doc for', orderId); return { tracking: [], title: '', address: '', cost: 0, orderDate: null }; }
+  if (!detailDoc) { console.warn('[AMZ] fetchOrderDetails: no doc for', orderId); return { tracking: [], title: '', address: '', cost: 0, orderDate: null, paymentLast4: undefined }; }
 
   const title = extractTitleFromDoc(detailDoc);
   const address = extractAddressFromDoc(detailDoc);
@@ -270,8 +270,13 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
   // Last-4 extraction from the detail page. The Payment Method section
   // usually says "Visa ending in 1234" / "Mastercard ending in 1234". List
   // cards often hide this, so the detail page is the more reliable source.
+  //
+  // Match against outerHTML (the parsed doc serialized back to a string).
+  // DOMParser-created docs have no layout, so .innerText is "" — and even
+  // textContent strips inter-element whitespace in ways that can swallow
+  // the prefix word. Raw HTML works regardless.
   let paymentLast4: string | undefined;
-  const detailText = (detailDoc.body ? (detailDoc.body as HTMLElement).innerText ?? detailDoc.body.textContent ?? '' : '').replace(/\s+/g, ' ');
+  const detailHtml = detailDoc.documentElement?.outerHTML ?? '';
   const detailPats: Array<RegExp> = [
     /\bending\s+in\s+(\d{4})\b/i,
     /\bending\s+(\d{4})\b/i,
@@ -280,7 +285,7 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
     /[•·․⋅●]{2,}\s*(\d{4})\b/,
   ];
   for (const pat of detailPats) {
-    const m = detailText.match(pat);
+    const m = detailHtml.match(pat);
     if (m) { paymentLast4 = m[1]; break; }
   }
 

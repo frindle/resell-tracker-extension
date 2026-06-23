@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.55
+- **Amazon last-4 actually works now.** v1.1.54 extracted from `detailDoc.body.innerText`, but DOMParser-created docs have no layout — `innerText` is `""`, and `??` only falls through to `textContent` on null/undefined, so the empty string silently won the chain. Switched to scanning `documentElement.outerHTML` (same approach as Walmart). The `<span class="a-color-base">ending in 1007</span>` Amazon emits in the Payment Method section now matches the first pattern cleanly.
+
 ### 1.1.54
 - **Walmart + Amazon last-4: tighter text regex.** v1.1.53's catch-all `\W{2,}\s*(\d{4})` matched four-digit years (real example: extension captured `2026` from an order placed on `2026-06-22`). Replaced with a fixed list of explicit card patterns (`ending in 1234`, `**1234`, `xxxx1234`, unicode bullets, HTML entities) tried in order.
 - **Amazon last-4 from detail page too.** List card often omits the payment method; detail page reliably shows "Visa ending in 1234". Detail extraction added, propagated to ScrapedOrder, logged on `[AMZ] tracking for` line.

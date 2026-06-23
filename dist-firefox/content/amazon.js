@@ -401,14 +401,14 @@
         const detailDoc = await fetchHtml(`https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`);
         if (!detailDoc) {
           console.warn("[AMZ] fetchOrderDetails: no doc for", orderId);
-          return { tracking: [], title: "", address: "", cost: 0, orderDate: null };
+          return { tracking: [], title: "", address: "", cost: 0, orderDate: null, paymentLast4: void 0 };
         }
         const title = extractTitleFromDoc(detailDoc);
         const address = extractAddressFromDoc(detailDoc);
         const cost = extractCostFromDoc(detailDoc);
         const orderDate = extractOrderDateFromDoc(detailDoc, orderId);
         let paymentLast4;
-        const detailText = (detailDoc.body ? detailDoc.body.innerText ?? detailDoc.body.textContent ?? "" : "").replace(/\s+/g, " ");
+        const detailHtml = detailDoc.documentElement?.outerHTML ?? "";
         const detailPats = [
           /\bending\s+in\s+(\d{4})\b/i,
           /\bending\s+(\d{4})\b/i,
@@ -417,7 +417,7 @@
           /[•·․⋅●]{2,}\s*(\d{4})\b/
         ];
         for (const pat of detailPats) {
-          const m = detailText.match(pat);
+          const m = detailHtml.match(pat);
           if (m) {
             paymentLast4 = m[1];
             break;
