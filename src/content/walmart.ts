@@ -341,6 +341,21 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
       const itemEl = doc.querySelector('[data-automation-id*="product-title"], [class*="product-title"], h2[class*="item"]');
       if (itemEl) itemDescription = (itemEl.textContent ?? '').trim().slice(0, 120) || null;
     }
+    if (!itemDescription) {
+      const ipLink = doc.querySelector('a[href*="/ip/"]');
+      const linkText = (ipLink?.textContent ?? '').trim();
+      if (linkText.length >= 5) {
+        itemDescription = linkText.slice(0, 120);
+      } else {
+        const href = ipLink?.getAttribute('href') ?? '';
+        const slugMatch = href.match(/\/ip\/([^/?#]+)/);
+        if (slugMatch) itemDescription = slugMatch[1].replace(/-/g, ' ').slice(0, 120);
+      }
+    }
+    if (!itemDescription) {
+      const slugMatch = html.match(/\/ip\/([A-Z][A-Za-z0-9-]{10,})/);
+      if (slugMatch) itemDescription = slugMatch[1].replace(/-/g, ' ').slice(0, 120);
+    }
 
     console.log('[WM] detail:', orderNumber, 'date:', orderDate, 'cost:', cost, 'item:', itemDescription?.slice(0, 40));
 
