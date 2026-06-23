@@ -97,17 +97,22 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
       console.log('[WM] no date found for order', orderNumber, '— will fetch detail for real date');
       if (isCancelledOrReturned(blockText)) continue;
       const totalMatch2 = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
-      const itemEl2 = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
+      const productNameEl2 = block.querySelector('[data-testid="productName"]');
+      const fallbackItemEl2 = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
+      let itemDesc2 = (productNameEl2?.textContent ?? fallbackItemEl2?.textContent ?? '').trim().slice(0, 120);
+      if (/^(Walmart\.com|Walmart|Loading|—|—\s*—)$/i.test(itemDesc2)) itemDesc2 = '';
+      const last4Match2 = blockText.match(/(?:ending\s+(?:in)?|\*{2,}|\.{2,})\s*(\d{4})\b/i);
       orders.push({
         platform: 'Walmart',
         orderNumber,
         orderDate: '',
-        itemDescription: (itemEl2?.textContent ?? '').trim().slice(0, 120),
+        itemDescription: itemDesc2,
         cost: totalMatch2 ? parseMoney(totalMatch2[1]) : 0,
         shippingCost: 0,
         shippingAddress: '',
         trackingNumbers: [],
         sourceUrl: `https://www.walmart.com/orders/${orderNumber}`,
+        paymentLast4: last4Match2?.[1],
       });
       continue;
     }

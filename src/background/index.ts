@@ -744,6 +744,7 @@ async function handlePushOrders(
       shippingAddress: o.shippingAddress,
       trackingNumbers: o.trackingNumbers,
       sourceUrl: o.sourceUrl || null,
+      paymentLast4: o.paymentLast4 || null,
     }))),
   });
 

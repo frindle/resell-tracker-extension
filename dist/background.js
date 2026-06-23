@@ -726,7 +726,8 @@
             shippingCost: o.shippingCost,
             shippingAddress: o.shippingAddress,
             trackingNumbers: o.trackingNumbers,
-            sourceUrl: o.sourceUrl || null
+            sourceUrl: o.sourceUrl || null,
+            paymentLast4: o.paymentLast4 || null
           })))
         });
         if (!res.ok) {
