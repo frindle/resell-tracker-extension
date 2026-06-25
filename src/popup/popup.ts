@@ -59,7 +59,7 @@ if (new URLSearchParams(location.search).get('standalone')) {
 } else {
   document.getElementById('popOutBtn')?.addEventListener('click', () => {
     chrome.windows.create({
-      url: chrome.runtime.getURL('popup.html?standalone=1'),
+      url: chrome.runtime.getURL('popup/popup.html?standalone=1'),
       type: 'popup',
       width: 340,
       height: 680,

@@ -51,6 +51,12 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.58
+- **Amazon Business orders are now skipped at scan time.** The 113- prefixed IDs returned a "we can't find that order" page when we tried to fetch detail. We now detect the not-found markup and drop the row instead of pushing an empty order to the server.
+- **Amazon No-Rush delivery detection.** When the order detail page shows the supplemental "Earns extra N% on items using No-Rush delivery" disclosure, capture `noRushBonusPercent` (e.g. 2 for "extra 2%") and forward it to the server. The server flags the order with `delayedShipping=true` and persists the bonus on the new `noRushBonusPercent` column.
+- **Sync banner cards stay until manually dismissed.** Removed the 30s auto-dismiss so you can come back and see what happened after walking away.
+- **Pop-out window fixed in Firefox.** Path was `popup.html?standalone=1` (which only exists in Chrome's flat build) — now correctly `popup/popup.html?standalone=1`.
+
 ### 1.1.57
 - **Critical: forward `paymentLast4` to the server.** Content scripts have been scraping last-4 since v1.1.51 and showing it in `[AMZ]` / `[WM] detail` logs, but `handlePushOrders` in the background script projected the order body for `POST /api/import` and silently dropped the field. Server logs confirmed: `[import] no paymentLast4 scraped for Amazon #114-0396526-8799400` even though the extension's content-script log line for that same order said `last4: 1007`. Card auto-assignment has been broken since the feature was added. Now passes through when scraped.
 

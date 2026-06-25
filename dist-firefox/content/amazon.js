@@ -403,10 +403,19 @@
           console.warn("[AMZ] fetchOrderDetails: no doc for", orderId);
           return { tracking: [], title: "", address: "", cost: 0, orderDate: null, paymentLast4: void 0 };
         }
+        const detailDocHtml = detailDoc.documentElement?.outerHTML ?? "";
+        const looksLikeNotFound = /We can't find an order with that number|Looking for an order|Page Not Found/i.test(detailDocHtml) || !/order-details|order-summary|orderDetails|pmts-payments/i.test(detailDocHtml);
+        if (looksLikeNotFound) {
+          console.log("[AMZ] detail page not accessible for", orderId, "(Business order or out-of-session) \u2014 skipping");
+          return { tracking: [], title: "", address: "", cost: 0, orderDate: null, paymentLast4: void 0, notFound: true };
+        }
         const title = extractTitleFromDoc(detailDoc);
         const address = extractAddressFromDoc(detailDoc);
         const cost = extractCostFromDoc(detailDoc);
         const orderDate = extractOrderDateFromDoc(detailDoc, orderId);
+        let noRushBonusPercent;
+        const noRushMatch = detailDocHtml.match(/(?:extra|additional)\s+(\d+(?:\.\d+)?)\s*%[^<]{0,80}No[- ]?Rush/i);
+        if (noRushMatch) noRushBonusPercent = parseFloat(noRushMatch[1]);
         let paymentLast4;
         const detailHtml = detailDoc.documentElement?.outerHTML ?? "";
         const detailPats = [
@@ -425,8 +434,8 @@
         }
         const shipTrackUrls = Array.from(detailDoc.querySelectorAll('a[href*="ship-track"]')).map((a) => a.href).filter((href, i, arr) => arr.indexOf(href) === i);
         if (shipTrackUrls.length === 0) {
-          console.log("[AMZ] no ship-track links for", orderId, "| title:", title || "(none)", "| addr:", address || "(none)", "| cost:", cost);
-          return { tracking: [], title, address, cost, orderDate };
+          console.log("[AMZ] no ship-track links for", orderId, "| title:", title || "(none)", "| addr:", address || "(none)", "| cost:", cost, "| noRush:", noRushBonusPercent ?? "-");
+          return { tracking: [], title, address, cost, orderDate, paymentLast4, noRushBonusPercent };
         }
         const tracking = [];
         for (const url of shipTrackUrls.slice(0, 3)) {
@@ -576,15 +585,27 @@
               const timeout = new Promise(
                 (r) => setTimeout(() => r({ tracking: [], title: "", address: "", cost: 0, orderDate: null }), 12e3)
               );
-              const { tracking, title, address, cost, orderDate, paymentLast4 } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
+              const { tracking, title, address, cost, orderDate, paymentLast4, noRushBonusPercent, notFound } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
+              if (notFound) {
+                order._skipBusiness = true;
+                continue;
+              }
               if (tracking.length > 0) order.trackingNumbers = tracking;
               if (!order.itemDescription && title) order.itemDescription = title;
               if (!order.shippingAddress && address) order.shippingAddress = address;
               if (!order.cost && cost) order.cost = cost;
               if (!order.paymentLast4 && paymentLast4) order.paymentLast4 = paymentLast4;
+              if (noRushBonusPercent != null) order.noRushBonusPercent = noRushBonusPercent;
               if (orderDate && /T\d{2}:\d{2}/.test(orderDate)) order.orderDate = orderDate;
             }
           }
+          const filteredOrders = allOrders.filter((o) => !o._skipBusiness);
+          const skippedBusiness = allOrders.length - filteredOrders.length;
+          if (skippedBusiness > 0) {
+            console.log(`[AMZ] skipping ${skippedBusiness} order(s) \u2014 detail page inaccessible (likely Amazon Business)`);
+          }
+          allOrders.length = 0;
+          for (const o of filteredOrders) allOrders.push(o);
           if (allOrders.length === 0) {
             clearState();
             setBadge("\u2014");

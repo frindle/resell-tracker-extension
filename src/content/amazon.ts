@@ -257,10 +257,25 @@ function extractCostFromDoc(doc: Document): number {
   return 0;
 }
 
-async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string }> {
+async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string; noRushBonusPercent?: number; notFound?: boolean }> {
   console.log('[AMZ] fetchOrderDetails', orderId);
   const detailDoc = await fetchHtml(`https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`);
   if (!detailDoc) { console.warn('[AMZ] fetchOrderDetails: no doc for', orderId); return { tracking: [], title: '', address: '', cost: 0, orderDate: null, paymentLast4: undefined }; }
+
+  // Detect Amazon Business / sub-account / not-found pages. Common signal:
+  // a hero block that says "Looking for an order?" / "We can't find an
+  // order with that number" — and zero order content. The 113- prefix is
+  // an Amazon Business order ID, which the user's personal session can't
+  // open at all. Skip the import entirely so we don't pollute the orders
+  // list with empty rows.
+  const detailDocHtml = detailDoc.documentElement?.outerHTML ?? '';
+  const looksLikeNotFound =
+    /We can't find an order with that number|Looking for an order|Page Not Found/i.test(detailDocHtml) ||
+    !/order-details|order-summary|orderDetails|pmts-payments/i.test(detailDocHtml);
+  if (looksLikeNotFound) {
+    console.log('[AMZ] detail page not accessible for', orderId, '(Business order or out-of-session) — skipping');
+    return { tracking: [], title: '', address: '', cost: 0, orderDate: null, paymentLast4: undefined, notFound: true };
+  }
 
   const title = extractTitleFromDoc(detailDoc);
   const address = extractAddressFromDoc(detailDoc);
@@ -275,6 +290,15 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
   // DOMParser-created docs have no layout, so .innerText is "" — and even
   // textContent strips inter-element whitespace in ways that can swallow
   // the prefix word. Raw HTML works regardless.
+  // No-Rush delivery bonus. Amazon shows a supplemental box under the
+  // payment method on delayed-shipping orders:
+  //   "Earns 5% back and extra 2% on items using No-Rush delivery."
+  // Capture the "extra N%" so we can flag the order + remember the
+  // promised bonus for analytics.
+  let noRushBonusPercent: number | undefined;
+  const noRushMatch = detailDocHtml.match(/(?:extra|additional)\s+(\d+(?:\.\d+)?)\s*%[^<]{0,80}No[- ]?Rush/i);
+  if (noRushMatch) noRushBonusPercent = parseFloat(noRushMatch[1]);
+
   let paymentLast4: string | undefined;
   const detailHtml = detailDoc.documentElement?.outerHTML ?? '';
   const detailPats: Array<RegExp> = [
@@ -295,8 +319,8 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
     .filter((href, i, arr) => arr.indexOf(href) === i);
 
   if (shipTrackUrls.length === 0) {
-    console.log('[AMZ] no ship-track links for', orderId, '| title:', title || '(none)', '| addr:', address || '(none)', '| cost:', cost);
-    return { tracking: [], title, address, cost, orderDate };
+    console.log('[AMZ] no ship-track links for', orderId, '| title:', title || '(none)', '| addr:', address || '(none)', '| cost:', cost, '| noRush:', noRushBonusPercent ?? '-');
+    return { tracking: [], title, address, cost, orderDate, paymentLast4, noRushBonusPercent };
   }
 
   // Fetch each ship-track page and extract carrier tracking numbers
@@ -496,20 +520,36 @@ async function runSync(state: SyncState) {
       const order = allOrders[i];
       sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Fetching details for order ${i + 1} of ${allOrders.length}…` });
       await new Promise(r => setTimeout(r, 800));
-      const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string }>(
+      const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string; noRushBonusPercent?: number; notFound?: boolean }>(
         r => setTimeout(() => r({ tracking: [], title: '', address: '', cost: 0, orderDate: null }), 12000)
       );
-      const { tracking, title, address, cost, orderDate, paymentLast4 } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
+      const { tracking, title, address, cost, orderDate, paymentLast4, noRushBonusPercent, notFound } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
+      if (notFound) {
+        // Amazon Business order or otherwise inaccessible — mark for
+        // exclusion from the import so we don't pollute the orders list.
+        order._skipBusiness = true;
+        continue;
+      }
       if (tracking.length > 0) order.trackingNumbers = tracking;
       if (!order.itemDescription && title) order.itemDescription = title;
       if (!order.shippingAddress && address) order.shippingAddress = address;
       if (!order.cost && cost) order.cost = cost;
       if (!order.paymentLast4 && paymentLast4) order.paymentLast4 = paymentLast4;
+      if (noRushBonusPercent != null) order.noRushBonusPercent = noRushBonusPercent;
       // Prefer detail's orderDate if it has a time component (T...:); otherwise
       // keep the listing's date-only value.
       if (orderDate && /T\d{2}:\d{2}/.test(orderDate)) order.orderDate = orderDate;
     }
   }
+
+  // Drop Business / inaccessible orders so they don't go to the server.
+  const filteredOrders = allOrders.filter(o => !o._skipBusiness);
+  const skippedBusiness = allOrders.length - filteredOrders.length;
+  if (skippedBusiness > 0) {
+    console.log(`[AMZ] skipping ${skippedBusiness} order(s) — detail page inaccessible (likely Amazon Business)`);
+  }
+  allOrders.length = 0;
+  for (const o of filteredOrders) allOrders.push(o);
 
   if (allOrders.length === 0) {
     clearState();

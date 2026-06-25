@@ -11,6 +11,8 @@ export interface ScrapedOrder {
   trackingNumbers: string[];
   sourceUrl: string;
   paymentLast4?: string;   // last 4 digits scraped from payment method — enables card auto-assign on import
+  noRushBonusPercent?: number; // Amazon "Earns extra N% on items using No-Rush delivery" — set when detected on detail page
+  _skipBusiness?: boolean;     // local-only: drops from push if detail page wasn't accessible (Amazon Business)
 }
 
 export interface SyncSettings {

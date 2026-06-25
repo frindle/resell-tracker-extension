@@ -203,7 +203,7 @@
           const isActive = s.type === "SYNC_STARTED" || s.type === "SYNC_PROGRESS";
           const isError = s.type === "SYNC_ERROR";
           const isDone = s.type === "SYNC_DONE";
-          if ((isDone || isError) && now - s.ts > 3e4) continue;
+          void now;
           const accent = isError ? "#dc2626" : isDone ? "#16a34a" : p.color;
           const label = isActive ? s.message ?? "syncing\u2026" : isError ? `error: ${s.error ?? "unknown"}` : isDone ? formatResult(s.result) : s.type;
           const spinner = isActive ? '<span class="rt-spin">\u27F3</span>' : "";

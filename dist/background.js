@@ -767,7 +767,9 @@
             // from Amazon/Walmart payment-method markup; the previous projection
             // here silently dropped it, which is why card auto-assign never fired
             // even when last4 was visible in extension logs.
-            ...o.paymentLast4 ? { paymentLast4: o.paymentLast4 } : {}
+            ...o.paymentLast4 ? { paymentLast4: o.paymentLast4 } : {},
+            // Amazon No-Rush delivery bonus, when detected on detail page.
+            ...o.noRushBonusPercent != null ? { noRushBonusPercent: o.noRushBonusPercent } : {}
           })))
         });
         if (!res.ok) {

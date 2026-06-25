@@ -70,8 +70,12 @@ function renderStatus(statuses: Record<string, SyncStatus | undefined>) {
     const isActive = s.type === 'SYNC_STARTED' || s.type === 'SYNC_PROGRESS';
     const isError  = s.type === 'SYNC_ERROR';
     const isDone   = s.type === 'SYNC_DONE';
-    // Auto-dismiss DONE / ERROR after 30s
-    if ((isDone || isError) && now - s.ts > 30_000) continue;
+    // Cards stay until the user clicks ×. Previously auto-dismissed
+    // after 30s, but user wants to be able to walk away and come back
+    // to see what happened. The dismiss button below already clears
+    // the status from storage; nothing else needs to change.
+    // (Keep the `now` reference reachable so timestamps stay valid.)
+    void now;
 
     const accent = isError ? '#dc2626' : isDone ? '#16a34a' : p.color;
     const label =
