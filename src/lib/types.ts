@@ -12,6 +12,7 @@ export interface ScrapedOrder {
   sourceUrl: string;
   paymentLast4?: string;   // last 4 digits scraped from payment method — enables card auto-assign on import
   noRushBonusPercent?: number; // Amazon "Earns extra N% on items using No-Rush delivery" — set when detected on detail page
+  deliveryPhotoUrl?: string;   // proof-of-delivery image URL (signed, expires). Server downloads bytes on import.
   _skipBusiness?: boolean;     // local-only: drops from push if detail page wasn't accessible (Amazon Business)
 }
 

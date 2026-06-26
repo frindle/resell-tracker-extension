@@ -267,7 +267,7 @@ function extractCostFromDoc(doc: Document): number {
   return 0;
 }
 
-async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string; noRushBonusPercent?: number; notFound?: boolean }> {
+async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string; noRushBonusPercent?: number; deliveryPhotoUrl?: string; notFound?: boolean }> {
   console.log('[AMZ] fetchOrderDetails', orderId);
   const detailDoc = await fetchHtml(`https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`);
   if (!detailDoc) { console.warn('[AMZ] fetchOrderDetails: no doc for', orderId); return { tracking: [], title: '', address: '', cost: 0, orderDate: null, paymentLast4: undefined }; }
@@ -344,6 +344,7 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
   // Fetch each tracking page and extract carrier tracking numbers.
   // Cap at 8 — split shipments routinely exceed 3 (raised after a real miss).
   const tracking: string[] = [...fromDetail];
+  let deliveryPhotoUrl: string | undefined;
   for (const url of trackingPageUrls.slice(0, 8)) {
     await new Promise(r => setTimeout(r, 600));
     const doc = await fetchHtml(url);
@@ -357,6 +358,19 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
       console.warn('[AMZ] shipTrack page yielded no tracking:', url);
     }
     tracking.push(...fromPage);
+
+    // Photo-on-delivery thumbnail lives in img.photo-on-delivery-img-thumb
+    // on the progress-tracker page. Take the first one we find — the URL
+    // is signed (X-Amz-Expires=259200, so 3 days), so the server will
+    // download bytes before it expires.
+    if (!deliveryPhotoUrl) {
+      const photoImg = doc.querySelector<HTMLImageElement>('img.photo-on-delivery-img-thumb, img[class*="photo-on-delivery"]');
+      const candidate = photoImg?.getAttribute('data-src') || photoImg?.getAttribute('src') || '';
+      if (candidate && /^https?:\/\//i.test(candidate)) {
+        deliveryPhotoUrl = candidate;
+        console.log('[AMZ] delivery photo found for', orderId);
+      }
+    }
   }
 
   // Clean each candidate: strip trailing letters from non-UPS only.
@@ -365,8 +379,8 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
   const cleaned = [...new Set(tracking)].map(t => /^1Z/i.test(t) ? t : t.replace(/[A-Za-z]+$/, ''));
   // Drop any entry that is a superstring of another (keep the shorter canonical form)
   const unique = [...new Set(cleaned)].filter(t => !cleaned.some(other => other !== t && t.startsWith(other))).slice(0, 5);
-  console.log('[AMZ] tracking for', orderId, ':', unique, '| title:', title || '(none)', '| addr:', address || '(none)', '| cost:', cost, '| orderDate:', orderDate, '| last4:', paymentLast4 ?? '(none)');
-  return { tracking: unique, title, address, cost, orderDate, paymentLast4 };
+  console.log('[AMZ] tracking for', orderId, ':', unique, '| title:', title || '(none)', '| addr:', address || '(none)', '| cost:', cost, '| orderDate:', orderDate, '| last4:', paymentLast4 ?? '(none)', '| photo:', deliveryPhotoUrl ? 'yes' : 'no');
+  return { tracking: unique, title, address, cost, orderDate, paymentLast4, deliveryPhotoUrl };
 }
 
 // Probe Amazon's order detail page for a placed timestamp. Amazon's UI usually
@@ -544,10 +558,10 @@ async function runSync(state: SyncState) {
       const order = allOrders[i];
       sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Fetching details for order ${i + 1} of ${allOrders.length}…` });
       await new Promise(r => setTimeout(r, 800));
-      const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string; noRushBonusPercent?: number; notFound?: boolean }>(
+      const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string; noRushBonusPercent?: number; deliveryPhotoUrl?: string; notFound?: boolean }>(
         r => setTimeout(() => r({ tracking: [], title: '', address: '', cost: 0, orderDate: null }), 12000)
       );
-      const { tracking, title, address, cost, orderDate, paymentLast4, noRushBonusPercent, notFound } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
+      const { tracking, title, address, cost, orderDate, paymentLast4, noRushBonusPercent, deliveryPhotoUrl, notFound } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
       if (notFound) {
         // Amazon Business order or otherwise inaccessible — mark for
         // exclusion from the import so we don't pollute the orders list.
@@ -558,6 +572,7 @@ async function runSync(state: SyncState) {
       if (!order.itemDescription && title) order.itemDescription = title;
       if (!order.shippingAddress && address) order.shippingAddress = address;
       if (!order.cost && cost) order.cost = cost;
+      if (deliveryPhotoUrl) order.deliveryPhotoUrl = deliveryPhotoUrl;
       if (!order.paymentLast4 && paymentLast4) order.paymentLast4 = paymentLast4;
       if (noRushBonusPercent != null) order.noRushBonusPercent = noRushBonusPercent;
       // Prefer detail's orderDate if it has a time component (T...:); otherwise

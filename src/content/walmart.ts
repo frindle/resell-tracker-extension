@@ -183,7 +183,7 @@ function getNextPageUrl(): string | null {
 // Enrich order detail pages for tracking + address
 // ---------------------------------------------------------------------------
 
-async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<{ address: string; tracking: string[]; orderDate: string | null; cost: number | null; itemDescription: string | null; hadInternalTracking: boolean; paymentLast4?: string }> {
+async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<{ address: string; tracking: string[]; orderDate: string | null; cost: number | null; itemDescription: string | null; hadInternalTracking: boolean; paymentLast4?: string; deliveryPhotoUrl?: string }> {
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 5000);
@@ -380,9 +380,18 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
       }
     }
 
-    console.log('[WM] detail:', orderNumber, 'date:', orderDate, 'cost:', cost, 'item:', itemDescription?.slice(0, 40), 'last4:', paymentLast4 ?? '(none)', `[${last4Source}]`);
+    // Delivery photo (proof-of-delivery image). Walmart serves it through a
+    // signed proxy URL — extract whichever <img alt="Proof of delivery
+    // location"> the page renders; the URL expires so the server downloads
+    // bytes immediately on import.
+    let deliveryPhotoUrl: string | undefined;
+    const photoImg = doc.querySelector<HTMLImageElement>('img[alt="Proof of delivery location"], img[src*="/delivery-photo/"]');
+    const photoSrc = photoImg?.getAttribute('src') || '';
+    if (photoSrc && /^https?:\/\//i.test(photoSrc)) deliveryPhotoUrl = photoSrc;
 
-    return { address, tracking: [...numbers], orderDate, cost, itemDescription, hadInternalTracking, paymentLast4 };
+    console.log('[WM] detail:', orderNumber, 'date:', orderDate, 'cost:', cost, 'item:', itemDescription?.slice(0, 40), 'last4:', paymentLast4 ?? '(none)', `[${last4Source}]`, 'photo:', deliveryPhotoUrl ? 'yes' : 'no');
+
+    return { address, tracking: [...numbers], orderDate, cost, itemDescription, hadInternalTracking, paymentLast4, deliveryPhotoUrl };
   } catch (e) {
     console.log('[WM] detail fetch failed:', orderNumber, String(e));
     return { address: '', tracking: [], orderDate: null, cost: null, itemDescription: null, hadInternalTracking: false };
@@ -514,6 +523,7 @@ async function startSync() {
         if (detail.cost != null && detail.cost > 0 && order.cost === 0) order.cost = detail.cost;
         if (detail.itemDescription && !order.itemDescription) order.itemDescription = detail.itemDescription;
         if (detail.paymentLast4 && !order.paymentLast4) order.paymentLast4 = detail.paymentLast4;
+        if (detail.deliveryPhotoUrl) order.deliveryPhotoUrl = detail.deliveryPhotoUrl;
         // Prefer detail's full ISO (with time) over the listing's date-only.
         // Time data lets the user track reset cycles per the cancel/refund
         // windows. Falls back to listing date when detail didn't parse.

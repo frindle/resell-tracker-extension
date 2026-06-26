@@ -913,6 +913,8 @@ async function handlePushOrders(
       ...(o.paymentLast4 ? { paymentLast4: o.paymentLast4 } : {}),
       // Amazon No-Rush delivery bonus, when detected on detail page.
       ...(o.noRushBonusPercent != null ? { noRushBonusPercent: o.noRushBonusPercent } : {}),
+      // Carrier proof-of-delivery photo URL. Server downloads + attaches.
+      ...(o.deliveryPhotoUrl ? { deliveryPhotoUrl: o.deliveryPhotoUrl } : {}),
     }))),
   });
 
