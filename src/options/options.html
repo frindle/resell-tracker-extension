@@ -40,13 +40,8 @@
       <input type="url" id="trackerUrl" placeholder="http://[CONTAINERIP]:[PORT]" />
     </label>
     <label>
-      <span>Extension Secret</span>
-      <div style="display:flex;gap:6px;align-items:stretch">
-        <input type="password" id="extensionSecret" placeholder="matches EXTENSION_SHARED_SECRET on the tracker" style="flex:1" />
-        <button type="button" class="btn-secondary" id="generateSecret" title="Generate a 32-byte hex secret">Generate</button>
-        <button type="button" class="btn-secondary" id="copySecret" title="Copy secret to clipboard">Copy</button>
-      </div>
-      <span class="status" id="secretStatus" style="margin-top:4px;display:block;font-size:0.8125rem"></span>
+      <span>Extension Secret <small style="color:#9ca3af;font-weight:normal">(auto-generated — paste into <code>EXTENSION_SHARED_SECRET</code> in the tracker .env)</small></span>
+      <input type="text" id="extensionSecret" readonly style="font-family:ui-monospace,monospace;font-size:0.8125rem;background:#1f2937;color:#e5e7eb" />
     </label>
     <div class="row">
       <button class="btn-primary" id="connect">Connect</button>
