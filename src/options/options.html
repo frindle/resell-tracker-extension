@@ -41,7 +41,12 @@
     </label>
     <label>
       <span>Extension Secret</span>
-      <input type="password" id="extensionSecret" placeholder="matches EXTENSION_SHARED_SECRET on the tracker" />
+      <div style="display:flex;gap:6px;align-items:stretch">
+        <input type="password" id="extensionSecret" placeholder="matches EXTENSION_SHARED_SECRET on the tracker" style="flex:1" />
+        <button type="button" class="btn-secondary" id="generateSecret" title="Generate a 32-byte hex secret">Generate</button>
+        <button type="button" class="btn-secondary" id="copySecret" title="Copy secret to clipboard">Copy</button>
+      </div>
+      <span class="status" id="secretStatus" style="margin-top:4px;display:block;font-size:0.8125rem"></span>
     </label>
     <div class="row">
       <button class="btn-primary" id="connect">Connect</button>

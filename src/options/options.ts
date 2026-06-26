@@ -48,6 +48,36 @@ async function init() {
     await loadUsers(trackerUrl);
   });
 
+  // Generate a fresh 32-byte hex secret + persist it. User still has to
+  // paste the value into the tracker's .env (EXTENSION_SHARED_SECRET=...)
+  // and restart the container — that's the side we can't write to.
+  document.getElementById('generateSecret')!.addEventListener('click', async () => {
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    const input = document.getElementById('extensionSecret') as HTMLInputElement;
+    input.value = hex;
+    await saveSettings({ extensionSecret: hex });
+    const s = document.getElementById('secretStatus')!;
+    s.textContent = 'Generated. Paste this into EXTENSION_SHARED_SECRET in the tracker .env, then restart the container.';
+    s.className = 'status ok';
+  });
+
+  document.getElementById('copySecret')!.addEventListener('click', async () => {
+    const input = document.getElementById('extensionSecret') as HTMLInputElement;
+    if (!input.value) return;
+    try {
+      await navigator.clipboard.writeText(input.value);
+      const s = document.getElementById('secretStatus')!;
+      s.textContent = 'Copied to clipboard.';
+      s.className = 'status ok';
+      setTimeout(() => { s.textContent = ''; }, 2000);
+    } catch (e) {
+      const s = document.getElementById('secretStatus')!;
+      s.textContent = `Copy failed: ${String(e)}`;
+      s.className = 'status fail';
+    }
+  });
+
   document.getElementById('saveUser')!.addEventListener('click', async () => {
     const userId = select.value;
     const user = users.find(u => String(u.id) === userId);
