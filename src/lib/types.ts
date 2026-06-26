@@ -18,6 +18,7 @@ export interface ScrapedOrder {
 export interface SyncSettings {
   trackerUrl: string;       // e.g. http://10.0.12.39:3000
   apiKey: string;
+  extensionSecret: string;  // shared X-Extension-Secret value (matches EXTENSION_SHARED_SECRET on the tracker)
   userId: string;           // selected tracker user id
   userName: string;         // display name
   amazonLastSync: string;   // ISO date

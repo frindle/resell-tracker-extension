@@ -321,11 +321,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       let ok = true;
       if (rates && rates.length > 0) {
         try {
-          const { trackerUrl, apiKey, userId } = await import('../lib/storage').then(m => m.getSettings());
+          const { trackerUrl, apiKey, extensionSecret, userId } = await import('../lib/storage').then(m => m.getSettings());
           if (trackerUrl) {
             const base = trackerUrl.replace(/\/$/, '');
             const headers: Record<string, string> = { 'Content-Type': 'application/json' };
             if (apiKey) headers['X-API-Key'] = apiKey;
+            if (extensionSecret) headers['X-Extension-Secret'] = extensionSecret;
             if (userId) headers['X-Extension-User-Id'] = userId;
             const res = await fetch(`${base}/api/portal-rates/bulk`, {
               method: 'POST',
@@ -536,12 +537,13 @@ type TrackerCommand = { id: number; type: string; payload: string | null };
 
 async function pollAndExecuteCommands() {
   await chrome.storage.local.set({ lastPoll: Date.now() });
-  const { trackerUrl, apiKey, userId } = await import('../lib/storage').then(m => m.getSettings());
+  const { trackerUrl, apiKey, extensionSecret, userId } = await import('../lib/storage').then(m => m.getSettings());
   if (!trackerUrl) return;
 
   const base = upgradeUrl(trackerUrl);
   const headers: Record<string, string> = {};
   if (apiKey) headers['X-API-Key'] = apiKey;
+  if (extensionSecret) headers['X-Extension-Secret'] = extensionSecret;
   if (userId) headers['X-Extension-User-Id'] = userId;
   // Tell the tracker which browser this extension instance is running in.
   // When both Firefox + Chrome are installed pointing at the same tracker,
@@ -734,12 +736,14 @@ async function handlePushBigskyOrders(
   groups: Array<{ trackingNumber: string; itemDescription: string; salePrice: number; scanDate: string; paymentDate: string | null }>,
 ) {
   const url = `${upgradeUrl(trackerUrl)}/api/bigsky/sync-orders`;
+  const { extensionSecret } = await import('../lib/storage').then(m => m.getSettings());
   const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       ...(userId ? { 'X-Extension-User-Id': userId } : {}),
       ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+      ...(extensionSecret ? { 'X-Extension-Secret': extensionSecret } : {}),
     },
     body: JSON.stringify({ groups }),
   });
@@ -766,12 +770,14 @@ async function handleFetchUsers(trackerUrl: string) {
 async function handlePushCostcoReceipts(trackerUrl: string, apiKey: string, userId: string | number | undefined, receipts: Record<string, unknown>[], receiptHtml?: Record<string, string>) {
   const url = `${upgradeUrl(trackerUrl)}/api/costco/receipts`;
   console.log('[RECEIPTS] pushing', receipts.length, 'receipts, userId=', userId, 'url=', url);
+  const { extensionSecret } = await import('../lib/storage').then(m => m.getSettings());
   const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       ...(apiKey ? { 'X-API-Key': apiKey } : {}),
       ...(userId != null ? { 'X-Extension-User-Id': String(userId) } : {}),
+      ...(extensionSecret ? { 'X-Extension-Secret': extensionSecret } : {}),
     },
     body: JSON.stringify({ receipts, receiptHtml: receiptHtml ?? {} }),
   });
@@ -790,12 +796,14 @@ async function handlePushOrders(
   // Upgrade http:// to https:// for known domain URLs to avoid Cloudflare 301
   // redirects that convert POST → GET (fetch follows 301 but drops the body).
   const url = `${upgradeUrl(trackerUrl)}/api/import`;
+  const { extensionSecret } = await import('../lib/storage').then(m => m.getSettings());
   const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       ...(userId ? { 'X-Extension-User-Id': userId } : {}),
       ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+      ...(extensionSecret ? { 'X-Extension-Secret': extensionSecret } : {}),
     },
     body: JSON.stringify(orders.map(o => ({
       platform: o.platform,

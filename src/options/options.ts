@@ -27,6 +27,7 @@ async function init() {
   const settings = await getSettings();
 
   (document.getElementById('trackerUrl') as HTMLInputElement).value = settings.trackerUrl;
+  (document.getElementById('extensionSecret') as HTMLInputElement).value = settings.extensionSecret;
   (document.getElementById('amazonLastSync') as HTMLInputElement).value = settings.amazonLastSync;
   (document.getElementById('walmartLastSync') as HTMLInputElement).value = settings.walmartLastSync;
   (document.getElementById('costcoLastSync') as HTMLInputElement).value = settings.costcoLastSync;
@@ -41,8 +42,9 @@ async function init() {
 
   document.getElementById('connect')!.addEventListener('click', async () => {
     const trackerUrl = (document.getElementById('trackerUrl') as HTMLInputElement).value.trim();
+    const extensionSecret = (document.getElementById('extensionSecret') as HTMLInputElement).value;
     if (!trackerUrl) return;
-    await saveSettings({ trackerUrl });
+    await saveSettings({ trackerUrl, extensionSecret });
     await loadUsers(trackerUrl);
   });
 
@@ -81,7 +83,7 @@ async function init() {
 
     try {
       const res = await fetch(`${currentSettings.trackerUrl}/api/orders/backfill`, {
-        headers: { 'X-Extension-User-Id': currentSettings.userId, ...(currentSettings.apiKey ? { 'X-API-Key': currentSettings.apiKey } : {}) },
+        headers: { 'X-Extension-User-Id': currentSettings.userId, ...(currentSettings.apiKey ? { 'X-API-Key': currentSettings.apiKey } : {}), ...(currentSettings.extensionSecret ? { 'X-Extension-Secret': currentSettings.extensionSecret } : {}) },
       });
       if (!res.ok) throw new Error(`API error ${res.status}`);
       type BackfillOrder = { id: number; platform: string; orderNumber: string; sourceUrl: string | null; shippingAddress: string | null; itemDescription: string | null };
@@ -191,7 +193,7 @@ async function init() {
 
           await fetch(`${currentSettings.trackerUrl}/api/orders/${order.id}`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', 'X-Extension-User-Id': currentSettings.userId, ...(currentSettings.apiKey ? { 'X-API-Key': currentSettings.apiKey } : {}) },
+            headers: { 'Content-Type': 'application/json', 'X-Extension-User-Id': currentSettings.userId, ...(currentSettings.apiKey ? { 'X-API-Key': currentSettings.apiKey } : {}), ...(currentSettings.extensionSecret ? { 'X-Extension-Secret': currentSettings.extensionSecret } : {}) },
             body: JSON.stringify(patch),
           });
           filled++;
