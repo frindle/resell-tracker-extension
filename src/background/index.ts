@@ -50,8 +50,14 @@ type OpenedScrapeTab = { platform: string; openedAt: number };
 const openedScrapeTabs = new Map<number, OpenedScrapeTab>();
 
 async function triggerSyncInBackground(platform: string, activeTabId?: number, activeTabUrl?: string) {
+  // Observability for the spurious "scrape didn't open a tab" issue. The
+  // failure modes we've suspected — getCurrent() returning the popup window,
+  // tabs.create silently failing, the 10s load wait racing the page — none
+  // currently leave a trace in the service-worker console. Make every step
+  // log so the next reproduction tells us where it died.
+  console.log(`[BG] triggerSync ${platform} | activeTabId=${activeTabId} | activeTabUrl=${activeTabUrl ?? '(none)'}`);
   const config = PLATFORM_CONFIG[platform];
-  if (!config) return;
+  if (!config) { console.warn(`[BG] triggerSync: no config for platform ${platform}`); return; }
 
   let targetTabId: number | undefined;
   let weOpenedIt = false;
@@ -64,38 +70,49 @@ async function triggerSyncInBackground(platform: string, activeTabId?: number, a
     try {
       if (new URL(activeTabUrl).hostname === config.host) {
         targetTabId = activeTabId;
+        console.log(`[BG] triggerSync: reusing active tab ${activeTabId} (host matches)`);
       }
     } catch { /* invalid url */ }
   }
 
   if (!targetTabId) {
     let currentWindowId: number | undefined;
-    try { currentWindowId = (await chrome.windows.getCurrent()).id; } catch { /* fall back to last-focused */ }
+    try { currentWindowId = (await chrome.windows.getCurrent()).id; } catch (e) { console.warn('[BG] windows.getCurrent failed:', e); }
     if (currentWindowId === undefined) {
-      try { currentWindowId = (await chrome.windows.getLastFocused()).id; } catch { /* leave undefined → new window */ }
+      try { currentWindowId = (await chrome.windows.getLastFocused()).id; } catch (e) { console.warn('[BG] windows.getLastFocused failed:', e); }
     }
+    console.log(`[BG] triggerSync: opening new tab in window ${currentWindowId ?? '(any)'}`);
 
-    const newTab = await chrome.tabs.create({ url: config.url, active: true, windowId: currentWindowId });
-    if (!newTab.id) return;
+    let newTab: chrome.tabs.Tab;
+    try {
+      newTab = await chrome.tabs.create({ url: config.url, active: true, windowId: currentWindowId });
+    } catch (e) {
+      console.error(`[BG] triggerSync: tabs.create FAILED for ${platform}`, e);
+      return;
+    }
+    if (!newTab.id) { console.error(`[BG] triggerSync: tabs.create returned no id for ${platform}`); return; }
     targetTabId = newTab.id;
     weOpenedIt = true;
     openedScrapeTabs.set(newTab.id, { platform, openedAt: Date.now() });
+    console.log(`[BG] triggerSync: created tab ${targetTabId}, waiting for load…`);
 
-    await new Promise<void>(resolve => {
+    const loadStart = Date.now();
+    const loadResult = await new Promise<'complete' | 'timeout'>(resolve => {
       let tabListener: (tabId: number, info: chrome.tabs.TabChangeInfo) => void;
       const timeout = setTimeout(() => {
         chrome.tabs.onUpdated.removeListener(tabListener);
-        resolve();
+        resolve('timeout');
       }, 10000);
       tabListener = (tabId: number, info: chrome.tabs.TabChangeInfo) => {
         if (tabId === targetTabId && info.status === 'complete') {
           chrome.tabs.onUpdated.removeListener(tabListener);
           clearTimeout(timeout);
-          resolve();
+          resolve('complete');
         }
       };
       chrome.tabs.onUpdated.addListener(tabListener);
     });
+    console.log(`[BG] triggerSync: tab load ${loadResult} after ${Date.now() - loadStart}ms`);
   }
 
   // Ping to check if content script is already loaded
@@ -103,6 +120,7 @@ async function triggerSyncInBackground(platform: string, activeTabId?: number, a
   if (!alive) {
     try {
       await chrome.scripting.executeScript({ target: { tabId: targetTabId }, files: [config.script] });
+      console.log(`[BG] triggerSync: injected ${config.script} into tab ${targetTabId}`);
     } catch (e) {
       console.error('[BG] injection failed', e);
       if (weOpenedIt && targetTabId) {
@@ -111,9 +129,13 @@ async function triggerSyncInBackground(platform: string, activeTabId?: number, a
       }
       return;
     }
+  } else {
+    console.log(`[BG] triggerSync: content script already alive in tab ${targetTabId}`);
   }
 
-  chrome.tabs.sendMessage(targetTabId, { type: 'START_SYNC', platform }).catch(e =>
+  chrome.tabs.sendMessage(targetTabId, { type: 'START_SYNC', platform }).then(() => {
+    console.log(`[BG] triggerSync: START_SYNC delivered to tab ${targetTabId}`);
+  }).catch(e =>
     console.error('[BG] START_SYNC failed', e)
   );
 }
