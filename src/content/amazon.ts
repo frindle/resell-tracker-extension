@@ -172,6 +172,16 @@ function extractCarrierTracking(doc: Document): string[] {
   const found: string[] = [];
   const text = (doc.body?.textContent ?? '').replace(/\s+/g, ' ');
 
+  // Explicit hook: Amazon's new package-tracker UI renders the tracking number
+  // inside `.pt-delivery-card-trackingId` ("Tracking ID: 9339…"). Grab the
+  // numeric/alphanumeric value out of that div first — it's the most reliable
+  // signal when present, and we want it ahead of anything text-scanned.
+  const ptCards = Array.from(doc.querySelectorAll<HTMLElement>('.pt-delivery-card-trackingId, [class*="trackingId"]'));
+  for (const el of ptCards) {
+    const v = (el.textContent ?? '').replace(/Tracking\s*(?:ID|number)?[:\s]*/i, '').trim().split(/\s+/)[0];
+    if (v && /^[A-Z0-9]{8,30}$/i.test(v)) found.unshift(v);
+  }
+
   // Amazon Logistics: TBA + 12-15 digits only (no letters after)
   const amzl = text.match(/\bTBA(\d{12,15})(?!\d)/g)?.map(m => m.replace(/\D+$/, ''));
   // UPS: 1Z + 16 alphanumeric
@@ -196,9 +206,9 @@ function extractCarrierTracking(doc: Document): string[] {
   // Also check carrier links
   const carrierLinks = Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href]'))
     .map(a => a.href)
-    .filter(h => /usps\.com|ups\.com|fedex\.com|dhl\.com/i.test(h));
+    .filter(h => /usps\.com|ups\.com|fedex\.com|dhl\.com|ontrac\.com|lasership\.com/i.test(h));
   for (const href of carrierLinks) {
-    const m = href.match(/[?&](?:qtc_tLabels1|tLabels|tracknum|InquiryNumber\d*|tracknumbers|trknbr|AWB)=([A-Z0-9]{8,30})/i);
+    const m = href.match(/[?&](?:qtc_tLabels1|tLabels|tracknum|InquiryNumber\d*|tracknumbers|trknbr|AWB|tracking[_-]?number[s]?|trackingNumber)=([A-Z0-9]{8,30})/i);
     if (m) found.unshift(m[1]);
   }
 
@@ -313,19 +323,28 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
     if (m) { paymentLast4 = m[1]; break; }
   }
 
-  // Extract ship-track URLs — each has a unique shipmentId
-  const shipTrackUrls = Array.from(detailDoc.querySelectorAll<HTMLAnchorElement>('a[href*="ship-track"]'))
+  // Extract tracking sub-page URLs. Amazon uses two patterns:
+  //  - legacy ship-track URLs (?orderId=&shipmentId=)
+  //  - new package-tracker URLs (/progress-tracker/package/)
+  // Each shipment has its own URL; we follow both shapes.
+  const trackingPageUrls = Array.from(detailDoc.querySelectorAll<HTMLAnchorElement>(
+    'a[href*="ship-track"], a[href*="progress-tracker"], a[href*="package-tracking"]'
+  ))
     .map(a => a.href)
     .filter((href, i, arr) => arr.indexOf(href) === i);
 
-  if (shipTrackUrls.length === 0) {
-    console.log('[AMZ] no ship-track links for', orderId, '| title:', title || '(none)', '| addr:', address || '(none)', '| cost:', cost, '| noRush:', noRushBonusPercent ?? '-');
+  // Even with no link, scan the detail page itself — the new pt-delivery-card
+  // sometimes inlines the tracking ID directly on the order page.
+  const fromDetail = extractCarrierTracking(detailDoc);
+  if (trackingPageUrls.length === 0 && fromDetail.length === 0) {
+    console.log('[AMZ] no tracking pages or inline tracking for', orderId, '| title:', title || '(none)', '| addr:', address || '(none)', '| cost:', cost, '| noRush:', noRushBonusPercent ?? '-');
     return { tracking: [], title, address, cost, orderDate, paymentLast4, noRushBonusPercent };
   }
 
-  // Fetch each ship-track page and extract carrier tracking numbers
-  const tracking: string[] = [];
-  for (const url of shipTrackUrls.slice(0, 3)) {
+  // Fetch each tracking page and extract carrier tracking numbers.
+  // Cap at 8 — split shipments routinely exceed 3 (raised after a real miss).
+  const tracking: string[] = [...fromDetail];
+  for (const url of trackingPageUrls.slice(0, 8)) {
     await new Promise(r => setTimeout(r, 600));
     const doc = await fetchHtml(url);
     if (!doc) continue;
@@ -334,11 +353,16 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
     doc.querySelectorAll('nav, footer, #navbar, #navFooter, #rhf').forEach(el => el.remove());
 
     const fromPage = extractCarrierTracking(doc);
+    if (fromPage.length === 0) {
+      console.warn('[AMZ] shipTrack page yielded no tracking:', url);
+    }
     tracking.push(...fromPage);
   }
 
-  // Clean each candidate: strip trailing letters (e.g. "TBA123See" → "TBA123", "9339...See" → "9339...")
-  const cleaned = [...new Set(tracking)].map(t => t.replace(/[A-Za-z]+$/, ''));
+  // Clean each candidate: strip trailing letters from non-UPS only.
+  // UPS 1Z numbers can legitimately end in [A-Z] (last char is part of the
+  // 16-char tail), so stripping there corrupts the number.
+  const cleaned = [...new Set(tracking)].map(t => /^1Z/i.test(t) ? t : t.replace(/[A-Za-z]+$/, ''));
   // Drop any entry that is a superstring of another (keep the shorter canonical form)
   const unique = [...new Set(cleaned)].filter(t => !cleaned.some(other => other !== t && t.startsWith(other))).slice(0, 5);
   console.log('[AMZ] tracking for', orderId, ':', unique, '| title:', title || '(none)', '| addr:', address || '(none)', '| cost:', cost, '| orderDate:', orderDate, '| last4:', paymentLast4 ?? '(none)');
