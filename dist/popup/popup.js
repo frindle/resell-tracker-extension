@@ -163,6 +163,7 @@
       DEFAULTS = {
         trackerUrl: "",
         apiKey: "",
+        extensionSecret: "",
         userId: "",
         userName: "",
         amazonLastSync: "",

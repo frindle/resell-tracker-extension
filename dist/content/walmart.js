@@ -167,6 +167,7 @@
       DEFAULTS = {
         trackerUrl: "",
         apiKey: "",
+        extensionSecret: "",
         userId: "",
         userName: "",
         amazonLastSync: "",
@@ -484,8 +485,12 @@
               }
             }
           }
-          console.log("[WM] detail:", orderNumber, "date:", orderDate, "cost:", cost, "item:", itemDescription?.slice(0, 40), "last4:", paymentLast4 ?? "(none)", `[${last4Source}]`);
-          return { address, tracking: [...numbers], orderDate, cost, itemDescription, hadInternalTracking, paymentLast4 };
+          let deliveryPhotoUrl;
+          const photoImg = doc.querySelector('img[alt="Proof of delivery location"], img[src*="/delivery-photo/"]');
+          const photoSrc = photoImg?.getAttribute("src") || "";
+          if (photoSrc && /^https?:\/\//i.test(photoSrc)) deliveryPhotoUrl = photoSrc;
+          console.log("[WM] detail:", orderNumber, "date:", orderDate, "cost:", cost, "item:", itemDescription?.slice(0, 40), "last4:", paymentLast4 ?? "(none)", `[${last4Source}]`, "photo:", deliveryPhotoUrl ? "yes" : "no");
+          return { address, tracking: [...numbers], orderDate, cost, itemDescription, hadInternalTracking, paymentLast4, deliveryPhotoUrl };
         } catch (e) {
           console.log("[WM] detail fetch failed:", orderNumber, String(e));
           return { address: "", tracking: [], orderDate: null, cost: null, itemDescription: null, hadInternalTracking: false };
@@ -598,6 +603,7 @@
               if (detail.cost != null && detail.cost > 0 && order.cost === 0) order.cost = detail.cost;
               if (detail.itemDescription && !order.itemDescription) order.itemDescription = detail.itemDescription;
               if (detail.paymentLast4 && !order.paymentLast4) order.paymentLast4 = detail.paymentLast4;
+              if (detail.deliveryPhotoUrl) order.deliveryPhotoUrl = detail.deliveryPhotoUrl;
               if (detail.orderDate) {
                 order.orderDate = detail.orderDate;
               } else if (!order.orderDate) {

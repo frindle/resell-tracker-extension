@@ -39,6 +39,10 @@
       <span>Tracker URL</span>
       <input type="url" id="trackerUrl" placeholder="http://[CONTAINERIP]:[PORT]" />
     </label>
+    <label>
+      <span>Extension Secret <small style="color:#9ca3af;font-weight:normal">(auto-generated — paste into <code>EXTENSION_SHARED_SECRET</code> in the tracker .env)</small></span>
+      <input type="text" id="extensionSecret" readonly style="font-family:ui-monospace,monospace;font-size:0.8125rem;background:#1f2937;color:#e5e7eb" />
+    </label>
     <div class="row">
       <button class="btn-primary" id="connect">Connect</button>
       <span class="status" id="userStatus"></span>

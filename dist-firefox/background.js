@@ -38,6 +38,7 @@
       DEFAULTS = {
         trackerUrl: "",
         apiKey: "",
+        extensionSecret: "",
         userId: "",
         userName: "",
         amazonLastSync: "",
@@ -86,14 +87,19 @@
       };
       var openedScrapeTabs = /* @__PURE__ */ new Map();
       async function triggerSyncInBackground(platform, activeTabId, activeTabUrl) {
+        console.log(`[BG] triggerSync ${platform} | activeTabId=${activeTabId} | activeTabUrl=${activeTabUrl ?? "(none)"}`);
         const config = PLATFORM_CONFIG[platform];
-        if (!config) return;
+        if (!config) {
+          console.warn(`[BG] triggerSync: no config for platform ${platform}`);
+          return;
+        }
         let targetTabId;
         let weOpenedIt = false;
         if (activeTabId && activeTabUrl) {
           try {
             if (new URL(activeTabUrl).hostname === config.host) {
               targetTabId = activeTabId;
+              console.log(`[BG] triggerSync: reusing active tab ${activeTabId} (host matches)`);
             }
           } catch {
           }
@@ -102,39 +108,55 @@
           let currentWindowId;
           try {
             currentWindowId = (await chrome.windows.getCurrent()).id;
-          } catch {
+          } catch (e) {
+            console.warn("[BG] windows.getCurrent failed:", e);
           }
           if (currentWindowId === void 0) {
             try {
               currentWindowId = (await chrome.windows.getLastFocused()).id;
-            } catch {
+            } catch (e) {
+              console.warn("[BG] windows.getLastFocused failed:", e);
             }
           }
-          const newTab = await chrome.tabs.create({ url: config.url, active: true, windowId: currentWindowId });
-          if (!newTab.id) return;
+          console.log(`[BG] triggerSync: opening new tab in window ${currentWindowId ?? "(any)"}`);
+          let newTab;
+          try {
+            newTab = await chrome.tabs.create({ url: config.url, active: true, windowId: currentWindowId });
+          } catch (e) {
+            console.error(`[BG] triggerSync: tabs.create FAILED for ${platform}`, e);
+            return;
+          }
+          if (!newTab.id) {
+            console.error(`[BG] triggerSync: tabs.create returned no id for ${platform}`);
+            return;
+          }
           targetTabId = newTab.id;
           weOpenedIt = true;
           openedScrapeTabs.set(newTab.id, { platform, openedAt: Date.now() });
-          await new Promise((resolve) => {
+          console.log(`[BG] triggerSync: created tab ${targetTabId}, waiting for load\u2026`);
+          const loadStart = Date.now();
+          const loadResult = await new Promise((resolve) => {
             let tabListener;
             const timeout = setTimeout(() => {
               chrome.tabs.onUpdated.removeListener(tabListener);
-              resolve();
+              resolve("timeout");
             }, 1e4);
             tabListener = (tabId, info) => {
               if (tabId === targetTabId && info.status === "complete") {
                 chrome.tabs.onUpdated.removeListener(tabListener);
                 clearTimeout(timeout);
-                resolve();
+                resolve("complete");
               }
             };
             chrome.tabs.onUpdated.addListener(tabListener);
           });
+          console.log(`[BG] triggerSync: tab load ${loadResult} after ${Date.now() - loadStart}ms`);
         }
         const alive = await chrome.tabs.sendMessage(targetTabId, { type: "PING" }).catch(() => null);
         if (!alive) {
           try {
             await chrome.scripting.executeScript({ target: { tabId: targetTabId }, files: [config.script] });
+            console.log(`[BG] triggerSync: injected ${config.script} into tab ${targetTabId}`);
           } catch (e) {
             console.error("[BG] injection failed", e);
             if (weOpenedIt && targetTabId) {
@@ -144,8 +166,12 @@
             }
             return;
           }
+        } else {
+          console.log(`[BG] triggerSync: content script already alive in tab ${targetTabId}`);
         }
-        chrome.tabs.sendMessage(targetTabId, { type: "START_SYNC", platform }).catch(
+        chrome.tabs.sendMessage(targetTabId, { type: "START_SYNC", platform }).then(() => {
+          console.log(`[BG] triggerSync: START_SYNC delivered to tab ${targetTabId}`);
+        }).catch(
           (e) => console.error("[BG] START_SYNC failed", e)
         );
       }
@@ -332,11 +358,12 @@
             let ok = true;
             if (rates && rates.length > 0) {
               try {
-                const { trackerUrl, apiKey, userId } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
+                const { trackerUrl, apiKey, extensionSecret, userId } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
                 if (trackerUrl) {
                   const base = trackerUrl.replace(/\/$/, "");
                   const headers = { "Content-Type": "application/json" };
                   if (apiKey) headers["X-API-Key"] = apiKey;
+                  if (extensionSecret) headers["X-Extension-Secret"] = extensionSecret;
                   if (userId) headers["X-Extension-User-Id"] = userId;
                   const res = await fetch(`${base}/api/portal-rates/bulk`, {
                     method: "POST",
@@ -383,6 +410,80 @@
           if (logs.length > 200) logs.splice(0, logs.length - 200);
           await chrome.storage.local.set({ apiLogs: logs, apiLogNextId: nextId + 1 });
         });
+        void forwardErrorIfRelevant(entry);
+        void triggerCommitmentSyncIfRelevant(entry);
+      }
+      var _commitmentSyncTimer = null;
+      async function triggerCommitmentSyncIfRelevant(entry) {
+        try {
+          const status = typeof entry.status === "number" ? entry.status : 0;
+          const url = typeof entry.url === "string" ? entry.url : "";
+          if (status < 200 || status >= 300) return;
+          if (!/buyinggroup\.com.*\/v1\/commitment\/(edit|create|delete|update|cancel)/i.test(url)) return;
+          if (_commitmentSyncTimer) clearTimeout(_commitmentSyncTimer);
+          _commitmentSyncTimer = setTimeout(async () => {
+            _commitmentSyncTimer = null;
+            try {
+              const { trackerUrl, apiKey, extensionSecret, userId } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
+              if (!trackerUrl || !userId) return;
+              const headers = { "X-Extension-User-Id": userId };
+              if (apiKey) headers["X-API-Key"] = apiKey;
+              if (extensionSecret) headers["X-Extension-Secret"] = extensionSecret;
+              headers["X-Extension-Browser"] = isFirefox ? "firefox" : "chrome";
+              console.log("[spy] auto-firing /api/buyinggroup/sync-commitments after edit_commitment");
+              await fetch(`${trackerUrl.replace(/\/$/, "")}/api/buyinggroup/sync-commitments`, {
+                method: "POST",
+                headers
+              }).catch(() => {
+              });
+            } catch {
+            }
+          }, 5e3);
+        } catch {
+        }
+      }
+      var _recentForwards = /* @__PURE__ */ new Map();
+      async function forwardErrorIfRelevant(entry) {
+        try {
+          const status = typeof entry.status === "number" ? entry.status : 0;
+          const url = typeof entry.url === "string" ? entry.url : "";
+          const method = typeof entry.method === "string" ? entry.method : "";
+          if (!url || status >= 200 && status < 300) return;
+          if (status === 0) return;
+          const group = classifyGroup(url);
+          if (!group) return;
+          const dedupeKey = `${group}:${method}:${url}:${status}`;
+          const last = _recentForwards.get(dedupeKey) ?? 0;
+          if (Date.now() - last < 6e4) return;
+          _recentForwards.set(dedupeKey, Date.now());
+          const { trackerUrl, apiKey, extensionSecret, userId } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
+          if (!trackerUrl || !userId) return;
+          const headers = { "Content-Type": "application/json", "X-Extension-User-Id": userId };
+          if (apiKey) headers["X-API-Key"] = apiKey;
+          if (extensionSecret) headers["X-Extension-Secret"] = extensionSecret;
+          headers["X-Extension-Browser"] = isFirefox ? "firefox" : "chrome";
+          await fetch(`${trackerUrl.replace(/\/$/, "")}/api/api-errors`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              group,
+              endpoint: url.replace(/^https?:\/\/[^/]+/, ""),
+              method,
+              status,
+              body: typeof entry.resBody === "string" ? entry.resBody.slice(0, 1500) : void 0,
+              context: "extension API spy"
+            })
+          }).catch(() => {
+          });
+        } catch {
+        }
+      }
+      function classifyGroup(url) {
+        if (/cardcenter\.cc/i.test(url)) return "CC";
+        if (/buyinggroup\.com|prod\.buyinggroup\.com/i.test(url)) return "BG";
+        if (/bfmr\.com/i.test(url)) return "BFMR";
+        if (/bigskybuyers\.com/i.test(url)) return "BigSky";
+        return null;
       }
       async function injectSpy(tabId) {
         await chrome.scripting.executeScript({ target: { tabId }, files: ["content/api-spy-bridge.js"] });
@@ -537,11 +638,12 @@
       }
       async function pollAndExecuteCommands() {
         await chrome.storage.local.set({ lastPoll: Date.now() });
-        const { trackerUrl, apiKey, userId } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
+        const { trackerUrl, apiKey, extensionSecret, userId } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
         if (!trackerUrl) return;
         const base = upgradeUrl(trackerUrl);
         const headers = {};
         if (apiKey) headers["X-API-Key"] = apiKey;
+        if (extensionSecret) headers["X-Extension-Secret"] = extensionSecret;
         if (userId) headers["X-Extension-User-Id"] = userId;
         headers["X-Extension-Browser"] = isFirefox ? "firefox" : "chrome";
         let commands = [];
@@ -701,12 +803,14 @@
       }
       async function handlePushBigskyOrders(trackerUrl, apiKey, userId, groups) {
         const url = `${upgradeUrl(trackerUrl)}/api/bigsky/sync-orders`;
+        const { extensionSecret } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
         const res = await fetch(url, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             ...userId ? { "X-Extension-User-Id": userId } : {},
-            ...apiKey ? { "X-API-Key": apiKey } : {}
+            ...apiKey ? { "X-API-Key": apiKey } : {},
+            ...extensionSecret ? { "X-Extension-Secret": extensionSecret } : {}
           },
           body: JSON.stringify({ groups })
         });
@@ -730,12 +834,14 @@
       async function handlePushCostcoReceipts(trackerUrl, apiKey, userId, receipts, receiptHtml) {
         const url = `${upgradeUrl(trackerUrl)}/api/costco/receipts`;
         console.log("[RECEIPTS] pushing", receipts.length, "receipts, userId=", userId, "url=", url);
+        const { extensionSecret } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
         const res = await fetch(url, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             ...apiKey ? { "X-API-Key": apiKey } : {},
-            ...userId != null ? { "X-Extension-User-Id": String(userId) } : {}
+            ...userId != null ? { "X-Extension-User-Id": String(userId) } : {},
+            ...extensionSecret ? { "X-Extension-Secret": extensionSecret } : {}
           },
           body: JSON.stringify({ receipts, receiptHtml: receiptHtml ?? {} })
         });
@@ -746,12 +852,14 @@
       }
       async function handlePushOrders(trackerUrl, apiKey, userId, orders) {
         const url = `${upgradeUrl(trackerUrl)}/api/import`;
+        const { extensionSecret } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
         const res = await fetch(url, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             ...userId ? { "X-Extension-User-Id": userId } : {},
-            ...apiKey ? { "X-API-Key": apiKey } : {}
+            ...apiKey ? { "X-API-Key": apiKey } : {},
+            ...extensionSecret ? { "X-Extension-Secret": extensionSecret } : {}
           },
           body: JSON.stringify(orders.map((o) => ({
             platform: o.platform,
@@ -770,7 +878,9 @@
             // even when last4 was visible in extension logs.
             ...o.paymentLast4 ? { paymentLast4: o.paymentLast4 } : {},
             // Amazon No-Rush delivery bonus, when detected on detail page.
-            ...o.noRushBonusPercent != null ? { noRushBonusPercent: o.noRushBonusPercent } : {}
+            ...o.noRushBonusPercent != null ? { noRushBonusPercent: o.noRushBonusPercent } : {},
+            // Carrier proof-of-delivery photo URL. Server downloads + attaches.
+            ...o.deliveryPhotoUrl ? { deliveryPhotoUrl: o.deliveryPhotoUrl } : {}
           })))
         });
         if (!res.ok) {

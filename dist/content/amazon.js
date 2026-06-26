@@ -167,6 +167,7 @@
       DEFAULTS = {
         trackerUrl: "",
         apiKey: "",
+        extensionSecret: "",
         userId: "",
         userName: "",
         amazonLastSync: "",
@@ -446,6 +447,7 @@
           return { tracking: [], title, address, cost, orderDate, paymentLast4, noRushBonusPercent };
         }
         const tracking = [...fromDetail];
+        let deliveryPhotoUrl;
         for (const url of trackingPageUrls.slice(0, 8)) {
           await new Promise((r) => setTimeout(r, 600));
           const doc = await fetchHtml(url);
@@ -456,11 +458,19 @@
             console.warn("[AMZ] shipTrack page yielded no tracking:", url);
           }
           tracking.push(...fromPage);
+          if (!deliveryPhotoUrl) {
+            const photoImg = doc.querySelector('img.photo-on-delivery-img-thumb, img[class*="photo-on-delivery"]');
+            const candidate = photoImg?.getAttribute("data-src") || photoImg?.getAttribute("src") || "";
+            if (candidate && /^https?:\/\//i.test(candidate)) {
+              deliveryPhotoUrl = candidate;
+              console.log("[AMZ] delivery photo found for", orderId);
+            }
+          }
         }
         const cleaned = [...new Set(tracking)].map((t) => /^1Z/i.test(t) ? t : t.replace(/[A-Za-z]+$/, ""));
         const unique = [...new Set(cleaned)].filter((t) => !cleaned.some((other) => other !== t && t.startsWith(other))).slice(0, 5);
-        console.log("[AMZ] tracking for", orderId, ":", unique, "| title:", title || "(none)", "| addr:", address || "(none)", "| cost:", cost, "| orderDate:", orderDate, "| last4:", paymentLast4 ?? "(none)");
-        return { tracking: unique, title, address, cost, orderDate, paymentLast4 };
+        console.log("[AMZ] tracking for", orderId, ":", unique, "| title:", title || "(none)", "| addr:", address || "(none)", "| cost:", cost, "| orderDate:", orderDate, "| last4:", paymentLast4 ?? "(none)", "| photo:", deliveryPhotoUrl ? "yes" : "no");
+        return { tracking: unique, title, address, cost, orderDate, paymentLast4, deliveryPhotoUrl };
       }
       function extractOrderDateFromDoc(doc, orderId) {
         const html = doc.documentElement.outerHTML;
@@ -596,7 +606,7 @@
               const timeout = new Promise(
                 (r) => setTimeout(() => r({ tracking: [], title: "", address: "", cost: 0, orderDate: null }), 12e3)
               );
-              const { tracking, title, address, cost, orderDate, paymentLast4, noRushBonusPercent, notFound } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
+              const { tracking, title, address, cost, orderDate, paymentLast4, noRushBonusPercent, deliveryPhotoUrl, notFound } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
               if (notFound) {
                 order._skipBusiness = true;
                 continue;
@@ -605,6 +615,7 @@
               if (!order.itemDescription && title) order.itemDescription = title;
               if (!order.shippingAddress && address) order.shippingAddress = address;
               if (!order.cost && cost) order.cost = cost;
+              if (deliveryPhotoUrl) order.deliveryPhotoUrl = deliveryPhotoUrl;
               if (!order.paymentLast4 && paymentLast4) order.paymentLast4 = paymentLast4;
               if (noRushBonusPercent != null) order.noRushBonusPercent = noRushBonusPercent;
               if (orderDate && /T\d{2}:\d{2}/.test(orderDate)) order.orderDate = orderDate;
