@@ -543,6 +543,7 @@
         const headers = {};
         if (apiKey) headers["X-API-Key"] = apiKey;
         if (userId) headers["X-Extension-User-Id"] = userId;
+        headers["X-Extension-Browser"] = isFirefox ? "firefox" : "chrome";
         let commands = [];
         try {
           const res = await fetch(`${base}/api/extension/commands`, { headers });

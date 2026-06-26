@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.59
+- **Amazon: catch tracking on the new package-tracker UI.** Amazon rolled out a `pt-delivery-card-wrapper` layout where the tracking number lives in `<div class="pt-delivery-card-trackingId">Tracking ID: …</div>` and "See all updates" is a modal trigger with `href="#"` — there's no ship-track sub-link to follow. We now (a) explicitly target `.pt-delivery-card-trackingId` and any `[class*="trackingId"]`, (b) widen the tracking-page selector to include `/progress-tracker/` and `/package-tracking/` URLs alongside legacy ship-track, and (c) scan the order detail page itself, so an inline pt-card no longer gets missed. Bumped the per-order tracking-page cap from 3 to 8 (split shipments exceeded the old cap), preserved UPS 1Z numbers that legitimately end in a letter (the trailing-letter strip was corrupting valid UPS IDs), widened carrier-link param matching (`tracking_number`, ontrac, lasership), and added a warn log when a fetched tracking page yields zero matches so future misses are diagnosable.
+
 ### 1.1.58
 - **Amazon Business orders are now skipped at scan time.** The 113- prefixed IDs returned a "we can't find that order" page when we tried to fetch detail. We now detect the not-found markup and drop the row instead of pushing an empty order to the server.
 - **Amazon No-Rush delivery detection.** When the order detail page shows the supplemental "Earns extra N% on items using No-Rush delivery" disclosure, capture `noRushBonusPercent` (e.g. 2 for "extra 2%") and forward it to the server. The server flags the order with `delayedShipping=true` and persists the bonus on the new `noRushBonusPercent` column.

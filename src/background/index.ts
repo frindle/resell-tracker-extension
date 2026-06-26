@@ -543,6 +543,12 @@ async function pollAndExecuteCommands() {
   const headers: Record<string, string> = {};
   if (apiKey) headers['X-API-Key'] = apiKey;
   if (userId) headers['X-Extension-User-Id'] = userId;
+  // Tell the tracker which browser this extension instance is running in.
+  // When both Firefox + Chrome are installed pointing at the same tracker,
+  // whichever polls first claims the command — leading to "I triggered
+  // sync in Firefox and Amazon opened in Chrome." The tracker can filter
+  // out commands targeted at the *other* browser using this header.
+  headers['X-Extension-Browser'] = isFirefox ? 'firefox' : 'chrome';
 
   let commands: TrackerCommand[] = [];
   try {

@@ -336,6 +336,11 @@
       function extractCarrierTracking(doc) {
         const found = [];
         const text = (doc.body?.textContent ?? "").replace(/\s+/g, " ");
+        const ptCards = Array.from(doc.querySelectorAll('.pt-delivery-card-trackingId, [class*="trackingId"]'));
+        for (const el of ptCards) {
+          const v = (el.textContent ?? "").replace(/Tracking\s*(?:ID|number)?[:\s]*/i, "").trim().split(/\s+/)[0];
+          if (v && /^[A-Z0-9]{8,30}$/i.test(v)) found.unshift(v);
+        }
         const amzl = text.match(/\bTBA(\d{12,15})(?!\d)/g)?.map((m) => m.replace(/\D+$/, ""));
         const ups = text.match(/\b(1Z[A-Z0-9]{16})\b/g);
         const usps = text.match(/\b(9[0-9]{19,21})\b/g);
@@ -349,9 +354,9 @@
         if (ups) found.push(...ups);
         if (usps) found.push(...usps);
         if (fedex) found.push(...fedex);
-        const carrierLinks = Array.from(doc.querySelectorAll("a[href]")).map((a) => a.href).filter((h) => /usps\.com|ups\.com|fedex\.com|dhl\.com/i.test(h));
+        const carrierLinks = Array.from(doc.querySelectorAll("a[href]")).map((a) => a.href).filter((h) => /usps\.com|ups\.com|fedex\.com|dhl\.com|ontrac\.com|lasership\.com/i.test(h));
         for (const href of carrierLinks) {
-          const m = href.match(/[?&](?:qtc_tLabels1|tLabels|tracknum|InquiryNumber\d*|tracknumbers|trknbr|AWB)=([A-Z0-9]{8,30})/i);
+          const m = href.match(/[?&](?:qtc_tLabels1|tLabels|tracknum|InquiryNumber\d*|tracknumbers|trknbr|AWB|tracking[_-]?number[s]?|trackingNumber)=([A-Z0-9]{8,30})/i);
           if (m) found.unshift(m[1]);
         }
         return [...new Set(found)];
@@ -432,21 +437,27 @@
             break;
           }
         }
-        const shipTrackUrls = Array.from(detailDoc.querySelectorAll('a[href*="ship-track"]')).map((a) => a.href).filter((href, i, arr) => arr.indexOf(href) === i);
-        if (shipTrackUrls.length === 0) {
-          console.log("[AMZ] no ship-track links for", orderId, "| title:", title || "(none)", "| addr:", address || "(none)", "| cost:", cost, "| noRush:", noRushBonusPercent ?? "-");
+        const trackingPageUrls = Array.from(detailDoc.querySelectorAll(
+          'a[href*="ship-track"], a[href*="progress-tracker"], a[href*="package-tracking"]'
+        )).map((a) => a.href).filter((href, i, arr) => arr.indexOf(href) === i);
+        const fromDetail = extractCarrierTracking(detailDoc);
+        if (trackingPageUrls.length === 0 && fromDetail.length === 0) {
+          console.log("[AMZ] no tracking pages or inline tracking for", orderId, "| title:", title || "(none)", "| addr:", address || "(none)", "| cost:", cost, "| noRush:", noRushBonusPercent ?? "-");
           return { tracking: [], title, address, cost, orderDate, paymentLast4, noRushBonusPercent };
         }
-        const tracking = [];
-        for (const url of shipTrackUrls.slice(0, 3)) {
+        const tracking = [...fromDetail];
+        for (const url of trackingPageUrls.slice(0, 8)) {
           await new Promise((r) => setTimeout(r, 600));
           const doc = await fetchHtml(url);
           if (!doc) continue;
           doc.querySelectorAll("nav, footer, #navbar, #navFooter, #rhf").forEach((el) => el.remove());
           const fromPage = extractCarrierTracking(doc);
+          if (fromPage.length === 0) {
+            console.warn("[AMZ] shipTrack page yielded no tracking:", url);
+          }
           tracking.push(...fromPage);
         }
-        const cleaned = [...new Set(tracking)].map((t) => t.replace(/[A-Za-z]+$/, ""));
+        const cleaned = [...new Set(tracking)].map((t) => /^1Z/i.test(t) ? t : t.replace(/[A-Za-z]+$/, ""));
         const unique = [...new Set(cleaned)].filter((t) => !cleaned.some((other) => other !== t && t.startsWith(other))).slice(0, 5);
         console.log("[AMZ] tracking for", orderId, ":", unique, "| title:", title || "(none)", "| addr:", address || "(none)", "| cost:", cost, "| orderDate:", orderDate, "| last4:", paymentLast4 ?? "(none)");
         return { tracking: unique, title, address, cost, orderDate, paymentLast4 };
