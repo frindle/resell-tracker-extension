@@ -373,6 +373,57 @@ function appendApiLog(entry: Record<string, unknown>) {
     if (logs.length > 200) logs.splice(0, logs.length - 200);
     await chrome.storage.local.set({ apiLogs: logs, apiLogNextId: nextId + 1 });
   });
+  // Fire-and-forget: forward CC API errors to the tracker so they land
+  // in /api-errors alongside our server-side failures. Keeps debugging
+  // unified — you don't have to remember to open the spy panel separately.
+  void forwardErrorIfRelevant(entry);
+}
+
+// Per-session dedupe of recent forwards. The spy fires for every fetch
+// the page makes, and CC pages tend to retry — we don't want N copies of
+// the same error in the tracker.
+const _recentForwards = new Map<string, number>();
+async function forwardErrorIfRelevant(entry: Record<string, unknown>) {
+  try {
+    const status = typeof entry.status === 'number' ? entry.status : 0;
+    const url = typeof entry.url === 'string' ? entry.url : '';
+    const method = typeof entry.method === 'string' ? entry.method : '';
+    if (!url || status >= 200 && status < 300) return;
+    if (status === 0) return; // network/abort, not server error
+    const group = classifyGroup(url);
+    if (!group) return;
+    const dedupeKey = `${group}:${method}:${url}:${status}`;
+    const last = _recentForwards.get(dedupeKey) ?? 0;
+    if (Date.now() - last < 60_000) return;
+    _recentForwards.set(dedupeKey, Date.now());
+
+    const { trackerUrl, apiKey, extensionSecret, userId } = await import('../lib/storage').then(m => m.getSettings());
+    if (!trackerUrl || !userId) return;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Extension-User-Id': userId };
+    if (apiKey) headers['X-API-Key'] = apiKey;
+    if (extensionSecret) headers['X-Extension-Secret'] = extensionSecret;
+    headers['X-Extension-Browser'] = isFirefox ? 'firefox' : 'chrome';
+    await fetch(`${trackerUrl.replace(/\/$/, '')}/api/api-errors`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        group,
+        endpoint: url.replace(/^https?:\/\/[^/]+/, ''),
+        method,
+        status,
+        body: typeof entry.resBody === 'string' ? entry.resBody.slice(0, 1500) : undefined,
+        context: 'extension API spy',
+      }),
+    }).catch(() => {});
+  } catch { /* never throw from a fire-and-forget logger */ }
+}
+
+function classifyGroup(url: string): string | null {
+  if (/cardcenter\.cc/i.test(url)) return 'CC';
+  if (/buyinggroup\.com|prod\.buyinggroup\.com/i.test(url)) return 'BG';
+  if (/bfmr\.com/i.test(url)) return 'BFMR';
+  if (/bigskybuyers\.com/i.test(url)) return 'BigSky';
+  return null;
 }
 
 async function injectSpy(tabId: number) {
