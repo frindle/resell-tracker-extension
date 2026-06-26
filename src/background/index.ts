@@ -377,6 +377,45 @@ function appendApiLog(entry: Record<string, unknown>) {
   // in /api-errors alongside our server-side failures. Keeps debugging
   // unified — you don't have to remember to open the spy panel separately.
   void forwardErrorIfRelevant(entry);
+
+  // When the spy sees a successful commitment edit on buyinggroup.com,
+  // nudge the tracker to re-sync. Without this, raising a commitment from
+  // 3 to 6 on bg.com doesn't show up locally until the user clicks "Sync
+  // from BG" manually — which they keep forgetting.
+  void triggerCommitmentSyncIfRelevant(entry);
+}
+
+// Debounce — bg.com fires edit_commitment per change, but the user may
+// drag a number up/down a few times in quick succession. Wait 5s of quiet
+// before kicking off the sync to avoid hammering the tracker.
+let _commitmentSyncTimer: ReturnType<typeof setTimeout> | null = null;
+async function triggerCommitmentSyncIfRelevant(entry: Record<string, unknown>) {
+  try {
+    const status = typeof entry.status === 'number' ? entry.status : 0;
+    const url = typeof entry.url === 'string' ? entry.url : '';
+    if (status < 200 || status >= 300) return;
+    // BG's commitment endpoints all live under /v1/commitment/ — fire on
+    // edits, creates, deletes. The fulfilled/count change is the whole
+    // point of the sync.
+    if (!/buyinggroup\.com.*\/v1\/commitment\/(edit|create|delete|update|cancel)/i.test(url)) return;
+
+    if (_commitmentSyncTimer) clearTimeout(_commitmentSyncTimer);
+    _commitmentSyncTimer = setTimeout(async () => {
+      _commitmentSyncTimer = null;
+      try {
+        const { trackerUrl, apiKey, extensionSecret, userId } = await import('../lib/storage').then(m => m.getSettings());
+        if (!trackerUrl || !userId) return;
+        const headers: Record<string, string> = { 'X-Extension-User-Id': userId };
+        if (apiKey) headers['X-API-Key'] = apiKey;
+        if (extensionSecret) headers['X-Extension-Secret'] = extensionSecret;
+        headers['X-Extension-Browser'] = isFirefox ? 'firefox' : 'chrome';
+        console.log('[spy] auto-firing /api/buyinggroup/sync-commitments after edit_commitment');
+        await fetch(`${trackerUrl.replace(/\/$/, '')}/api/buyinggroup/sync-commitments`, {
+          method: 'POST', headers,
+        }).catch(() => {});
+      } catch { /* never throw */ }
+    }, 5000);
+  } catch { /* never throw */ }
 }
 
 // Per-session dedupe of recent forwards. The spy fires for every fetch
