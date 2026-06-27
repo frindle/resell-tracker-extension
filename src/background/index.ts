@@ -237,6 +237,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'FETCH_IMAGE_BYTES') {
+    // Fetch a delivery photo URL with credentials so cookies for the user's
+    // Walmart/Amazon session are included. Returns base64 + content-type so
+    // the content script can attach to the order's import payload. Used for
+    // Walmart's receipts-query.edge.walmart.com URLs which 401 when fetched
+    // server-side (no session cookie). Amazon's S3 signed URLs would also
+    // work via this path but we let the server fetch those directly since
+    // they're self-contained.
+    fetch(message.url as string, { credentials: 'include' })
+      .then(async r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const buf = await r.arrayBuffer();
+        // Cap at 5 MB — same as the server-side cap. Delivery photos are
+        // ~50-200 KB, so this is generous; rejects anything unexpected.
+        if (buf.byteLength > 5 * 1024 * 1024) throw new Error(`oversized: ${buf.byteLength} bytes`);
+        const bytes = new Uint8Array(buf);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        const base64 = btoa(binary);
+        sendResponse({ base64, mimeType: r.headers.get('content-type') || 'image/jpeg' });
+      })
+      .catch(e => sendResponse({ error: String(e) }));
+    return true;
+  }
+
   if (message.type === 'CYCLE_DATE_FILTER') {
     const tabId = sender.tab?.id;
     if (!tabId) { sendResponse(null); return; }
@@ -937,6 +962,11 @@ async function handlePushOrders(
       ...(o.noRushBonusPercent != null ? { noRushBonusPercent: o.noRushBonusPercent } : {}),
       // Carrier proof-of-delivery photo URL. Server downloads + attaches.
       ...(o.deliveryPhotoUrl ? { deliveryPhotoUrl: o.deliveryPhotoUrl } : {}),
+      // For Walmart (and any other host whose photo URL needs the user's
+      // session cookies), we ship the bytes inline so the server doesn't
+      // try to fetch and 401.
+      ...(o.deliveryPhotoBase64 ? { deliveryPhotoBase64: o.deliveryPhotoBase64 } : {}),
+      ...(o.deliveryPhotoMime ? { deliveryPhotoMime: o.deliveryPhotoMime } : {}),
     }))),
   });
 

@@ -12,7 +12,9 @@ export interface ScrapedOrder {
   sourceUrl: string;
   paymentLast4?: string;   // last 4 digits scraped from payment method — enables card auto-assign on import
   noRushBonusPercent?: number; // Amazon "Earns extra N% on items using No-Rush delivery" — set when detected on detail page
-  deliveryPhotoUrl?: string;   // proof-of-delivery image URL (signed, expires). Server downloads bytes on import.
+  deliveryPhotoUrl?: string;      // proof-of-delivery image URL (signed, expires). Server downloads bytes on import.
+  deliveryPhotoBase64?: string;   // when set, server uses these bytes directly instead of fetching. Required for Walmart (URL requires session cookies); optional for Amazon (S3 URL is self-contained).
+  deliveryPhotoMime?: string;     // content-type for the bytes above, e.g. "image/jpeg".
   _skipBusiness?: boolean;     // local-only: drops from push if detail page wasn't accessible (Amazon Business)
 }
 

@@ -183,7 +183,7 @@ function getNextPageUrl(): string | null {
 // Enrich order detail pages for tracking + address
 // ---------------------------------------------------------------------------
 
-async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<{ address: string; tracking: string[]; orderDate: string | null; cost: number | null; itemDescription: string | null; hadInternalTracking: boolean; paymentLast4?: string; deliveryPhotoUrl?: string }> {
+async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<{ address: string; tracking: string[]; orderDate: string | null; cost: number | null; itemDescription: string | null; hadInternalTracking: boolean; paymentLast4?: string; deliveryPhotoUrl?: string; deliveryPhotoBase64?: string; deliveryPhotoMime?: string }> {
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 5000);
@@ -385,13 +385,31 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
     // location"> the page renders; the URL expires so the server downloads
     // bytes immediately on import.
     let deliveryPhotoUrl: string | undefined;
+    let deliveryPhotoBase64: string | undefined;
+    let deliveryPhotoMime: string | undefined;
     const photoImg = doc.querySelector<HTMLImageElement>('img[alt="Proof of delivery location"], img[src*="/delivery-photo/"]');
     const photoSrc = photoImg?.getAttribute('src') || '';
-    if (photoSrc && /^https?:\/\//i.test(photoSrc)) deliveryPhotoUrl = photoSrc;
+    if (photoSrc && /^https?:\/\//i.test(photoSrc)) {
+      deliveryPhotoUrl = photoSrc;
+      // Walmart's photo proxy (receipts-query.edge.walmart.com) requires the
+      // user's session cookies; server-side fetch 401s. Have the background
+      // SW fetch with credentials and we forward the bytes inline.
+      try {
+        const r = await chrome.runtime.sendMessage({ type: 'FETCH_IMAGE_BYTES', url: photoSrc });
+        if (r?.base64) {
+          deliveryPhotoBase64 = r.base64;
+          deliveryPhotoMime = r.mimeType;
+        } else {
+          console.warn('[WM] photo bytes fetch failed:', r?.error);
+        }
+      } catch (e) {
+        console.warn('[WM] photo bytes fetch threw:', e);
+      }
+    }
 
     console.log('[WM] detail:', orderNumber, 'date:', orderDate, 'cost:', cost, 'item:', itemDescription?.slice(0, 40), 'last4:', paymentLast4 ?? '(none)', `[${last4Source}]`, 'photo:', deliveryPhotoUrl ? 'yes' : 'no');
 
-    return { address, tracking: [...numbers], orderDate, cost, itemDescription, hadInternalTracking, paymentLast4, deliveryPhotoUrl };
+    return { address, tracking: [...numbers], orderDate, cost, itemDescription, hadInternalTracking, paymentLast4, deliveryPhotoUrl, deliveryPhotoBase64, deliveryPhotoMime };
   } catch (e) {
     console.log('[WM] detail fetch failed:', orderNumber, String(e));
     return { address: '', tracking: [], orderDate: null, cost: null, itemDescription: null, hadInternalTracking: false };
@@ -524,6 +542,8 @@ async function startSync() {
         if (detail.itemDescription && !order.itemDescription) order.itemDescription = detail.itemDescription;
         if (detail.paymentLast4 && !order.paymentLast4) order.paymentLast4 = detail.paymentLast4;
         if (detail.deliveryPhotoUrl) order.deliveryPhotoUrl = detail.deliveryPhotoUrl;
+        if (detail.deliveryPhotoBase64) order.deliveryPhotoBase64 = detail.deliveryPhotoBase64;
+        if (detail.deliveryPhotoMime) order.deliveryPhotoMime = detail.deliveryPhotoMime;
         // Prefer detail's full ISO (with time) over the listing's date-only.
         // Time data lets the user track reset cycles per the cancel/refund
         // windows. Falls back to listing date when detail didn't parse.
