@@ -486,11 +486,26 @@
             }
           }
           let deliveryPhotoUrl;
+          let deliveryPhotoBase64;
+          let deliveryPhotoMime;
           const photoImg = doc.querySelector('img[alt="Proof of delivery location"], img[src*="/delivery-photo/"]');
           const photoSrc = photoImg?.getAttribute("src") || "";
-          if (photoSrc && /^https?:\/\//i.test(photoSrc)) deliveryPhotoUrl = photoSrc;
+          if (photoSrc && /^https?:\/\//i.test(photoSrc)) {
+            deliveryPhotoUrl = photoSrc;
+            try {
+              const r = await chrome.runtime.sendMessage({ type: "FETCH_IMAGE_BYTES", url: photoSrc });
+              if (r?.base64) {
+                deliveryPhotoBase64 = r.base64;
+                deliveryPhotoMime = r.mimeType;
+              } else {
+                console.warn("[WM] photo bytes fetch failed:", r?.error);
+              }
+            } catch (e) {
+              console.warn("[WM] photo bytes fetch threw:", e);
+            }
+          }
           console.log("[WM] detail:", orderNumber, "date:", orderDate, "cost:", cost, "item:", itemDescription?.slice(0, 40), "last4:", paymentLast4 ?? "(none)", `[${last4Source}]`, "photo:", deliveryPhotoUrl ? "yes" : "no");
-          return { address, tracking: [...numbers], orderDate, cost, itemDescription, hadInternalTracking, paymentLast4, deliveryPhotoUrl };
+          return { address, tracking: [...numbers], orderDate, cost, itemDescription, hadInternalTracking, paymentLast4, deliveryPhotoUrl, deliveryPhotoBase64, deliveryPhotoMime };
         } catch (e) {
           console.log("[WM] detail fetch failed:", orderNumber, String(e));
           return { address: "", tracking: [], orderDate: null, cost: null, itemDescription: null, hadInternalTracking: false };
@@ -604,6 +619,8 @@
               if (detail.itemDescription && !order.itemDescription) order.itemDescription = detail.itemDescription;
               if (detail.paymentLast4 && !order.paymentLast4) order.paymentLast4 = detail.paymentLast4;
               if (detail.deliveryPhotoUrl) order.deliveryPhotoUrl = detail.deliveryPhotoUrl;
+              if (detail.deliveryPhotoBase64) order.deliveryPhotoBase64 = detail.deliveryPhotoBase64;
+              if (detail.deliveryPhotoMime) order.deliveryPhotoMime = detail.deliveryPhotoMime;
               if (detail.orderDate) {
                 order.orderDate = detail.orderDate;
               } else if (!order.orderDate) {

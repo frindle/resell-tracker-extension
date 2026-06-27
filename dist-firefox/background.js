@@ -250,6 +250,19 @@
           fetch(message.url, { credentials: "include" }).then((r) => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))).then((html) => sendResponse({ html })).catch((e) => sendResponse({ error: String(e) }));
           return true;
         }
+        if (message.type === "FETCH_IMAGE_BYTES") {
+          fetch(message.url, { credentials: "include" }).then(async (r) => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const buf = await r.arrayBuffer();
+            if (buf.byteLength > 5 * 1024 * 1024) throw new Error(`oversized: ${buf.byteLength} bytes`);
+            const bytes = new Uint8Array(buf);
+            let binary = "";
+            for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+            const base64 = btoa(binary);
+            sendResponse({ base64, mimeType: r.headers.get("content-type") || "image/jpeg" });
+          }).catch((e) => sendResponse({ error: String(e) }));
+          return true;
+        }
         if (message.type === "CYCLE_DATE_FILTER") {
           const tabId = sender.tab?.id;
           if (!tabId) {
@@ -880,7 +893,12 @@
             // Amazon No-Rush delivery bonus, when detected on detail page.
             ...o.noRushBonusPercent != null ? { noRushBonusPercent: o.noRushBonusPercent } : {},
             // Carrier proof-of-delivery photo URL. Server downloads + attaches.
-            ...o.deliveryPhotoUrl ? { deliveryPhotoUrl: o.deliveryPhotoUrl } : {}
+            ...o.deliveryPhotoUrl ? { deliveryPhotoUrl: o.deliveryPhotoUrl } : {},
+            // For Walmart (and any other host whose photo URL needs the user's
+            // session cookies), we ship the bytes inline so the server doesn't
+            // try to fetch and 401.
+            ...o.deliveryPhotoBase64 ? { deliveryPhotoBase64: o.deliveryPhotoBase64 } : {},
+            ...o.deliveryPhotoMime ? { deliveryPhotoMime: o.deliveryPhotoMime } : {}
           })))
         });
         if (!res.ok) {

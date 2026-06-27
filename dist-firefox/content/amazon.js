@@ -507,28 +507,10 @@
         const parsed = new Date(fallback);
         return isNaN(parsed.getTime()) ? null : parsed.toISOString();
       }
-      async function fetchOrdersPage(startIndex) {
-        return fetchHtml(`https://www.amazon.com/your-orders/orders?startIndex=${startIndex}`);
-      }
-      function waitForOrders(timeoutMs = 15e3) {
-        return new Promise((resolve) => {
-          const start = Date.now();
-          function check() {
-            const links = document.querySelectorAll('a[href*="orderID="], a[href*="orderId="], a[href*="order-details"]');
-            if (links.length > 0) {
-              console.log("[AMZ] found", links.length, "order links");
-              resolve();
-              return;
-            }
-            if (Date.now() - start > timeoutMs) {
-              console.warn("[AMZ] waitForOrders timed out \u2014 url:", location.href, "\u2014 sample links:", Array.from(document.querySelectorAll("a[href]")).slice(0, 5).map((a) => a.href));
-              resolve();
-              return;
-            }
-            setTimeout(check, 500);
-          }
-          check();
-        });
+      async function fetchOrdersPage(startIndex, year) {
+        const params = new URLSearchParams({ startIndex: String(startIndex) });
+        if (year !== void 0) params.set("timeFilter", `year-${year}`);
+        return fetchHtml(`https://www.amazon.com/your-orders/orders?${params}`);
       }
       var STATE_KEY = "__resell_sync_state__";
       var STORAGE_KEY = "amazonPendingSync";
@@ -561,39 +543,46 @@
           const sinceDate = new Date(state.sinceDate);
           const allOrders = [];
           const seen = /* @__PURE__ */ new Set();
-          sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: 0, message: "Scraping page 1\u2026" });
-          console.log("[AMZ] waiting for orders on", location.href);
-          await waitForOrders();
-          console.log("[AMZ] scraping page 1, sinceDate:", sinceDate.toISOString().split("T")[0]);
-          const page1 = scrapeDoc(document, sinceDate);
-          console.log("[AMZ] page 1 result:", page1.orders.length, "orders, hasOlder:", page1.hasOlder);
-          if (page1.orders.length) console.log("[AMZ] orders found:", page1.orders.map((o) => `${o.orderDate} #${o.orderNumber} $${o.cost} addr=${o.shippingAddress || "none"}`).join(" | "));
-          for (const o of page1.orders) {
-            if (!seen.has(o.orderNumber)) {
-              seen.add(o.orderNumber);
-              allOrders.push(o);
-            }
-          }
-          if (!page1.hasOlder && allOrders.length < 200) {
-            let nextIndex = getNextStartIndex(document);
-            let pageNum = 2;
-            while (nextIndex !== null && allOrders.length < 200 && !cancelRequested) {
-              sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Scraping page ${pageNum}\u2026` });
-              await new Promise((r) => setTimeout(r, 1500));
-              const doc = await fetchOrdersPage(nextIndex);
-              if (!doc) break;
-              const { orders, hasOlder } = scrapeDoc(doc, sinceDate);
-              for (const o of orders) {
+          const fromYear = sinceDate.getFullYear();
+          const toYear = (/* @__PURE__ */ new Date()).getFullYear();
+          console.log("[AMZ] sinceDate:", sinceDate.toISOString().split("T")[0], "\u2192 scraping years", fromYear, "to", toYear);
+          yearLoop:
+            for (let year = toYear; year >= fromYear; year--) {
+              sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Scraping ${year}, page 1\u2026` });
+              const page1Doc = await fetchOrdersPage(0, year);
+              if (!page1Doc) {
+                console.warn("[AMZ] no doc for year", year);
+                continue;
+              }
+              const page1 = scrapeDoc(page1Doc, sinceDate);
+              console.log(`[AMZ] ${year} page 1:`, page1.orders.length, "orders, hasOlder:", page1.hasOlder);
+              for (const o of page1.orders) {
                 if (!seen.has(o.orderNumber)) {
                   seen.add(o.orderNumber);
                   allOrders.push(o);
                 }
               }
-              if (hasOlder) break;
-              nextIndex = getNextStartIndex(doc);
-              pageNum++;
+              if (page1.hasOlder) break yearLoop;
+              let nextIndex = getNextStartIndex(page1Doc);
+              let pageNum = 2;
+              while (nextIndex !== null && allOrders.length < 500 && !cancelRequested) {
+                sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Scraping ${year}, page ${pageNum}\u2026` });
+                await new Promise((r) => setTimeout(r, 1500));
+                const doc = await fetchOrdersPage(nextIndex, year);
+                if (!doc) break;
+                const { orders, hasOlder } = scrapeDoc(doc, sinceDate);
+                for (const o of orders) {
+                  if (!seen.has(o.orderNumber)) {
+                    seen.add(o.orderNumber);
+                    allOrders.push(o);
+                  }
+                }
+                if (hasOlder) break yearLoop;
+                nextIndex = getNextStartIndex(doc);
+                pageNum++;
+              }
+              if (cancelRequested || allOrders.length >= 500) break;
             }
-          }
           if (allOrders.length > 0) {
             for (let i = 0; i < allOrders.length; i++) {
               if (cancelRequested) {
