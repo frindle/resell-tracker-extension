@@ -432,8 +432,14 @@ function extractOrderDateFromDoc(doc: Document, orderId: string): string | null 
   return isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
-async function fetchOrdersPage(startIndex: number): Promise<Document | null> {
-  return fetchHtml(`https://www.amazon.com/your-orders/orders?startIndex=${startIndex}`);
+async function fetchOrdersPage(startIndex: number, year?: number): Promise<Document | null> {
+  // Without timeFilter, Amazon's orders page only returns ~30 days regardless
+  // of how far back the user wants to scrape. timeFilter=year-YYYY widens
+  // it to the full calendar year. For spans that cross years, the caller
+  // iterates one year at a time.
+  const params = new URLSearchParams({ startIndex: String(startIndex) });
+  if (year !== undefined) params.set('timeFilter', `year-${year}`);
+  return fetchHtml(`https://www.amazon.com/your-orders/orders?${params}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -510,43 +516,56 @@ async function runSync(state: SyncState) {
   const allOrders: ScrapedOrder[] = [];
   const seen = new Set<string>();
 
-  sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: 0, message: 'Scraping page 1…' });
+  // Amazon's orders page only returns ~30 days unless we pin it to a
+  // year via timeFilter=year-YYYY. We iterate from the current calendar
+  // year down through sinceDate's year so a "since Jan 1 2026" sync on
+  // a July 2026 day pulls all of 2026, and a "since Aug 2025" sync also
+  // pulls 2025 after exhausting 2026.
+  const fromYear = sinceDate.getFullYear();
+  const toYear   = new Date().getFullYear();
+  console.log('[AMZ] sinceDate:', sinceDate.toISOString().split('T')[0], '→ scraping years', fromYear, 'to', toYear);
 
-  // Page 1: read live DOM (React-rendered)
-  console.log('[AMZ] waiting for orders on', location.href);
-  await waitForOrders();
-  console.log('[AMZ] scraping page 1, sinceDate:', sinceDate.toISOString().split('T')[0]);
-  const page1 = scrapeDoc(document, sinceDate);
-  console.log('[AMZ] page 1 result:', page1.orders.length, 'orders, hasOlder:', page1.hasOlder);
-  if (page1.orders.length) console.log('[AMZ] orders found:', page1.orders.map(o => `${o.orderDate} #${o.orderNumber} $${o.cost} addr=${o.shippingAddress || 'none'}`).join(' | '));
-  for (const o of page1.orders) {
-    if (!seen.has(o.orderNumber)) { seen.add(o.orderNumber); allOrders.push(o); }
-  }
+  yearLoop:
+  for (let year = toYear; year >= fromYear; year--) {
+    sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Scraping ${year}, page 1…` });
 
-  // Subsequent pages: fetch HTML directly — no navigation, no trust token burn
-  if (!page1.hasOlder && allOrders.length < 200) {
-    let nextIndex = getNextStartIndex(document);
+    // Page 1 for THIS year is fetched even if it's the current calendar
+    // year — the live DOM only has the default (~30-day) window, which
+    // doesn't help us when the user wants the whole year.
+    const page1Doc = await fetchOrdersPage(0, year);
+    if (!page1Doc) {
+      console.warn('[AMZ] no doc for year', year);
+      continue;
+    }
+    const page1 = scrapeDoc(page1Doc, sinceDate);
+    console.log(`[AMZ] ${year} page 1:`, page1.orders.length, 'orders, hasOlder:', page1.hasOlder);
+    for (const o of page1.orders) {
+      if (!seen.has(o.orderNumber)) { seen.add(o.orderNumber); allOrders.push(o); }
+    }
+    if (page1.hasOlder) break yearLoop;
+
+    let nextIndex = getNextStartIndex(page1Doc);
     let pageNum = 2;
-
-    while (nextIndex !== null && allOrders.length < 200 && !cancelRequested) {
-      sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Scraping page ${pageNum}…` });
-
-      // Small delay to be polite to Amazon's servers
+    while (nextIndex !== null && allOrders.length < 500 && !cancelRequested) {
+      sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Scraping ${year}, page ${pageNum}…` });
       await new Promise(r => setTimeout(r, 1500));
 
-      const doc = await fetchOrdersPage(nextIndex);
+      const doc = await fetchOrdersPage(nextIndex, year);
       if (!doc) break;
-
       const { orders, hasOlder } = scrapeDoc(doc, sinceDate);
       for (const o of orders) {
         if (!seen.has(o.orderNumber)) { seen.add(o.orderNumber); allOrders.push(o); }
       }
-
-      if (hasOlder) break;
+      if (hasOlder) break yearLoop;
       nextIndex = getNextStartIndex(doc);
       pageNum++;
     }
+
+    if (cancelRequested || allOrders.length >= 500) break;
   }
+  // Cap raised from 200 → 500 since a multi-year span legitimately needs
+  // more headroom. The hasOlder check stops us before we drift past
+  // sinceDate; this is just a safety cap to prevent runaway scrapes.
 
   // Fetch tracking + fill missing titles from order detail pages
   if (allOrders.length > 0) {
