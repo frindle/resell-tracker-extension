@@ -297,6 +297,10 @@
             const productLink = card.querySelector('a[href*="/dp/"], a[href*="/gp/product/"]');
             itemDescription = (productLink?.textContent ?? "").trim().slice(0, 120);
           }
+          const trackButtons = Array.from(card.querySelectorAll('a[href*="ship-track"], a[href*="progress-tracker"], a[href*="package-tracking"]')).map((a) => a.href).filter((h) => !/\/(preship|cancel-items?|return|refund|replacement)\b/i.test(h)).filter((href, i, arr) => arr.indexOf(href) === i);
+          if (trackButtons.length > 0) {
+            console.log("[AMZ] order", orderId, "has", trackButtons.length, "list-page track links");
+          }
           console.log("[AMZ] adding order", orderId, "item:", itemDescription.slice(0, 60), "cost:", cost, "last4:", paymentLast4 ?? "(none)", "cardText:", cardText.slice(0, 200));
           orders.push({
             platform: "Amazon",
@@ -308,7 +312,8 @@
             shippingAddress,
             trackingNumbers: [],
             sourceUrl: `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`,
-            paymentLast4
+            paymentLast4,
+            _listTrackingUrls: trackButtons
           });
         }
         return { orders, hasOlder };
@@ -402,7 +407,7 @@
         if (fallbackMatch) return parseMoney(fallbackMatch[1]);
         return 0;
       }
-      async function fetchOrderDetails(orderId) {
+      async function fetchOrderDetails(orderId, extraTrackingUrls = []) {
         console.log("[AMZ] fetchOrderDetails", orderId);
         const detailDoc = await fetchHtml(`https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`);
         if (!detailDoc) {
@@ -438,9 +443,13 @@
             break;
           }
         }
-        const trackingPageUrls = Array.from(detailDoc.querySelectorAll(
+        const detailPageUrls = Array.from(detailDoc.querySelectorAll(
           'a[href*="ship-track"], a[href*="progress-tracker"], a[href*="package-tracking"]'
-        )).map((a) => a.href).filter((href, i, arr) => arr.indexOf(href) === i);
+        )).map((a) => a.href).filter((h) => !/\/(preship|cancel-items?|return|refund|replacement)\b/i.test(h));
+        const trackingPageUrls = [...detailPageUrls, ...extraTrackingUrls].filter((href, i, arr) => arr.indexOf(href) === i);
+        if (extraTrackingUrls.length > 0) {
+          console.log("[AMZ]", orderId, "detail had", detailPageUrls.length, "tracking URLs, list added", extraTrackingUrls.length);
+        }
         const fromDetail = extractCarrierTracking(detailDoc);
         if (trackingPageUrls.length === 0 && fromDetail.length === 0) {
           console.log("[AMZ] no tracking pages or inline tracking for", orderId, "| title:", title || "(none)", "| addr:", address || "(none)", "| cost:", cost, "| noRush:", noRushBonusPercent ?? "-");
@@ -468,7 +477,8 @@
           }
         }
         const cleaned = [...new Set(tracking)].map((t) => /^1Z/i.test(t) ? t : t.replace(/[A-Za-z]+$/, ""));
-        const unique = [...new Set(cleaned)].filter((t) => !cleaned.some((other) => other !== t && t.startsWith(other))).slice(0, 5);
+        const cleanedNonEmpty = [...new Set(cleaned)].filter((t) => t && t.length >= 8);
+        const unique = cleanedNonEmpty.filter((t) => !cleanedNonEmpty.some((other) => other !== t && t.startsWith(other))).slice(0, 5);
         console.log("[AMZ] tracking for", orderId, ":", unique, "| title:", title || "(none)", "| addr:", address || "(none)", "| cost:", cost, "| orderDate:", orderDate, "| last4:", paymentLast4 ?? "(none)", "| photo:", deliveryPhotoUrl ? "yes" : "no");
         return { tracking: unique, title, address, cost, orderDate, paymentLast4, deliveryPhotoUrl };
       }
@@ -621,7 +631,7 @@
               const timeout = new Promise(
                 (r) => setTimeout(() => r({ tracking: [], title: "", address: "", cost: 0, orderDate: null }), 12e3)
               );
-              const { tracking, title, address, cost, orderDate, paymentLast4, noRushBonusPercent, deliveryPhotoUrl, notFound } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
+              const { tracking, title, address, cost, orderDate, paymentLast4, noRushBonusPercent, deliveryPhotoUrl, notFound } = await Promise.race([fetchOrderDetails(order.orderNumber, order._listTrackingUrls ?? []), timeout]);
               if (notFound) {
                 order._skipBusiness = true;
                 continue;

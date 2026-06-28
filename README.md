@@ -51,6 +51,11 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.63
+- **Amazon split-shipment tracking from the LIST page.** Real fix for "5 orders shipped overnight, only 1 got tracking." On split-shipment orders, Amazon's detail page often only has preship/cancel URLs because the post-ship state hasn't aggregated yet — but the orders LIST already shows a "Track package" button per shipment (`/gp/your-account/ship-track?itemId=…&packageIndex=N&orderId=…&shipmentId=…`). `scrapeDoc` now captures those URLs into a local-only `_listTrackingUrls` field on each scraped order, and `fetchOrderDetails` merges them with the detail-page URLs before walking through tracking extraction.
+- **Skip preship / cancel-items pages.** The selector `a[href*="progress-tracker"]` was matching `/progress-tracker/package/preship/cancel-items?orderID=…` URLs which contain no tracking. They burned through the 8-page budget and (for orders with ONLY preship URLs rendered) caused the whole order to end up with empty tracking. Path-keyword filter added: `preship`, `cancel-items`, `return`, `refund`, `replacement`.
+- **Reject empty tracking strings.** An empty `""` was leaking through the final dedupe (the superstring filter let it survive because every non-empty other made `"".startsWith(other)` false). Added a `length >= 8` filter before the dedupe.
+
 ### 1.1.62
 - **Hotfix: Amazon page-1 read live DOM again.** The 1.1.61 multi-year refactor switched page 1 to `fetchOrdersPage(0, year)` for all years. The fetched current-year page returned zero order links (`[AMZ] scrapeDoc found 0 order links: <empty string>`) and the entire sync stalled before tracking extraction could even start. Restore the live-DOM path for the current calendar year; past years still go through `fetchOrdersPage` with `timeFilter=year-YYYY`.
 
