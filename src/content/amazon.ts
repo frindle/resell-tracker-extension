@@ -327,11 +327,19 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
   //  - legacy ship-track URLs (?orderId=&shipmentId=)
   //  - new package-tracker URLs (/progress-tracker/package/)
   // Each shipment has its own URL; we follow both shapes.
+  //
+  // CRITICAL: Amazon's progress-tracker namespace also includes pre-ship
+  // and cancellation pages (e.g. /progress-tracker/package/preship/cancel-items)
+  // which match our `*"progress-tracker"*` selector but contain no tracking.
+  // Skip those — they consume our 8-page cap, return nothing, and worse,
+  // the user reported the entire order ending up with empty tracking when
+  // only preship URLs were present. Filter on URL path keywords.
   const trackingPageUrls = Array.from(detailDoc.querySelectorAll<HTMLAnchorElement>(
     'a[href*="ship-track"], a[href*="progress-tracker"], a[href*="package-tracking"]'
   ))
     .map(a => a.href)
-    .filter((href, i, arr) => arr.indexOf(href) === i);
+    .filter((href, i, arr) => arr.indexOf(href) === i)
+    .filter(h => !/\/(preship|cancel-items?|return|refund|replacement)\b/i.test(h));
 
   // Even with no link, scan the detail page itself — the new pt-delivery-card
   // sometimes inlines the tracking ID directly on the order page.
@@ -377,8 +385,12 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
   // UPS 1Z numbers can legitimately end in [A-Z] (last char is part of the
   // 16-char tail), so stripping there corrupts the number.
   const cleaned = [...new Set(tracking)].map(t => /^1Z/i.test(t) ? t : t.replace(/[A-Za-z]+$/, ''));
+  // Drop empty / too-short entries first — an "" was leaking through the
+  // dedupe filter (any non-empty other made startsWith(other) false, so ""
+  // survived). 8 chars is the floor for any real carrier tracking number.
+  const cleanedNonEmpty = [...new Set(cleaned)].filter(t => t && t.length >= 8);
   // Drop any entry that is a superstring of another (keep the shorter canonical form)
-  const unique = [...new Set(cleaned)].filter(t => !cleaned.some(other => other !== t && t.startsWith(other))).slice(0, 5);
+  const unique = cleanedNonEmpty.filter(t => !cleanedNonEmpty.some(other => other !== t && t.startsWith(other))).slice(0, 5);
   console.log('[AMZ] tracking for', orderId, ':', unique, '| title:', title || '(none)', '| addr:', address || '(none)', '| cost:', cost, '| orderDate:', orderDate, '| last4:', paymentLast4 ?? '(none)', '| photo:', deliveryPhotoUrl ? 'yes' : 'no');
   return { tracking: unique, title, address, cost, orderDate, paymentLast4, deliveryPhotoUrl };
 }
