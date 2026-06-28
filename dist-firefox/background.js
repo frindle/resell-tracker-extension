@@ -203,6 +203,11 @@
           sendResponse({ ok: true });
           return;
         }
+        if (message.type === "SCRAPE_LOG") {
+          const fn = message.level === "warn" ? console.warn : console.log;
+          fn(...message.args ?? []);
+          return;
+        }
         if (message.type === "SYNC_DONE" || message.type === "SYNC_ERROR") {
           const tabId = sender.tab?.id;
           if (tabId != null && openedScrapeTabs.has(tabId)) {

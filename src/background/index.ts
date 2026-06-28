@@ -174,6 +174,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return;
   }
 
+  // Content scripts forward their console.log/warn here so the scrape
+  // transcript survives the tab close. Visible via about:debugging →
+  // Inspect on the Reselling Tracker Sync extension's background page.
+  if (message.type === 'SCRAPE_LOG') {
+    const fn = message.level === 'warn' ? console.warn : console.log;
+    fn(...(message.args ?? []));
+    return;
+  }
+
   // When a scrape tab we opened finishes, close it. Small delay so the
   // user can see the result toast in the tab before it disappears.
   if (message.type === 'SYNC_DONE' || message.type === 'SYNC_ERROR') {

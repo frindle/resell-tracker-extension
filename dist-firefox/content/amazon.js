@@ -198,6 +198,36 @@
       var import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min());
       init_storage();
       init_api();
+      (function installLogForwarder() {
+        const origLog = console.log.bind(console);
+        const origWarn = console.warn.bind(console);
+        function stringifyArg(a) {
+          if (a == null) return String(a);
+          if (typeof a === "string") return a;
+          if (typeof a === "number" || typeof a === "boolean") return String(a);
+          try {
+            return JSON.stringify(a);
+          } catch {
+            return String(a);
+          }
+        }
+        console.log = (...args) => {
+          origLog(...args);
+          try {
+            chrome.runtime.sendMessage({ type: "SCRAPE_LOG", level: "log", args: args.map(stringifyArg) }).catch(() => {
+            });
+          } catch {
+          }
+        };
+        console.warn = (...args) => {
+          origWarn(...args);
+          try {
+            chrome.runtime.sendMessage({ type: "SCRAPE_LOG", level: "warn", args: args.map(stringifyArg) }).catch(() => {
+            });
+          } catch {
+          }
+        };
+      })();
       console.log("[AMZ] content script loaded", location.href);
       function parseMoney(text) {
         return parseFloat(text.replace(/[^0-9.-]/g, "")) || 0;

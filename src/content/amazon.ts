@@ -2,6 +2,33 @@ import { getSettings, setLastSync } from '../lib/storage';
 import { pushOrders } from '../lib/api';
 import type { ScrapedOrder, SyncMessage } from '../lib/types';
 
+// Mirror all console.log/warn calls to the background service worker so
+// the scrape transcript survives the tab close. Background logs them to
+// its own persistent console (visible via about:debugging → Inspect on
+// the Reselling Tracker Sync background page).
+(function installLogForwarder() {
+  const origLog = console.log.bind(console);
+  const origWarn = console.warn.bind(console);
+  function stringifyArg(a: unknown): string {
+    if (a == null) return String(a);
+    if (typeof a === 'string') return a;
+    if (typeof a === 'number' || typeof a === 'boolean') return String(a);
+    try { return JSON.stringify(a); } catch { return String(a); }
+  }
+  console.log = (...args: unknown[]) => {
+    origLog(...args);
+    try {
+      chrome.runtime.sendMessage({ type: 'SCRAPE_LOG', level: 'log', args: args.map(stringifyArg) }).catch(() => {});
+    } catch {}
+  };
+  console.warn = (...args: unknown[]) => {
+    origWarn(...args);
+    try {
+      chrome.runtime.sendMessage({ type: 'SCRAPE_LOG', level: 'warn', args: args.map(stringifyArg) }).catch(() => {});
+    } catch {}
+  };
+})();
+
 console.log('[AMZ] content script loaded', location.href);
 
 function parseMoney(text: string): number {
