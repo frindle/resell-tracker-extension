@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.68
+- **Amazon: same-origin fetch from content script.** v1.1.67 diagnostics showed pagination IS now detected (`startIndex=10`) but `fetchOrdersPage(10, 2026)` returns 0 orders — the page-2 fetch comes back as a SPA shell with no order links rendered. Theory: Amazon serves SSR HTML for same-origin requests and a CSR shell for cross-origin (Sec-Fetch-Site: cross-site) requests. Previously `fetchHtml` routed through the background SW (cross-origin); now it `fetch()`es directly from the content script which runs in amazon.com's origin. Past years worked either way because Amazon SSRs older orders regardless.
+
 ### 1.1.67
 - **Diagnostic-only: forward Amazon scrape logs to background SW.** Scrape tab auto-closes when sync completes, taking DevTools with it — so we never get to read the new `[AMZ] pagination:` diagnostics added in v1.1.66. Now the Amazon content script mirrors every `console.log`/`console.warn` to the background service worker via `chrome.runtime.sendMessage({ type: 'SCRAPE_LOG' })`, where they persist. Read them via `about:debugging` → This Firefox → Reselling Tracker Sync → Inspect → Console.
 

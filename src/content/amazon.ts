@@ -241,12 +241,20 @@ function getNextStartIndex(doc: Document): number | null {
 // ---------------------------------------------------------------------------
 
 async function fetchHtml(url: string): Promise<Document | null> {
+  // Fetch directly from the content script (amazon.com origin) rather
+  // than via the background SW. Amazon appears to serve a SPA shell
+  // (no order links rendered) when current-year requests come from a
+  // cross-origin context (Sec-Fetch-Site: cross-site). Same-origin
+  // fetches from the orders page itself get the SSR HTML the user
+  // would normally see. Past years work either way because Amazon
+  // SSRs them regardless.
   try {
-    const resp = await chrome.runtime.sendMessage({ type: 'FETCH_HTML', url });
-    if (resp?.error) { console.warn('[AMZ] fetch error', url, resp.error); return null; }
-    return new DOMParser().parseFromString(resp.html, 'text/html');
+    const r = await fetch(url, { credentials: 'same-origin' });
+    if (!r.ok) { console.warn('[AMZ] direct fetch HTTP', r.status, 'for', url); return null; }
+    const html = await r.text();
+    return new DOMParser().parseFromString(html, 'text/html');
   } catch (e) {
-    console.warn('[AMZ] fetch error', url, e);
+    console.warn('[AMZ] direct fetch error', url, e);
     return null;
   }
 }
