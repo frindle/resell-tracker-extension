@@ -563,23 +563,27 @@ async function runSync(state: SyncState) {
   for (let year = toYear; year >= fromYear; year--) {
     sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Scraping ${year}, page 1…` });
 
-    // For the CURRENT year, page 1 reads the live DOM the user already
-    // has loaded (this is the same code path that worked before the
-    // multi-year refactor). For PAST years, we have to fetch — the live
-    // DOM only has the default (~30-day) window for the year the user
-    // is currently viewing. Past-year fetch uses timeFilter=year-YYYY.
-    let page1Doc: Document | null;
-    if (year === toYear) {
+    // Always try the year-filtered fetch first — it returns the full
+    // calendar-year view with proper pagination links. For the CURRENT
+    // year, if Amazon shorts us with 0 orders (happened in v1.1.61),
+    // fall back to the live DOM the user already has loaded.
+    //
+    // Bug history: v1.1.62 used live DOM as page 1 for current year.
+    // That works for the first 9 orders, but the live DOM is the
+    // default ~30-day view with no "Next page" link, so pagination
+    // exits immediately and we miss every older order in the year.
+    let page1Doc: Document | null = await fetchOrdersPage(0, year);
+    let page1 = page1Doc ? scrapeDoc(page1Doc, sinceDate) : { orders: [], hasOlder: false };
+    if (year === toYear && page1.orders.length === 0) {
+      console.log(`[AMZ] ${year} fetched page 1 was empty, falling back to live DOM`);
       await waitForOrders();
       page1Doc = document;
-    } else {
-      page1Doc = await fetchOrdersPage(0, year);
+      page1 = scrapeDoc(page1Doc, sinceDate);
     }
     if (!page1Doc) {
       console.warn('[AMZ] no doc for year', year);
       continue;
     }
-    const page1 = scrapeDoc(page1Doc, sinceDate);
     console.log(`[AMZ] ${year} page 1:`, page1.orders.length, 'orders, hasOlder:', page1.hasOlder);
     for (const o of page1.orders) {
       if (!seen.has(o.orderNumber)) { seen.add(o.orderNumber); allOrders.push(o); }

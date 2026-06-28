@@ -579,18 +579,18 @@
           yearLoop:
             for (let year = toYear; year >= fromYear; year--) {
               sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Scraping ${year}, page 1\u2026` });
-              let page1Doc;
-              if (year === toYear) {
+              let page1Doc = await fetchOrdersPage(0, year);
+              let page1 = page1Doc ? scrapeDoc(page1Doc, sinceDate) : { orders: [], hasOlder: false };
+              if (year === toYear && page1.orders.length === 0) {
+                console.log(`[AMZ] ${year} fetched page 1 was empty, falling back to live DOM`);
                 await waitForOrders();
                 page1Doc = document;
-              } else {
-                page1Doc = await fetchOrdersPage(0, year);
+                page1 = scrapeDoc(page1Doc, sinceDate);
               }
               if (!page1Doc) {
                 console.warn("[AMZ] no doc for year", year);
                 continue;
               }
-              const page1 = scrapeDoc(page1Doc, sinceDate);
               console.log(`[AMZ] ${year} page 1:`, page1.orders.length, "orders, hasOlder:", page1.hasOlder);
               for (const o of page1.orders) {
                 if (!seen.has(o.orderNumber)) {

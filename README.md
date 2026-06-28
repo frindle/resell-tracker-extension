@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.64
+- **Amazon current-year pagination fixed.** v1.1.62's "live DOM as page 1" hotfix worked for the first 9 orders but stopped there: the live DOM is Amazon's default ~30-day view with no "Next page" link, so `getNextStartIndex(liveDom)` returned `null` and we exited the loop on page 1. Result: out of 57 orders in the year, only 9 got scraped. Switched to: try `fetchOrdersPage(0, year)` first (year-filtered view with full pagination); only fall back to live DOM when the fetched view returns 0 orders. Past years still go through the year-filtered fetch as before.
+
 ### 1.1.63
 - **Amazon split-shipment tracking from the LIST page.** Real fix for "5 orders shipped overnight, only 1 got tracking." On split-shipment orders, Amazon's detail page often only has preship/cancel URLs because the post-ship state hasn't aggregated yet — but the orders LIST already shows a "Track package" button per shipment (`/gp/your-account/ship-track?itemId=…&packageIndex=N&orderId=…&shipmentId=…`). `scrapeDoc` now captures those URLs into a local-only `_listTrackingUrls` field on each scraped order, and `fetchOrderDetails` merges them with the detail-page URLs before walking through tracking extraction.
 - **Skip preship / cancel-items pages.** The selector `a[href*="progress-tracker"]` was matching `/progress-tracker/package/preship/cancel-items?orderID=…` URLs which contain no tracking. They burned through the 8-page budget and (for orders with ONLY preship URLs rendered) caused the whole order to end up with empty tracking. Path-keyword filter added: `preship`, `cancel-items`, `return`, `refund`, `replacement`.
