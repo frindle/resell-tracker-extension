@@ -586,6 +586,15 @@ interface SyncState {
   trackerUrl: string;
   apiKey: string;
   userId: string;
+  // Current-year pagination resume — set when the script navigates the
+  // live tab to the next page (`?startIndex=N&timeFilter=year-YYYY`) and
+  // expects the new content-script instance to continue scraping from
+  // there. Past years use fetchOrdersPage (Amazon SSRs them) so they
+  // don't need navigation-based resume.
+  resumeStartIndex?: number;
+  resumeYear?: number;
+  resumeOrders?: ScrapedOrder[];
+  resumeSeen?: string[];
 }
 
 function saveState(state: SyncState) {
@@ -623,8 +632,8 @@ let cancelRequested = false;
 async function runSync(state: SyncState) {
   try {
   const sinceDate = new Date(state.sinceDate);
-  const allOrders: ScrapedOrder[] = [];
-  const seen = new Set<string>();
+  const allOrders: ScrapedOrder[] = state.resumeOrders ? [...state.resumeOrders] : [];
+  const seen = new Set<string>(state.resumeSeen ?? []);
 
   // Amazon's orders page only returns ~30 days unless we pin it to a
   // year via timeFilter=year-YYYY. We iterate from the current calendar
@@ -633,86 +642,96 @@ async function runSync(state: SyncState) {
   // pulls 2025 after exhausting 2026.
   const fromYear = sinceDate.getFullYear();
   const toYear   = new Date().getFullYear();
-  console.log('[AMZ] sinceDate:', sinceDate.toISOString().split('T')[0], '→ scraping years', fromYear, 'to', toYear);
+  const resuming = state.resumeStartIndex != null && state.resumeYear === toYear;
+  console.log('[AMZ] sinceDate:', sinceDate.toISOString().split('T')[0],
+              '→ scraping years', fromYear, 'to', toYear,
+              resuming ? `(resuming current year at startIndex=${state.resumeStartIndex})` : '');
 
-  yearLoop:
-  for (let year = toYear; year >= fromYear; year--) {
-    sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Scraping ${year}, page 1…` });
-
-    // Always try the year-filtered fetch first — it returns the full
-    // calendar-year view with proper pagination links. For the CURRENT
-    // year, if Amazon shorts us with 0 orders (happened in v1.1.61),
-    // fall back to the live DOM the user already has loaded.
-    //
-    // Bug history: v1.1.62 used live DOM as page 1 for current year.
-    // That works for the first 9 orders, but the live DOM is the
-    // default ~30-day view with no "Next page" link, so pagination
-    // exits immediately and we miss every older order in the year.
-    let page1Doc: Document | null = await fetchOrdersPage(0, year);
-    let page1 = page1Doc ? scrapeDoc(page1Doc, sinceDate) : { orders: [], hasOlder: false };
-    if (year === toYear && page1.orders.length === 0) {
-      console.log(`[AMZ] ${year} fetched page 1 was empty, falling back to live DOM`);
-      await waitForOrders();
-      page1Doc = document;
-      page1 = scrapeDoc(page1Doc, sinceDate);
+  // CURRENT YEAR — walk pages via live-tab navigation. Amazon's current-
+  // year orders page is fully React-rendered: static fetches (regardless
+  // of origin or Sec-Fetch-Site) return an empty SPA shell. The React app
+  // only populates order cards when full JS executes. So we navigate the
+  // tab itself, wait for orders to render, scrape the live DOM, save
+  // state, and `location.href` to the next page. The new content-script
+  // instance picks up via the on-load handler and resumes the loop.
+  //
+  // Past years skip this entirely (Amazon SSRs them, fetch works fine).
+  let hasOlderHit = false;
+  if (toYear >= fromYear && allOrders.length < 500 && !cancelRequested) {
+    const year = toYear;
+    if (!resuming) {
+      sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: 0, message: `Scraping ${year}, page 1…` });
+    } else {
+      sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Scraping ${year}, startIndex=${state.resumeStartIndex}…` });
     }
-    if (!page1Doc) {
-      console.warn('[AMZ] no doc for year', year);
-      continue;
-    }
-    console.log(`[AMZ] ${year} page 1:`, page1.orders.length, 'orders, hasOlder:', page1.hasOlder);
-    for (const o of page1.orders) {
+    await waitForOrders();
+    // Wait for the pagination block — Amazon lazy-injects it after the
+    // order cards render.
+    await new Promise(r => setTimeout(r, 1500));
+    const { orders, hasOlder } = scrapeDoc(document, sinceDate);
+    console.log(`[AMZ] ${year} ${resuming ? `startIndex=${state.resumeStartIndex}` : 'page 1'}:`, orders.length, 'orders, hasOlder:', hasOlder);
+    for (const o of orders) {
       if (!seen.has(o.orderNumber)) { seen.add(o.orderNumber); allOrders.push(o); }
     }
-    if (page1.hasOlder) break yearLoop;
-
-    // Wait briefly for pagination to render — Amazon sometimes lazy-injects
-    // the bottom pagination block AFTER the order cards have already loaded
-    // (so waitForOrders returns before pagination is in the DOM).
-    if (year === toYear) await new Promise(r => setTimeout(r, 1500));
-
-    let nextIndex = getNextStartIndex(page1Doc);
-    // Brute-force fallback: if no Next link was found but we got orders on
-    // page 1, assume Amazon uses 10-per-page and walk startIndex by 10
-    // until a fetch returns 0 orders. Safe because hasOlder + 500-order
-    // safety cap still bound the loop.
-    if (nextIndex === null && page1.orders.length > 0) {
-      console.log('[AMZ] no Next link found, falling back to brute-force startIndex+=10');
-      nextIndex = 10;
+    hasOlderHit = hasOlder;
+    if (!hasOlderHit) {
+      const nextIndex = getNextStartIndex(document);
+      if (nextIndex != null && allOrders.length < 500 && !cancelRequested) {
+        // Save state and navigate. Script exits; on-load handler will
+        // resume with the new live DOM.
+        console.log('[AMZ] navigating live tab → startIndex=', nextIndex);
+        sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Loading next page (startIndex=${nextIndex})…` });
+        saveState({ ...state, resumeStartIndex: nextIndex, resumeYear: year, resumeOrders: allOrders, resumeSeen: Array.from(seen) });
+        await new Promise(r => setTimeout(r, 200));
+        window.location.href = `https://www.amazon.com/your-orders/orders?startIndex=${nextIndex}&timeFilter=year-${year}`;
+        return; // Tab navigates, new content script picks up
+      }
     }
-    let pageNum = 2;
-    let blindMode = nextIndex === 10 && page1.orders.length > 0;
-    while (nextIndex !== null && allOrders.length < 500 && !cancelRequested) {
-      sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Scraping ${year}, page ${pageNum}…` });
-      await new Promise(r => setTimeout(r, 1500));
+  }
 
-      const doc = await fetchOrdersPage(nextIndex, year);
-      if (!doc) break;
-      const { orders, hasOlder } = scrapeDoc(doc, sinceDate);
-      console.log(`[AMZ] ${year} page ${pageNum}:`, orders.length, 'orders, hasOlder:', hasOlder);
-      for (const o of orders) {
+  // PAST YEARS — fetch-based (Amazon SSRs old years, so this works).
+  if (!hasOlderHit) {
+    yearLoop:
+    for (let year = toYear - 1; year >= fromYear; year--) {
+      if (cancelRequested || allOrders.length >= 500) break;
+      sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Scraping ${year}, page 1…` });
+      const page1Doc = await fetchOrdersPage(0, year);
+      if (!page1Doc) {
+        console.warn('[AMZ] no doc for year', year);
+        continue;
+      }
+      const page1 = scrapeDoc(page1Doc, sinceDate);
+      console.log(`[AMZ] ${year} page 1:`, page1.orders.length, 'orders, hasOlder:', page1.hasOlder);
+      for (const o of page1.orders) {
         if (!seen.has(o.orderNumber)) { seen.add(o.orderNumber); allOrders.push(o); }
       }
-      if (hasOlder) break yearLoop;
-      // If we got 0 orders in brute-force mode, we've run off the end.
-      if (blindMode && orders.length === 0) break;
-      const detected = getNextStartIndex(doc);
-      if (detected !== null) {
-        nextIndex = detected;
-        blindMode = false;
-      } else if (blindMode) {
-        nextIndex += 10;
-      } else {
-        nextIndex = null;
-      }
-      pageNum++;
-    }
+      if (page1.hasOlder) break yearLoop;
 
-    if (cancelRequested || allOrders.length >= 500) break;
+      let nextIndex = getNextStartIndex(page1Doc);
+      let pageNum = 2;
+      while (nextIndex !== null && allOrders.length < 500 && !cancelRequested) {
+        sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Scraping ${year}, page ${pageNum}…` });
+        await new Promise(r => setTimeout(r, 1500));
+        const doc = await fetchOrdersPage(nextIndex, year);
+        if (!doc) break;
+        const { orders, hasOlder } = scrapeDoc(doc, sinceDate);
+        console.log(`[AMZ] ${year} page ${pageNum}:`, orders.length, 'orders, hasOlder:', hasOlder);
+        for (const o of orders) {
+          if (!seen.has(o.orderNumber)) { seen.add(o.orderNumber); allOrders.push(o); }
+        }
+        if (hasOlder) break yearLoop;
+        nextIndex = getNextStartIndex(doc);
+        pageNum++;
+      }
+    }
   }
-  // Cap raised from 200 → 500 since a multi-year span legitimately needs
-  // more headroom. The hasOlder check stops us before we drift past
-  // sinceDate; this is just a safety cap to prevent runaway scrapes.
+
+  // Clear resume fields — past-year and detail fetch all happen here.
+  const finalState: SyncState = { ...state };
+  delete finalState.resumeStartIndex;
+  delete finalState.resumeYear;
+  delete finalState.resumeOrders;
+  delete finalState.resumeSeen;
 
   // Fetch tracking + fill missing titles from order detail pages
   if (allOrders.length > 0) {

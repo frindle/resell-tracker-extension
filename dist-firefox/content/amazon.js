@@ -636,70 +636,96 @@
       async function runSync(state) {
         try {
           const sinceDate = new Date(state.sinceDate);
-          const allOrders = [];
-          const seen = /* @__PURE__ */ new Set();
+          const allOrders = state.resumeOrders ? [...state.resumeOrders] : [];
+          const seen = new Set(state.resumeSeen ?? []);
           const fromYear = sinceDate.getFullYear();
           const toYear = (/* @__PURE__ */ new Date()).getFullYear();
-          console.log("[AMZ] sinceDate:", sinceDate.toISOString().split("T")[0], "\u2192 scraping years", fromYear, "to", toYear);
-          yearLoop:
-            for (let year = toYear; year >= fromYear; year--) {
-              sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Scraping ${year}, page 1\u2026` });
-              let page1Doc = await fetchOrdersPage(0, year);
-              let page1 = page1Doc ? scrapeDoc(page1Doc, sinceDate) : { orders: [], hasOlder: false };
-              if (year === toYear && page1.orders.length === 0) {
-                console.log(`[AMZ] ${year} fetched page 1 was empty, falling back to live DOM`);
-                await waitForOrders();
-                page1Doc = document;
-                page1 = scrapeDoc(page1Doc, sinceDate);
+          const resuming = state.resumeStartIndex != null && state.resumeYear === toYear;
+          console.log(
+            "[AMZ] sinceDate:",
+            sinceDate.toISOString().split("T")[0],
+            "\u2192 scraping years",
+            fromYear,
+            "to",
+            toYear,
+            resuming ? `(resuming current year at startIndex=${state.resumeStartIndex})` : ""
+          );
+          let hasOlderHit = false;
+          if (toYear >= fromYear && allOrders.length < 500 && !cancelRequested) {
+            const year = toYear;
+            if (!resuming) {
+              sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: 0, message: `Scraping ${year}, page 1\u2026` });
+            } else {
+              sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Scraping ${year}, startIndex=${state.resumeStartIndex}\u2026` });
+            }
+            await waitForOrders();
+            await new Promise((r) => setTimeout(r, 1500));
+            const { orders, hasOlder } = scrapeDoc(document, sinceDate);
+            console.log(`[AMZ] ${year} ${resuming ? `startIndex=${state.resumeStartIndex}` : "page 1"}:`, orders.length, "orders, hasOlder:", hasOlder);
+            for (const o of orders) {
+              if (!seen.has(o.orderNumber)) {
+                seen.add(o.orderNumber);
+                allOrders.push(o);
               }
-              if (!page1Doc) {
-                console.warn("[AMZ] no doc for year", year);
-                continue;
+            }
+            hasOlderHit = hasOlder;
+            if (!hasOlderHit) {
+              const nextIndex = getNextStartIndex(document);
+              if (nextIndex != null && allOrders.length < 500 && !cancelRequested) {
+                console.log("[AMZ] navigating live tab \u2192 startIndex=", nextIndex);
+                sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Loading next page (startIndex=${nextIndex})\u2026` });
+                saveState({ ...state, resumeStartIndex: nextIndex, resumeYear: year, resumeOrders: allOrders, resumeSeen: Array.from(seen) });
+                await new Promise((r) => setTimeout(r, 200));
+                window.location.href = `https://www.amazon.com/your-orders/orders?startIndex=${nextIndex}&timeFilter=year-${year}`;
+                return;
               }
-              console.log(`[AMZ] ${year} page 1:`, page1.orders.length, "orders, hasOlder:", page1.hasOlder);
-              for (const o of page1.orders) {
-                if (!seen.has(o.orderNumber)) {
-                  seen.add(o.orderNumber);
-                  allOrders.push(o);
+            }
+          }
+          if (!hasOlderHit) {
+            yearLoop:
+              for (let year = toYear - 1; year >= fromYear; year--) {
+                if (cancelRequested || allOrders.length >= 500) break;
+                sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Scraping ${year}, page 1\u2026` });
+                const page1Doc = await fetchOrdersPage(0, year);
+                if (!page1Doc) {
+                  console.warn("[AMZ] no doc for year", year);
+                  continue;
                 }
-              }
-              if (page1.hasOlder) break yearLoop;
-              if (year === toYear) await new Promise((r) => setTimeout(r, 1500));
-              let nextIndex = getNextStartIndex(page1Doc);
-              if (nextIndex === null && page1.orders.length > 0) {
-                console.log("[AMZ] no Next link found, falling back to brute-force startIndex+=10");
-                nextIndex = 10;
-              }
-              let pageNum = 2;
-              let blindMode = nextIndex === 10 && page1.orders.length > 0;
-              while (nextIndex !== null && allOrders.length < 500 && !cancelRequested) {
-                sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Scraping ${year}, page ${pageNum}\u2026` });
-                await new Promise((r) => setTimeout(r, 1500));
-                const doc = await fetchOrdersPage(nextIndex, year);
-                if (!doc) break;
-                const { orders, hasOlder } = scrapeDoc(doc, sinceDate);
-                console.log(`[AMZ] ${year} page ${pageNum}:`, orders.length, "orders, hasOlder:", hasOlder);
-                for (const o of orders) {
+                const page1 = scrapeDoc(page1Doc, sinceDate);
+                console.log(`[AMZ] ${year} page 1:`, page1.orders.length, "orders, hasOlder:", page1.hasOlder);
+                for (const o of page1.orders) {
                   if (!seen.has(o.orderNumber)) {
                     seen.add(o.orderNumber);
                     allOrders.push(o);
                   }
                 }
-                if (hasOlder) break yearLoop;
-                if (blindMode && orders.length === 0) break;
-                const detected = getNextStartIndex(doc);
-                if (detected !== null) {
-                  nextIndex = detected;
-                  blindMode = false;
-                } else if (blindMode) {
-                  nextIndex += 10;
-                } else {
-                  nextIndex = null;
+                if (page1.hasOlder) break yearLoop;
+                let nextIndex = getNextStartIndex(page1Doc);
+                let pageNum = 2;
+                while (nextIndex !== null && allOrders.length < 500 && !cancelRequested) {
+                  sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Scraping ${year}, page ${pageNum}\u2026` });
+                  await new Promise((r) => setTimeout(r, 1500));
+                  const doc = await fetchOrdersPage(nextIndex, year);
+                  if (!doc) break;
+                  const { orders, hasOlder } = scrapeDoc(doc, sinceDate);
+                  console.log(`[AMZ] ${year} page ${pageNum}:`, orders.length, "orders, hasOlder:", hasOlder);
+                  for (const o of orders) {
+                    if (!seen.has(o.orderNumber)) {
+                      seen.add(o.orderNumber);
+                      allOrders.push(o);
+                    }
+                  }
+                  if (hasOlder) break yearLoop;
+                  nextIndex = getNextStartIndex(doc);
+                  pageNum++;
                 }
-                pageNum++;
               }
-              if (cancelRequested || allOrders.length >= 500) break;
-            }
+          }
+          const finalState = { ...state };
+          delete finalState.resumeStartIndex;
+          delete finalState.resumeYear;
+          delete finalState.resumeOrders;
+          delete finalState.resumeSeen;
           if (allOrders.length > 0) {
             for (let i = 0; i < allOrders.length; i++) {
               if (cancelRequested) {

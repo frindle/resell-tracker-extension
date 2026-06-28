@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.69
+- **Amazon current-year: walk pages via live-tab navigation.** v1.1.68's same-origin fetch still came back as a SPA shell — Amazon's current-year orders page is fully React-rendered regardless of `Sec-Fetch-Site`. Static fetches just don't populate. New approach: `runSync` now uses the live tab itself for current-year pagination. Scrape the live DOM, get the Next link, save state (orders found so far, sinceDate, nextStartIndex) to `chrome.storage.local` + `sessionStorage`, then `location.href = '/your-orders/orders?startIndex=N&timeFilter=year-YYYY'`. The page reloads, the on-load handler reads the resume state, scrapes the new live DOM, and the loop continues. Past years still use `fetchOrdersPage` (Amazon SSRs old years). Bounded by the existing 500-order safety cap.
+
 ### 1.1.68
 - **Amazon: same-origin fetch from content script.** v1.1.67 diagnostics showed pagination IS now detected (`startIndex=10`) but `fetchOrdersPage(10, 2026)` returns 0 orders — the page-2 fetch comes back as a SPA shell with no order links rendered. Theory: Amazon serves SSR HTML for same-origin requests and a CSR shell for cross-origin (Sec-Fetch-Site: cross-site) requests. Previously `fetchHtml` routed through the background SW (cross-origin); now it `fetch()`es directly from the content script which runs in amazon.com's origin. Past years worked either way because Amazon SSRs older orders regardless.
 
