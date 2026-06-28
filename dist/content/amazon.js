@@ -512,6 +512,26 @@
         if (year !== void 0) params.set("timeFilter", `year-${year}`);
         return fetchHtml(`https://www.amazon.com/your-orders/orders?${params}`);
       }
+      function waitForOrders(timeoutMs = 15e3) {
+        return new Promise((resolve) => {
+          const start = Date.now();
+          function check() {
+            const links = document.querySelectorAll('a[href*="orderID="], a[href*="orderId="], a[href*="order-details"]');
+            if (links.length > 0) {
+              console.log("[AMZ] found", links.length, "order links");
+              resolve();
+              return;
+            }
+            if (Date.now() - start > timeoutMs) {
+              console.warn("[AMZ] waitForOrders timed out \u2014 url:", location.href, "\u2014 sample links:", Array.from(document.querySelectorAll("a[href]")).slice(0, 5).map((a) => a.href));
+              resolve();
+              return;
+            }
+            setTimeout(check, 500);
+          }
+          check();
+        });
+      }
       var STATE_KEY = "__resell_sync_state__";
       var STORAGE_KEY = "amazonPendingSync";
       function saveState(state) {
@@ -549,7 +569,13 @@
           yearLoop:
             for (let year = toYear; year >= fromYear; year--) {
               sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Scraping ${year}, page 1\u2026` });
-              const page1Doc = await fetchOrdersPage(0, year);
+              let page1Doc;
+              if (year === toYear) {
+                await waitForOrders();
+                page1Doc = document;
+              } else {
+                page1Doc = await fetchOrdersPage(0, year);
+              }
               if (!page1Doc) {
                 console.warn("[AMZ] no doc for year", year);
                 continue;

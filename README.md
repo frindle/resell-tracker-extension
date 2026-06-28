@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.62
+- **Hotfix: Amazon page-1 read live DOM again.** The 1.1.61 multi-year refactor switched page 1 to `fetchOrdersPage(0, year)` for all years. The fetched current-year page returned zero order links (`[AMZ] scrapeDoc found 0 order links: <empty string>`) and the entire sync stalled before tracking extraction could even start. Restore the live-DOM path for the current calendar year; past years still go through `fetchOrdersPage` with `timeFilter=year-YYYY`.
+
 ### 1.1.61
 - **Amazon: multi-year scrape via `timeFilter=year-YYYY`.** Without the param, Amazon's `/your-orders/orders` page only returns ~30 days regardless of how far back the user wants to scrape. We now iterate calendar years from the current year back to `sinceDate.getFullYear()` and pass `timeFilter=year-YYYY` on each fetch. The existing `hasOlder` check inside `scrapeDoc` ends the scrape at `sinceDate`. Page-1-from-live-DOM optimization removed (we always fetch now); cap raised 200→500 to give multi-year spans room.
 - **Walmart delivery photos: fetch bytes in background SW.** The signed Walmart photo URLs (`receipts-query.edge.walmart.com`) require the user's session cookies — server-side fetch returns HTTP 401. The background SW now fetches with `credentials: 'include'` and forwards base64 + mime back to the content script, which threads them through to `/api/import`. The server prefers the inline bytes when present and decodes directly. Amazon's S3 path is unchanged (its signed URLs are self-contained).
