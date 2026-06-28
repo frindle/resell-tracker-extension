@@ -16,6 +16,7 @@ export interface ScrapedOrder {
   deliveryPhotoBase64?: string;   // when set, server uses these bytes directly instead of fetching. Required for Walmart (URL requires session cookies); optional for Amazon (S3 URL is self-contained).
   deliveryPhotoMime?: string;     // content-type for the bytes above, e.g. "image/jpeg".
   _skipBusiness?: boolean;     // local-only: drops from push if detail page wasn't accessible (Amazon Business)
+  _listTrackingUrls?: string[]; // local-only: tracking URLs harvested from the order LIST page (Amazon split-shipment case where detail page hasn't aggregated yet)
 }
 
 export interface SyncSettings {

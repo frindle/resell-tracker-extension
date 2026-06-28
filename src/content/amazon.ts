@@ -126,6 +126,20 @@ function scrapeDoc(doc: Document, sinceDate: Date): { orders: ScrapedOrder[]; ha
       itemDescription = (productLink?.textContent ?? '').trim().slice(0, 120);
     }
 
+    // Capture "Track package" links right on the order card. For split
+    // shipments Amazon shows N of these per order on the LIST page BEFORE
+    // the detail page aggregates them. We surface these into the scraped
+    // order so fetchOrderDetails can prefer them over (or supplement) the
+    // detail-page links — which often only have preship/cancel-items
+    // URLs for split shipments where only one part has shipped.
+    const trackButtons = Array.from(card.querySelectorAll<HTMLAnchorElement>('a[href*="ship-track"], a[href*="progress-tracker"], a[href*="package-tracking"]'))
+      .map(a => a.href)
+      .filter(h => !/\/(preship|cancel-items?|return|refund|replacement)\b/i.test(h))
+      .filter((href, i, arr) => arr.indexOf(href) === i);
+    if (trackButtons.length > 0) {
+      console.log('[AMZ] order', orderId, 'has', trackButtons.length, 'list-page track links');
+    }
+
     console.log('[AMZ] adding order', orderId, 'item:', itemDescription.slice(0, 60), 'cost:', cost, 'last4:', paymentLast4 ?? '(none)', 'cardText:', cardText.slice(0, 200));
     orders.push({
       platform: 'Amazon',
@@ -138,6 +152,7 @@ function scrapeDoc(doc: Document, sinceDate: Date): { orders: ScrapedOrder[]; ha
       trackingNumbers: [],
       sourceUrl: `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`,
       paymentLast4,
+      _listTrackingUrls: trackButtons,
     });
   }
 
@@ -267,7 +282,7 @@ function extractCostFromDoc(doc: Document): number {
   return 0;
 }
 
-async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string; noRushBonusPercent?: number; deliveryPhotoUrl?: string; notFound?: boolean }> {
+async function fetchOrderDetails(orderId: string, extraTrackingUrls: string[] = []): Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string; noRushBonusPercent?: number; deliveryPhotoUrl?: string; notFound?: boolean }> {
   console.log('[AMZ] fetchOrderDetails', orderId);
   const detailDoc = await fetchHtml(`https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`);
   if (!detailDoc) { console.warn('[AMZ] fetchOrderDetails: no doc for', orderId); return { tracking: [], title: '', address: '', cost: 0, orderDate: null, paymentLast4: undefined }; }
@@ -334,12 +349,19 @@ async function fetchOrderDetails(orderId: string): Promise<{ tracking: string[];
   // Skip those — they consume our 8-page cap, return nothing, and worse,
   // the user reported the entire order ending up with empty tracking when
   // only preship URLs were present. Filter on URL path keywords.
-  const trackingPageUrls = Array.from(detailDoc.querySelectorAll<HTMLAnchorElement>(
+  const detailPageUrls = Array.from(detailDoc.querySelectorAll<HTMLAnchorElement>(
     'a[href*="ship-track"], a[href*="progress-tracker"], a[href*="package-tracking"]'
   ))
     .map(a => a.href)
-    .filter((href, i, arr) => arr.indexOf(href) === i)
     .filter(h => !/\/(preship|cancel-items?|return|refund|replacement)\b/i.test(h));
+  // Merge with the list-page tracking URLs the caller passed in (split
+  // shipments — Amazon shows "Track package" buttons on the list before
+  // the detail page aggregates them). De-dupe across both sources.
+  const trackingPageUrls = [...detailPageUrls, ...extraTrackingUrls]
+    .filter((href, i, arr) => arr.indexOf(href) === i);
+  if (extraTrackingUrls.length > 0) {
+    console.log('[AMZ]', orderId, 'detail had', detailPageUrls.length, 'tracking URLs, list added', extraTrackingUrls.length);
+  }
 
   // Even with no link, scan the detail page itself — the new pt-delivery-card
   // sometimes inlines the tracking ID directly on the order page.
@@ -600,7 +622,7 @@ async function runSync(state: SyncState) {
       const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string; noRushBonusPercent?: number; deliveryPhotoUrl?: string; notFound?: boolean }>(
         r => setTimeout(() => r({ tracking: [], title: '', address: '', cost: 0, orderDate: null }), 12000)
       );
-      const { tracking, title, address, cost, orderDate, paymentLast4, noRushBonusPercent, deliveryPhotoUrl, notFound } = await Promise.race([fetchOrderDetails(order.orderNumber), timeout]);
+      const { tracking, title, address, cost, orderDate, paymentLast4, noRushBonusPercent, deliveryPhotoUrl, notFound } = await Promise.race([fetchOrderDetails(order.orderNumber, order._listTrackingUrls ?? []), timeout]);
       if (notFound) {
         // Amazon Business order or otherwise inaccessible — mark for
         // exclusion from the import so we don't pollute the orders list.
