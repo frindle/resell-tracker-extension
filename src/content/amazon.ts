@@ -160,26 +160,52 @@ function scrapeDoc(doc: Document, sinceDate: Date): { orders: ScrapedOrder[]; ha
 }
 
 function getNextStartIndex(doc: Document): number | null {
-  const nextEl = doc.querySelector(
+  const strictEl = doc.querySelector(
     '.a-pagination .a-last:not(.a-disabled) a, [aria-label="Next page"] a'
   ) as HTMLAnchorElement | null;
-  if (nextEl?.href) {
-    const m = nextEl.href.match(/startIndex=(\d+)/);
-    if (m) return parseInt(m[1]);
+  if (strictEl?.href) {
+    const m = strictEl.href.match(/startIndex=(\d+)/);
+    if (m) {
+      console.log('[AMZ] pagination: strict selector hit startIndex=', m[1]);
+      return parseInt(m[1]);
+    }
   }
-  // Fallback: scan every anchor for a "Next" link with a startIndex param.
-  // Amazon swapped pagination markup mid-2026 — the new wrapper is no
-  // longer `.a-pagination .a-last` (observed `ppx_yo2ov_dt_b_pagination_1_2`
-  // ref). Catch it by anchor text instead of wrapper class so we're not
-  // chasing markup changes every quarter.
+  // Fallback: scan every anchor with a startIndex= param. Amazon swapped
+  // wrappers (mid-2026 markup uses `ref_=ppx_yo2ov_dt_b_pagination_1_2`
+  // and no longer sits inside .a-pagination .a-last). We match by anchor
+  // text/href rather than wrapper class.
   const candidates = Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href*="startIndex="]'));
+  console.log('[AMZ] pagination: strict miss, fallback candidates =', candidates.length);
+  if (candidates.length > 0) {
+    console.log('[AMZ] pagination: candidate texts =', candidates.map(a => (a.textContent ?? '').trim().slice(0, 40)));
+    console.log('[AMZ] pagination: candidate hrefs =', candidates.map(a => a.getAttribute('href')?.slice(0, 80)));
+  }
   for (const a of candidates) {
     const text = (a.textContent ?? '').trim();
     if (/^Next\b/i.test(text) || text.includes('→')) {
       const m = a.href.match(/startIndex=(\d+)/);
-      if (m) return parseInt(m[1]);
+      if (m) {
+        console.log('[AMZ] pagination: fallback hit startIndex=', m[1], 'via text:', text.slice(0, 20));
+        return parseInt(m[1]);
+      }
     }
   }
+  // Last-ditch: pick the highest startIndex value greater than 0 among
+  // candidates. Amazon's pagination block usually has Next pointing to
+  // the largest start index visible from page 1.
+  let best = 0;
+  for (const a of candidates) {
+    const m = (a.getAttribute('href') ?? '').match(/startIndex=(\d+)/);
+    if (m) {
+      const v = parseInt(m[1]);
+      if (v > best) best = v;
+    }
+  }
+  if (best > 0) {
+    console.log('[AMZ] pagination: last-ditch picked highest startIndex=', best);
+    return best;
+  }
+  console.log('[AMZ] pagination: no Next found');
   return null;
 }
 
@@ -605,8 +631,22 @@ async function runSync(state: SyncState) {
     }
     if (page1.hasOlder) break yearLoop;
 
+    // Wait briefly for pagination to render — Amazon sometimes lazy-injects
+    // the bottom pagination block AFTER the order cards have already loaded
+    // (so waitForOrders returns before pagination is in the DOM).
+    if (year === toYear) await new Promise(r => setTimeout(r, 1500));
+
     let nextIndex = getNextStartIndex(page1Doc);
+    // Brute-force fallback: if no Next link was found but we got orders on
+    // page 1, assume Amazon uses 10-per-page and walk startIndex by 10
+    // until a fetch returns 0 orders. Safe because hasOlder + 500-order
+    // safety cap still bound the loop.
+    if (nextIndex === null && page1.orders.length > 0) {
+      console.log('[AMZ] no Next link found, falling back to brute-force startIndex+=10');
+      nextIndex = 10;
+    }
     let pageNum = 2;
+    let blindMode = nextIndex === 10 && page1.orders.length > 0;
     while (nextIndex !== null && allOrders.length < 500 && !cancelRequested) {
       sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Scraping ${year}, page ${pageNum}…` });
       await new Promise(r => setTimeout(r, 1500));
@@ -614,11 +654,22 @@ async function runSync(state: SyncState) {
       const doc = await fetchOrdersPage(nextIndex, year);
       if (!doc) break;
       const { orders, hasOlder } = scrapeDoc(doc, sinceDate);
+      console.log(`[AMZ] ${year} page ${pageNum}:`, orders.length, 'orders, hasOlder:', hasOlder);
       for (const o of orders) {
         if (!seen.has(o.orderNumber)) { seen.add(o.orderNumber); allOrders.push(o); }
       }
       if (hasOlder) break yearLoop;
-      nextIndex = getNextStartIndex(doc);
+      // If we got 0 orders in brute-force mode, we've run off the end.
+      if (blindMode && orders.length === 0) break;
+      const detected = getNextStartIndex(doc);
+      if (detected !== null) {
+        nextIndex = detected;
+        blindMode = false;
+      } else if (blindMode) {
+        nextIndex += 10;
+      } else {
+        nextIndex = null;
+      }
       pageNum++;
     }
 

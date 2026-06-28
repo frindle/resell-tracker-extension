@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.66
+- **Amazon pagination — wait for lazy injection, brute-force fallback, full diagnostics.** v1.1.65's text-based fallback still returned `null` for the user's Next anchor — either Amazon lazy-injects the pagination block after the order cards render, or the anchor's text doesn't match expectations. Three changes: (1) wait 1.5s on live DOM before reading pagination so lazy markup has a chance, (2) log fallback candidates' text/href for diagnosis, (3) brute-force fallback — when no Next link is detected but page 1 had orders, walk `startIndex += 10` until a page returns 0. Existing `hasOlder` check and 500-order cap still bound the loop.
+
 ### 1.1.65
 - **Amazon pagination selector — markup-change fallback.** v1.1.64 still stopped at 9 because Amazon changed the "Next page" wrapper. The link is no longer inside `.a-pagination .a-last` — it now ships with a `ref_=ppx_yo2ov_dt_b_pagination_1_2`-style ref attribute and unrelated parent classes. `getNextStartIndex` now falls back to scanning every `<a href*="startIndex=">` whose text starts with "Next" or contains "→", so it survives future markup churn.
 

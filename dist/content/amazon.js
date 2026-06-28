@@ -319,21 +319,45 @@
         return { orders, hasOlder };
       }
       function getNextStartIndex(doc) {
-        const nextEl = doc.querySelector(
+        const strictEl = doc.querySelector(
           '.a-pagination .a-last:not(.a-disabled) a, [aria-label="Next page"] a'
         );
-        if (nextEl?.href) {
-          const m = nextEl.href.match(/startIndex=(\d+)/);
-          if (m) return parseInt(m[1]);
+        if (strictEl?.href) {
+          const m = strictEl.href.match(/startIndex=(\d+)/);
+          if (m) {
+            console.log("[AMZ] pagination: strict selector hit startIndex=", m[1]);
+            return parseInt(m[1]);
+          }
         }
         const candidates = Array.from(doc.querySelectorAll('a[href*="startIndex="]'));
+        console.log("[AMZ] pagination: strict miss, fallback candidates =", candidates.length);
+        if (candidates.length > 0) {
+          console.log("[AMZ] pagination: candidate texts =", candidates.map((a) => (a.textContent ?? "").trim().slice(0, 40)));
+          console.log("[AMZ] pagination: candidate hrefs =", candidates.map((a) => a.getAttribute("href")?.slice(0, 80)));
+        }
         for (const a of candidates) {
           const text = (a.textContent ?? "").trim();
           if (/^Next\b/i.test(text) || text.includes("\u2192")) {
             const m = a.href.match(/startIndex=(\d+)/);
-            if (m) return parseInt(m[1]);
+            if (m) {
+              console.log("[AMZ] pagination: fallback hit startIndex=", m[1], "via text:", text.slice(0, 20));
+              return parseInt(m[1]);
+            }
           }
         }
+        let best = 0;
+        for (const a of candidates) {
+          const m = (a.getAttribute("href") ?? "").match(/startIndex=(\d+)/);
+          if (m) {
+            const v = parseInt(m[1]);
+            if (v > best) best = v;
+          }
+        }
+        if (best > 0) {
+          console.log("[AMZ] pagination: last-ditch picked highest startIndex=", best);
+          return best;
+        }
+        console.log("[AMZ] pagination: no Next found");
         return null;
       }
       async function fetchHtml(url) {
@@ -609,14 +633,21 @@
                 }
               }
               if (page1.hasOlder) break yearLoop;
+              if (year === toYear) await new Promise((r) => setTimeout(r, 1500));
               let nextIndex = getNextStartIndex(page1Doc);
+              if (nextIndex === null && page1.orders.length > 0) {
+                console.log("[AMZ] no Next link found, falling back to brute-force startIndex+=10");
+                nextIndex = 10;
+              }
               let pageNum = 2;
+              let blindMode = nextIndex === 10 && page1.orders.length > 0;
               while (nextIndex !== null && allOrders.length < 500 && !cancelRequested) {
                 sendMessage({ type: "SYNC_PROGRESS", platform: "Amazon", scraped: allOrders.length, message: `Scraping ${year}, page ${pageNum}\u2026` });
                 await new Promise((r) => setTimeout(r, 1500));
                 const doc = await fetchOrdersPage(nextIndex, year);
                 if (!doc) break;
                 const { orders, hasOlder } = scrapeDoc(doc, sinceDate);
+                console.log(`[AMZ] ${year} page ${pageNum}:`, orders.length, "orders, hasOlder:", hasOlder);
                 for (const o of orders) {
                   if (!seen.has(o.orderNumber)) {
                     seen.add(o.orderNumber);
@@ -624,7 +655,16 @@
                   }
                 }
                 if (hasOlder) break yearLoop;
-                nextIndex = getNextStartIndex(doc);
+                if (blindMode && orders.length === 0) break;
+                const detected = getNextStartIndex(doc);
+                if (detected !== null) {
+                  nextIndex = detected;
+                  blindMode = false;
+                } else if (blindMode) {
+                  nextIndex += 10;
+                } else {
+                  nextIndex = null;
+                }
                 pageNum++;
               }
               if (cancelRequested || allOrders.length >= 500) break;
