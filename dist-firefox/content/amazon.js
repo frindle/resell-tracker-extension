@@ -322,9 +322,19 @@
         const nextEl = doc.querySelector(
           '.a-pagination .a-last:not(.a-disabled) a, [aria-label="Next page"] a'
         );
-        if (!nextEl?.href) return null;
-        const m = nextEl.href.match(/startIndex=(\d+)/);
-        return m ? parseInt(m[1]) : null;
+        if (nextEl?.href) {
+          const m = nextEl.href.match(/startIndex=(\d+)/);
+          if (m) return parseInt(m[1]);
+        }
+        const candidates = Array.from(doc.querySelectorAll('a[href*="startIndex="]'));
+        for (const a of candidates) {
+          const text = (a.textContent ?? "").trim();
+          if (/^Next\b/i.test(text) || text.includes("\u2192")) {
+            const m = a.href.match(/startIndex=(\d+)/);
+            if (m) return parseInt(m[1]);
+          }
+        }
+        return null;
       }
       async function fetchHtml(url) {
         try {

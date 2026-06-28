@@ -163,9 +163,24 @@ function getNextStartIndex(doc: Document): number | null {
   const nextEl = doc.querySelector(
     '.a-pagination .a-last:not(.a-disabled) a, [aria-label="Next page"] a'
   ) as HTMLAnchorElement | null;
-  if (!nextEl?.href) return null;
-  const m = nextEl.href.match(/startIndex=(\d+)/);
-  return m ? parseInt(m[1]) : null;
+  if (nextEl?.href) {
+    const m = nextEl.href.match(/startIndex=(\d+)/);
+    if (m) return parseInt(m[1]);
+  }
+  // Fallback: scan every anchor for a "Next" link with a startIndex param.
+  // Amazon swapped pagination markup mid-2026 — the new wrapper is no
+  // longer `.a-pagination .a-last` (observed `ppx_yo2ov_dt_b_pagination_1_2`
+  // ref). Catch it by anchor text instead of wrapper class so we're not
+  // chasing markup changes every quarter.
+  const candidates = Array.from(doc.querySelectorAll<HTMLAnchorElement>('a[href*="startIndex="]'));
+  for (const a of candidates) {
+    const text = (a.textContent ?? '').trim();
+    if (/^Next\b/i.test(text) || text.includes('→')) {
+      const m = a.href.match(/startIndex=(\d+)/);
+      if (m) return parseInt(m[1]);
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

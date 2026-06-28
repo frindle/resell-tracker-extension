@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.65
+- **Amazon pagination selector — markup-change fallback.** v1.1.64 still stopped at 9 because Amazon changed the "Next page" wrapper. The link is no longer inside `.a-pagination .a-last` — it now ships with a `ref_=ppx_yo2ov_dt_b_pagination_1_2`-style ref attribute and unrelated parent classes. `getNextStartIndex` now falls back to scanning every `<a href*="startIndex=">` whose text starts with "Next" or contains "→", so it survives future markup churn.
+
 ### 1.1.64
 - **Amazon current-year pagination fixed.** v1.1.62's "live DOM as page 1" hotfix worked for the first 9 orders but stopped there: the live DOM is Amazon's default ~30-day view with no "Next page" link, so `getNextStartIndex(liveDom)` returned `null` and we exited the loop on page 1. Result: out of 57 orders in the year, only 9 got scraped. Switched to: try `fetchOrdersPage(0, year)` first (year-filtered view with full pagination); only fall back to live DOM when the fetched view returns 0 orders. Past years still go through the year-filtered fetch as before.
 
