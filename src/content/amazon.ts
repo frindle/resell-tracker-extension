@@ -529,10 +529,18 @@ async function runSync(state: SyncState) {
   for (let year = toYear; year >= fromYear; year--) {
     sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Scraping ${year}, page 1…` });
 
-    // Page 1 for THIS year is fetched even if it's the current calendar
-    // year — the live DOM only has the default (~30-day) window, which
-    // doesn't help us when the user wants the whole year.
-    const page1Doc = await fetchOrdersPage(0, year);
+    // For the CURRENT year, page 1 reads the live DOM the user already
+    // has loaded (this is the same code path that worked before the
+    // multi-year refactor). For PAST years, we have to fetch — the live
+    // DOM only has the default (~30-day) window for the year the user
+    // is currently viewing. Past-year fetch uses timeFilter=year-YYYY.
+    let page1Doc: Document | null;
+    if (year === toYear) {
+      await waitForOrders();
+      page1Doc = document;
+    } else {
+      page1Doc = await fetchOrdersPage(0, year);
+    }
     if (!page1Doc) {
       console.warn('[AMZ] no doc for year', year);
       continue;
