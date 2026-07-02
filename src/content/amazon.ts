@@ -135,6 +135,16 @@ function scrapeDoc(doc: Document, sinceDate: Date): { orders: ScrapedOrder[]; ha
       continue;
     }
 
+    // Store-pickup orders don't go to a group and shouldn't be imported.
+    // Amazon shows "Ready for pickup" / "Pick up at" / "Locker" / "Fresh
+    // Pickup" on the order card. Also skip if there's no "Ship to" address
+    // AND the card mentions any pickup phrasing — safer than either alone.
+    const pickupPhrase = /\b(?:Ready\s+for\s+pickup|Pick\s+up\s+at|Amazon\s+Locker|Fresh\s+Pickup|Store\s+Pickup|Whole\s+Foods\s+Market\b)\b/i;
+    if (pickupPhrase.test(cardText)) {
+      console.log('[AMZ] skipping store-pickup order:', orderId, '— cardText:', cardText.slice(0, 200));
+      continue;
+    }
+
     let shippingAddress = '';
     const addrMatch = cardText.match(/Ship to\s+(.+?)\s+United States/is);
     if (addrMatch) {

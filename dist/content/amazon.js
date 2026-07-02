@@ -312,6 +312,11 @@
             console.log("[AMZ] skipping promo card:", orderId, "hasApplyNow:", hasApplyNow, "promoPhrase:", promoPhrase, "\u2014 cardText:", cardText.slice(0, 200));
             continue;
           }
+          const pickupPhrase = /\b(?:Ready\s+for\s+pickup|Pick\s+up\s+at|Amazon\s+Locker|Fresh\s+Pickup|Store\s+Pickup|Whole\s+Foods\s+Market\b)\b/i;
+          if (pickupPhrase.test(cardText)) {
+            console.log("[AMZ] skipping store-pickup order:", orderId, "\u2014 cardText:", cardText.slice(0, 200));
+            continue;
+          }
           let shippingAddress = "";
           const addrMatch = cardText.match(/Ship to\s+(.+?)\s+United States/is);
           if (addrMatch) {

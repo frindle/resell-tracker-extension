@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.71
+- **Amazon + Walmart: skip store-pickup orders during scrape.** Pickup orders never ship to a group, so they don't belong in the tracker. Amazon triggers on "Ready for pickup / Pick up at / Amazon Locker / Fresh Pickup / Whole Foods Market" phrasing on the order card; Walmart triggers on "Free store pickup / Curbside pickup / Pickup at / Ready for pickup / Store Pickup". Skips run before the per-order detail fetch, so it's a real cost win too.
+
 ### 1.1.70
 - **Amazon: skip locked orders during rescrape.** Fetches `GET /api/orders/locked-order-numbers?platform=amazon` from the tracker at scrape start and drops those order numbers from `allOrders` before the per-order detail-fetch loop. Locked orders reject writes server-side anyway, so the per-order detail fetch (which is where the rescrape cost lives) is pure waste. Graceful degradation: if the endpoint is unavailable, the sync proceeds without a skip (same behavior as before).
 

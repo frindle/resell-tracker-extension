@@ -119,6 +119,13 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
     // Skip cancelled/returned orders
     if (isCancelledOrReturned(blockText)) continue;
 
+    // Skip store-pickup orders — they don't go to a group. Walmart shows
+    // "Pickup" / "Pickup at" / "Curbside" / "Free store pickup".
+    if (/\b(?:Free\s+store\s+pickup|Curbside\s+pickup|Pickup\s+at|Ready\s+for\s+pickup|Store\s+Pickup|Pickup\s+order)\b/i.test(blockText)) {
+      console.log('[WM] skipping store-pickup order:', orderNumber);
+      continue;
+    }
+
     // Total — "Total $XX.XX"
     const totalMatch = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
     const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
