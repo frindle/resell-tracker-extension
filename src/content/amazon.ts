@@ -733,6 +733,38 @@ async function runSync(state: SyncState) {
   delete finalState.resumeOrders;
   delete finalState.resumeSeen;
 
+  // Skip re-checking any order the tracker has already locked. Locked orders
+  // reject writes server-side anyway, so the per-order detail fetch (which
+  // is where the rescrape cost lives — one HTTP round-trip per order) is
+  // pure waste. This grows with backlog, so short-circuit early.
+  if (allOrders.length > 0) {
+    try {
+      const lockedRes = await fetch(`${state.trackerUrl.replace(/\/$/, '')}/api/orders/locked-order-numbers?platform=amazon`, {
+        headers: { 'X-Extension-User-Id': state.userId, 'X-API-Key': state.apiKey },
+        credentials: 'include',
+      });
+      if (lockedRes.ok) {
+        const lockedData = await lockedRes.json() as { orderNumbers?: string[] };
+        const lockedSet = new Set(lockedData.orderNumbers ?? []);
+        if (lockedSet.size > 0) {
+          const before = allOrders.length;
+          const kept: ScrapedOrder[] = [];
+          for (const o of allOrders) {
+            if (lockedSet.has(o.orderNumber)) continue;
+            kept.push(o);
+          }
+          allOrders.length = 0;
+          for (const o of kept) allOrders.push(o);
+          console.log(`[AMZ] skipping ${before - allOrders.length} locked order(s); ${allOrders.length} remain for detail fetch`);
+        }
+      } else {
+        console.warn(`[AMZ] locked-order-numbers HTTP ${lockedRes.status} — proceeding without skip`);
+      }
+    } catch (e) {
+      console.warn('[AMZ] locked-order-numbers fetch failed — proceeding without skip:', e);
+    }
+  }
+
   // Fetch tracking + fill missing titles from order detail pages
   if (allOrders.length > 0) {
     for (let i = 0; i < allOrders.length; i++) {

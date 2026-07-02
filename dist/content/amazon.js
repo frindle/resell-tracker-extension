@@ -727,6 +727,33 @@
           delete finalState.resumeOrders;
           delete finalState.resumeSeen;
           if (allOrders.length > 0) {
+            try {
+              const lockedRes = await fetch(`${state.trackerUrl.replace(/\/$/, "")}/api/orders/locked-order-numbers?platform=amazon`, {
+                headers: { "X-Extension-User-Id": state.userId, "X-API-Key": state.apiKey },
+                credentials: "include"
+              });
+              if (lockedRes.ok) {
+                const lockedData = await lockedRes.json();
+                const lockedSet = new Set(lockedData.orderNumbers ?? []);
+                if (lockedSet.size > 0) {
+                  const before = allOrders.length;
+                  const kept = [];
+                  for (const o of allOrders) {
+                    if (lockedSet.has(o.orderNumber)) continue;
+                    kept.push(o);
+                  }
+                  allOrders.length = 0;
+                  for (const o of kept) allOrders.push(o);
+                  console.log(`[AMZ] skipping ${before - allOrders.length} locked order(s); ${allOrders.length} remain for detail fetch`);
+                }
+              } else {
+                console.warn(`[AMZ] locked-order-numbers HTTP ${lockedRes.status} \u2014 proceeding without skip`);
+              }
+            } catch (e) {
+              console.warn("[AMZ] locked-order-numbers fetch failed \u2014 proceeding without skip:", e);
+            }
+          }
+          if (allOrders.length > 0) {
             for (let i = 0; i < allOrders.length; i++) {
               if (cancelRequested) {
                 console.log("[AMZ] sync cancelled during detail fetch");

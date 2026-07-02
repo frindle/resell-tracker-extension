@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.70
+- **Amazon: skip locked orders during rescrape.** Fetches `GET /api/orders/locked-order-numbers?platform=amazon` from the tracker at scrape start and drops those order numbers from `allOrders` before the per-order detail-fetch loop. Locked orders reject writes server-side anyway, so the per-order detail fetch (which is where the rescrape cost lives) is pure waste. Graceful degradation: if the endpoint is unavailable, the sync proceeds without a skip (same behavior as before).
+
 ### 1.1.69
 - **Amazon current-year: walk pages via live-tab navigation.** v1.1.68's same-origin fetch still came back as a SPA shell — Amazon's current-year orders page is fully React-rendered regardless of `Sec-Fetch-Site`. Static fetches just don't populate. New approach: `runSync` now uses the live tab itself for current-year pagination. Scrape the live DOM, get the Next link, save state (orders found so far, sinceDate, nextStartIndex) to `chrome.storage.local` + `sessionStorage`, then `location.href = '/your-orders/orders?startIndex=N&timeFilter=year-YYYY'`. The page reloads, the on-load handler reads the resume state, scrapes the new live DOM, and the loop continues. Past years still use `fetchOrdersPage` (Amazon SSRs old years). Bounded by the existing 500-order safety cap.
 
