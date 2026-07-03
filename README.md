@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.72
+- **Amazon: sync no longer hijacks other open Amazon tabs.** `loadState()` was falling back to `chrome.storage.local` (a browser-wide shared store) when sessionStorage was empty, so every other open Amazon tab picked up the fresh pending-sync state on its next page load and started running the sync too. Fixed by removing the fallback — sessionStorage is per-tab, so only the initiating tab (which set the state via `saveState()`) auto-resumes across the pagination navigations. New-tab-from-popup flow still works because the background SW sends `START_SYNC` to the specific tab it opened, which then writes to that tab's sessionStorage.
+
 ### 1.1.71
 - **Amazon + Walmart: skip store-pickup orders during scrape.** Pickup orders never ship to a group, so they don't belong in the tracker. Amazon triggers on "Ready for pickup / Pick up at / Amazon Locker / Fresh Pickup / Whole Foods Market" phrasing on the order card; Walmart triggers on "Free store pickup / Curbside pickup / Pickup at / Ready for pickup / Store Pickup". Skips run before the per-order detail fetch, so it's a real cost win too.
 

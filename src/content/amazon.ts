@@ -613,16 +613,22 @@ function saveState(state: SyncState) {
 }
 
 async function loadState(): Promise<SyncState | null> {
-  // Prefer sessionStorage (same tab); fall back to chrome.storage (new tab from popup)
+  // sessionStorage is per-tab. That's exactly the isolation we want:
+  // only the tab that actually initiated the sync should auto-resume on
+  // page load. Falling back to chrome.storage.local (a browser-wide
+  // shared store) caused every OTHER open Amazon tab to see the fresh
+  // pending state and hijack it — a user with 3 Amazon tabs open would
+  // watch all 3 start syncing. The initiating tab's sessionStorage
+  // survives the same-tab window.location.href navigations we use for
+  // current-year pagination, so nothing is lost.
+  //
+  // The "new tab from popup" flow doesn't rely on this fallback either:
+  // the background SW opens a fresh tab, waits for load, and sends
+  // START_SYNC directly to it — which triggers startSync() → saveState()
+  // → sessionStorage in that specific tab.
   try {
     const raw = sessionStorage.getItem(STATE_KEY);
     if (raw) return JSON.parse(raw);
-  } catch { /* ignore */ }
-  try {
-    const result = await chrome.storage.local.get(STORAGE_KEY);
-    const stored = result[STORAGE_KEY] as (SyncState & { ts: number }) | undefined;
-    // Only use if fresh (within last 2 minutes) — avoids stale state from a previous session
-    if (stored && Date.now() - stored.ts < 2 * 60 * 1000) return stored;
   } catch { /* ignore */ }
   return null;
 }

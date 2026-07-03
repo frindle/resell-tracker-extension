@@ -624,12 +624,6 @@
           if (raw) return JSON.parse(raw);
         } catch {
         }
-        try {
-          const result = await chrome.storage.local.get(STORAGE_KEY);
-          const stored = result[STORAGE_KEY];
-          if (stored && Date.now() - stored.ts < 2 * 60 * 1e3) return stored;
-        } catch {
-        }
         return null;
       }
       function clearState() {
