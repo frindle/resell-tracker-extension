@@ -907,8 +907,35 @@ async function scrapeAmazonOrders(orderNumbers: string[]): Promise<{ scraped: nu
     throw new Error('Tracker URL or user not configured — open Settings.');
   }
 
+  // Same skip-locked pattern as the main sync — a manual rescrape of
+  // a locked order costs a full detail fetch for no gain (server rejects
+  // the write). Cheap upfront filter.
+  const trackerBase = settings.trackerUrl.replace(/\/$/, '');
+  let filtered = [...orderNumbers];
+  try {
+    const lockedRes = await fetch(`${trackerBase}/api/orders/locked-order-numbers?platform=amazon`, {
+      headers: { 'X-Extension-User-Id': settings.userId, 'X-API-Key': settings.apiKey ?? '' },
+      credentials: 'include',
+    });
+    if (lockedRes.ok) {
+      const lockedData = await lockedRes.json() as { orderNumbers?: string[] };
+      const lockedSet = new Set(lockedData.orderNumbers ?? []);
+      if (lockedSet.size > 0) {
+        const before = filtered.length;
+        filtered = filtered.filter(id => !lockedSet.has(id));
+        if (before !== filtered.length) {
+          console.log(`[AMZ] SCRAPE_AMAZON_ORDER: skipping ${before - filtered.length} locked; ${filtered.length} remain`);
+        }
+      }
+    } else {
+      console.warn(`[AMZ] SCRAPE_AMAZON_ORDER: locked-order-numbers HTTP ${lockedRes.status} — proceeding without skip`);
+    }
+  } catch (e) {
+    console.warn('[AMZ] SCRAPE_AMAZON_ORDER: locked-order-numbers fetch failed — proceeding without skip:', e);
+  }
+
   const orders: ScrapedOrder[] = [];
-  for (const orderId of orderNumbers) {
+  for (const orderId of filtered) {
     console.log('[AMZ] SCRAPE_AMAZON_ORDER: fetching', orderId);
     const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string }>(
       r => setTimeout(() => r({ tracking: [], title: '', address: '', cost: 0, orderDate: null }), 20000)

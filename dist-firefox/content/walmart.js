@@ -282,6 +282,10 @@
             continue;
           }
           if (isCancelledOrReturned(blockText)) continue;
+          if (/\b(?:Free\s+store\s+pickup|Curbside\s+pickup|Pickup\s+at|Ready\s+for\s+pickup|Store\s+Pickup|Pickup\s+order)\b/i.test(blockText)) {
+            console.log("[WM] skipping store-pickup order:", orderNumber);
+            continue;
+          }
           const totalMatch = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
           const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
           const productNameEl = block.querySelector('[data-testid="productName"]');

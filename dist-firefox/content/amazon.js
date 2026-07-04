@@ -312,6 +312,11 @@
             console.log("[AMZ] skipping promo card:", orderId, "hasApplyNow:", hasApplyNow, "promoPhrase:", promoPhrase, "\u2014 cardText:", cardText.slice(0, 200));
             continue;
           }
+          const pickupPhrase = /\b(?:Ready\s+for\s+pickup|Pick\s+up\s+at|Amazon\s+Locker|Fresh\s+Pickup|Store\s+Pickup|Whole\s+Foods\s+Market\b)\b/i;
+          if (pickupPhrase.test(cardText)) {
+            console.log("[AMZ] skipping store-pickup order:", orderId, "\u2014 cardText:", cardText.slice(0, 200));
+            continue;
+          }
           let shippingAddress = "";
           const addrMatch = cardText.match(/Ship to\s+(.+?)\s+United States/is);
           if (addrMatch) {
@@ -619,12 +624,6 @@
           if (raw) return JSON.parse(raw);
         } catch {
         }
-        try {
-          const result = await chrome.storage.local.get(STORAGE_KEY);
-          const stored = result[STORAGE_KEY];
-          if (stored && Date.now() - stored.ts < 2 * 60 * 1e3) return stored;
-        } catch {
-        }
         return null;
       }
       function clearState() {
@@ -726,6 +725,33 @@
           delete finalState.resumeYear;
           delete finalState.resumeOrders;
           delete finalState.resumeSeen;
+          if (allOrders.length > 0) {
+            try {
+              const lockedRes = await fetch(`${state.trackerUrl.replace(/\/$/, "")}/api/orders/locked-order-numbers?platform=amazon`, {
+                headers: { "X-Extension-User-Id": state.userId, "X-API-Key": state.apiKey },
+                credentials: "include"
+              });
+              if (lockedRes.ok) {
+                const lockedData = await lockedRes.json();
+                const lockedSet = new Set(lockedData.orderNumbers ?? []);
+                if (lockedSet.size > 0) {
+                  const before = allOrders.length;
+                  const kept = [];
+                  for (const o of allOrders) {
+                    if (lockedSet.has(o.orderNumber)) continue;
+                    kept.push(o);
+                  }
+                  allOrders.length = 0;
+                  for (const o of kept) allOrders.push(o);
+                  console.log(`[AMZ] skipping ${before - allOrders.length} locked order(s); ${allOrders.length} remain for detail fetch`);
+                }
+              } else {
+                console.warn(`[AMZ] locked-order-numbers HTTP ${lockedRes.status} \u2014 proceeding without skip`);
+              }
+            } catch (e) {
+              console.warn("[AMZ] locked-order-numbers fetch failed \u2014 proceeding without skip:", e);
+            }
+          }
           if (allOrders.length > 0) {
             for (let i = 0; i < allOrders.length; i++) {
               if (cancelRequested) {
@@ -829,8 +855,31 @@
         if (!settings.trackerUrl || !settings.userId) {
           throw new Error("Tracker URL or user not configured \u2014 open Settings.");
         }
+        const trackerBase = settings.trackerUrl.replace(/\/$/, "");
+        let filtered = [...orderNumbers];
+        try {
+          const lockedRes = await fetch(`${trackerBase}/api/orders/locked-order-numbers?platform=amazon`, {
+            headers: { "X-Extension-User-Id": settings.userId, "X-API-Key": settings.apiKey ?? "" },
+            credentials: "include"
+          });
+          if (lockedRes.ok) {
+            const lockedData = await lockedRes.json();
+            const lockedSet = new Set(lockedData.orderNumbers ?? []);
+            if (lockedSet.size > 0) {
+              const before = filtered.length;
+              filtered = filtered.filter((id) => !lockedSet.has(id));
+              if (before !== filtered.length) {
+                console.log(`[AMZ] SCRAPE_AMAZON_ORDER: skipping ${before - filtered.length} locked; ${filtered.length} remain`);
+              }
+            }
+          } else {
+            console.warn(`[AMZ] SCRAPE_AMAZON_ORDER: locked-order-numbers HTTP ${lockedRes.status} \u2014 proceeding without skip`);
+          }
+        } catch (e) {
+          console.warn("[AMZ] SCRAPE_AMAZON_ORDER: locked-order-numbers fetch failed \u2014 proceeding without skip:", e);
+        }
         const orders = [];
-        for (const orderId of orderNumbers) {
+        for (const orderId of filtered) {
           console.log("[AMZ] SCRAPE_AMAZON_ORDER: fetching", orderId);
           const timeout = new Promise(
             (r) => setTimeout(() => r({ tracking: [], title: "", address: "", cost: 0, orderDate: null }), 2e4)
