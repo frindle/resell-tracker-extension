@@ -855,8 +855,31 @@
         if (!settings.trackerUrl || !settings.userId) {
           throw new Error("Tracker URL or user not configured \u2014 open Settings.");
         }
+        const trackerBase = settings.trackerUrl.replace(/\/$/, "");
+        let filtered = [...orderNumbers];
+        try {
+          const lockedRes = await fetch(`${trackerBase}/api/orders/locked-order-numbers?platform=amazon`, {
+            headers: { "X-Extension-User-Id": settings.userId, "X-API-Key": settings.apiKey ?? "" },
+            credentials: "include"
+          });
+          if (lockedRes.ok) {
+            const lockedData = await lockedRes.json();
+            const lockedSet = new Set(lockedData.orderNumbers ?? []);
+            if (lockedSet.size > 0) {
+              const before = filtered.length;
+              filtered = filtered.filter((id) => !lockedSet.has(id));
+              if (before !== filtered.length) {
+                console.log(`[AMZ] SCRAPE_AMAZON_ORDER: skipping ${before - filtered.length} locked; ${filtered.length} remain`);
+              }
+            }
+          } else {
+            console.warn(`[AMZ] SCRAPE_AMAZON_ORDER: locked-order-numbers HTTP ${lockedRes.status} \u2014 proceeding without skip`);
+          }
+        } catch (e) {
+          console.warn("[AMZ] SCRAPE_AMAZON_ORDER: locked-order-numbers fetch failed \u2014 proceeding without skip:", e);
+        }
         const orders = [];
-        for (const orderId of orderNumbers) {
+        for (const orderId of filtered) {
           console.log("[AMZ] SCRAPE_AMAZON_ORDER: fetching", orderId);
           const timeout = new Promise(
             (r) => setTimeout(() => r({ tracking: [], title: "", address: "", cost: 0, orderDate: null }), 2e4)

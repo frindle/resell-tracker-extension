@@ -51,6 +51,9 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.73
+- **Amazon: single-order rescrapes now respect the locked list too.** 1.1.70 added the skip to the main sync loop, but `scrapeAmazonOrders()` — the manual-rescrape entry point — never got the same filter, so re-triggering a scrape on a locked order still cost a full detail fetch. Now filters the incoming order-number list against `GET /api/orders/locked-order-numbers?platform=amazon` before the detail-fetch loop.
+
 ### 1.1.72
 - **Amazon: sync no longer hijacks other open Amazon tabs.** `loadState()` was falling back to `chrome.storage.local` (a browser-wide shared store) when sessionStorage was empty, so every other open Amazon tab picked up the fresh pending-sync state on its next page load and started running the sync too. Fixed by removing the fallback — sessionStorage is per-tab, so only the initiating tab (which set the state via `saveState()`) auto-resumes across the pagination navigations. New-tab-from-popup flow still works because the background SW sends `START_SYNC` to the specific tab it opened, which then writes to that tab's sessionStorage.
 
