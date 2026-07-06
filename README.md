@@ -51,6 +51,10 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.74
+- **Fix: API_LOG messages crashed the background handler.** `appendApiLog()` returned nothing but the message handler called `.catch()` on it — a TypeError on every spy-panel API log entry. It now returns the write-queue promise.
+- Popup sync summaries: `SyncResult`/`ImportResult` types now include the `verified` (Walmart) and `receiptsLinked`/`receiptsUnlinked` (Costco) counts the content scripts were already sending; `npx tsc --noEmit` is clean again.
+
 ### 1.1.73
 - **Amazon: single-order rescrapes now respect the locked list too.** 1.1.70 added the skip to the main sync loop, but `scrapeAmazonOrders()` — the manual-rescrape entry point — never got the same filter, so re-triggering a scrape on a locked order still cost a full detail fetch. Now filters the incoming order-number list against `GET /api/orders/locked-order-numbers?platform=amazon` before the detail-fetch loop.
 
