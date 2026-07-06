@@ -4,7 +4,7 @@ console.log('[CST-INT] interceptor script executing');
 
 (function () {
   // Save pristine fetch before any page scripts wrap it
-  (window as Record<string, unknown>).__origFetch = window.fetch.bind(window);
+  (window as unknown as Record<string, unknown>).__origFetch = window.fetch.bind(window);
   console.log('[CST-INT] __origFetch saved, interceptor installed');
 
   function headersToPlain(h: HeadersInit | undefined): Record<string, string> {
@@ -32,12 +32,12 @@ console.log('[CST-INT] interceptor script executing');
     console.log('[CST-INT] all headers:', JSON.stringify(headers));
     if (auth.startsWith('Bearer ') && clientId) {
       console.log('[CST-INT] captured ecom-api auth token');
-      (window as Record<string, unknown>).__costcoAuth = { token: auth.slice(7), clientId, allHeaders: { ...headers } };
+      (window as unknown as Record<string, unknown>).__costcoAuth = { token: auth.slice(7), clientId, allHeaders: { ...headers } };
     }
   }
 
   // Wrap fetch
-  const origFetch = (window as Record<string, unknown>).__origFetch as typeof fetch;
+  const origFetch = (window as unknown as Record<string, unknown>).__origFetch as typeof fetch;
   window.fetch = async function (input, init) {
     const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
     tryCapture(url, headersToPlain(init?.headers));
@@ -46,7 +46,7 @@ console.log('[CST-INT] interceptor script executing');
       console.log('[CST-INT] response ←', url, res.status, res.ok ? 'OK' : 'FAIL');
       if (res.ok && url.includes('order/v1/orders/graphql')) {
         res.clone().json().then((data: Record<string, unknown>) => {
-          const w = window as Record<string, unknown>;
+          const w = window as unknown as Record<string, unknown>;
           const rc = (data?.data as Record<string, unknown>)?.receiptsWithCounts as { receipts?: Record<string, unknown>[] } | undefined;
           if (rc) {
             const receipts = rc.receipts ?? [];
@@ -101,7 +101,7 @@ console.log('[CST-INT] interceptor script executing');
         if (this.status < 400 && url.includes('order/v1/orders/graphql')) {
           try {
             const data = JSON.parse(this.responseText);
-            const w = window as Record<string, unknown>;
+            const w = window as unknown as Record<string, unknown>;
 
             const pages = data?.data?.getOnlineOrders;
             if (Array.isArray(pages)) {

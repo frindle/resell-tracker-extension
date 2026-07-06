@@ -4,6 +4,7 @@ export interface ImportResult {
   imported: number;
   updated: number;
   skipped: number;
+  verified?: number; // present on Walmart pushes (receipt-verified orders)
   eventId?: number | null;
 }
 

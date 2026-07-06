@@ -41,6 +41,10 @@ export interface SyncResult {
   scraped: number;
   imported: number;
   updated: number;
+  skipped?: number;
+  verified?: number;         // Walmart: orders confirmed against receipts
+  receiptsLinked?: number;   // Costco: receipts matched to orders
+  receiptsUnlinked?: number; // Costco: receipts with no matching order
   eventId?: number | null;
   error?: string;
 }

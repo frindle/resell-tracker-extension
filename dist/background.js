@@ -430,6 +430,7 @@
         });
         void forwardErrorIfRelevant(entry);
         void triggerCommitmentSyncIfRelevant(entry);
+        return _apiLogQueue;
       }
       var _commitmentSyncTimer = null;
       async function triggerCommitmentSyncIfRelevant(entry) {

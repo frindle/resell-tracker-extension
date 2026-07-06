@@ -98,12 +98,12 @@ async function triggerSyncInBackground(platform: string, activeTabId?: number, a
 
     const loadStart = Date.now();
     const loadResult = await new Promise<'complete' | 'timeout'>(resolve => {
-      let tabListener: (tabId: number, info: chrome.tabs.TabChangeInfo) => void;
+      let tabListener: (tabId: number, info: { status?: string }) => void;
       const timeout = setTimeout(() => {
         chrome.tabs.onUpdated.removeListener(tabListener);
         resolve('timeout');
       }, 10000);
-      tabListener = (tabId: number, info: chrome.tabs.TabChangeInfo) => {
+      tabListener = (tabId: number, info: { status?: string }) => {
         if (tabId === targetTabId && info.status === 'complete') {
           chrome.tabs.onUpdated.removeListener(tabListener);
           clearTimeout(timeout);
@@ -290,7 +290,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.scripting.executeScript({
       target: { tabId },
       world: 'MAIN',
-      func: () => (window as Record<string, unknown>).__costcoAllOrders ?? null,
+      func: () => (window as unknown as Record<string, unknown>).__costcoAllOrders ?? null,
     }).then(results => sendResponse(results[0]?.result ?? null))
       .catch(() => sendResponse(null));
     return true;
@@ -303,8 +303,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       target: { tabId },
       world: 'MAIN',
       func: () => ({
-        list: (window as Record<string, unknown>).__costcoReceiptList ?? [],
-        details: (window as Record<string, unknown>).__costcoReceiptDetails ?? {},
+        list: (window as unknown as Record<string, unknown>).__costcoReceiptList ?? [],
+        details: (window as unknown as Record<string, unknown>).__costcoReceiptDetails ?? {},
       }),
     }).then(results => sendResponse(results[0]?.result ?? null))
       .catch(() => sendResponse(null));
@@ -329,7 +329,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.scripting.executeScript({
       target: { tabId },
       world: 'MAIN',
-      func: () => (window as Record<string, unknown>).__costcoAuth as { token: string; clientId: string } | undefined,
+      func: () => (window as unknown as Record<string, unknown>).__costcoAuth as { token: string; clientId: string } | undefined,
     }).then(results => sendResponse(results[0]?.result ?? null))
       .catch(() => sendResponse(null));
     return true;
@@ -420,7 +420,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 let _apiLogQueue: Promise<void> = Promise.resolve();
-function appendApiLog(entry: Record<string, unknown>) {
+function appendApiLog(entry: Record<string, unknown>): Promise<void> {
   _apiLogQueue = _apiLogQueue.then(async () => {
     const stored = await chrome.storage.local.get(['apiLogs', 'apiLogNextId']);
     const logs = (stored.apiLogs as Record<string, unknown>[] | undefined) ?? [];
@@ -439,6 +439,8 @@ function appendApiLog(entry: Record<string, unknown>) {
   // 3 to 6 on bg.com doesn't show up locally until the user clicks "Sync
   // from BG" manually — which they keep forgetting.
   void triggerCommitmentSyncIfRelevant(entry);
+
+  return _apiLogQueue;
 }
 
 // Debounce — bg.com fires edit_commitment per change, but the user may
@@ -548,7 +550,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
 
 // Runs in MAIN world — finds Costco's MSAL instance and calls acquireTokenSilent
 async function inPageGetMsalToken(): Promise<string | null> {
-  const w = window as Record<string, unknown>;
+  const w = window as unknown as Record<string, unknown>;
 
   // Log all window keys that look auth/token related so we can identify the instance
   const interesting: string[] = [];
@@ -632,7 +634,7 @@ async function inPageCycleDateFilter(sinceDate: string): Promise<number> {
     const periodEnd = new Date(year, endMonthIdx + 1, 0); // last day of endMonth
     if (periodEnd < since) break; // periods are newest-first, stop when past sinceDate
 
-    const before = (window as Record<string, unknown>).__costcoAllOrders as unknown[] | undefined;
+    const before = (window as unknown as Record<string, unknown>).__costcoAllOrders as unknown[] | undefined;
     const beforeLen = before?.length ?? 0;
 
     sel.value = sel.options[i].value || text;
@@ -645,7 +647,7 @@ async function inPageCycleDateFilter(sinceDate: string): Promise<number> {
       let waited = 0;
       const interval = setInterval(() => {
         waited += 200;
-        const current = (window as Record<string, unknown>).__costcoAllOrders as unknown[] | undefined;
+        const current = (window as unknown as Record<string, unknown>).__costcoAllOrders as unknown[] | undefined;
         if ((current?.length ?? 0) > beforeLen || waited >= 8000) {
           clearInterval(interval);
           resolve();
@@ -771,12 +773,12 @@ async function runAmazonOrderSync(orderNumbers: string[]): Promise<unknown> {
     if (!newTab.id) throw new Error('failed to open Amazon tab');
     targetTabId = newTab.id;
     await new Promise<void>(resolve => {
-      let tabListener: (tabId: number, info: chrome.tabs.TabChangeInfo) => void;
+      let tabListener: (tabId: number, info: { status?: string }) => void;
       const timeout = setTimeout(() => {
         chrome.tabs.onUpdated.removeListener(tabListener);
         resolve();
       }, 15000);
-      tabListener = (tabId: number, info: chrome.tabs.TabChangeInfo) => {
+      tabListener = (tabId: number, info: { status?: string }) => {
         if (tabId === targetTabId && info.status === 'complete') {
           chrome.tabs.onUpdated.removeListener(tabListener);
           clearTimeout(timeout);
