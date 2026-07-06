@@ -4,3 +4,4 @@ node_modules/
 .memsearch/
 .env
 amo_sign.py
+.DS_Store
