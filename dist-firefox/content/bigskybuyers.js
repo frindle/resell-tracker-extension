@@ -196,6 +196,16 @@
         if (!Array.isArray(items)) throw new Error("Unexpected BigSky tRPC response shape");
         return items;
       }
+      async function fetchNotCheckedInTracking() {
+        const input = encodeURIComponent(JSON.stringify({ "0": { json: null, meta: { values: ["undefined"] } } }));
+        const url = `https://www.bigskybuyers.com/api/trpc/tracking.getNotCheckedInTracking?batch=1&input=${input}`;
+        const res = await fetch(url, { credentials: "include" });
+        if (!res.ok) throw new Error(`BigSky tRPC error ${res.status}`);
+        const json = await res.json();
+        const items = json?.[0]?.result?.data?.json;
+        if (!Array.isArray(items)) throw new Error("Unexpected BigSky tRPC response shape");
+        return items;
+      }
       function groupByTracking(items) {
         const map = /* @__PURE__ */ new Map();
         for (const item of items) {
@@ -249,6 +259,7 @@
           broadcast({ type: "SYNC_STARTED", platform: "BigSkyBuyers" });
           const items = await fetchScanItems();
           const groups = groupByTracking(items);
+          const notCheckedIn = await fetchNotCheckedInTracking().catch(() => []);
           broadcast({
             type: "SYNC_PROGRESS",
             platform: "BigSkyBuyers",
@@ -260,7 +271,8 @@
             trackerUrl: settings.trackerUrl,
             apiKey: settings.apiKey,
             userId: settings.userId,
-            groups
+            groups,
+            notCheckedInTracking: notCheckedIn.map((r) => r.tracking)
           });
           if (result?.error) throw new Error(result.error);
           await setLastSync("bigsky", (/* @__PURE__ */ new Date()).toISOString().split("T")[0]);

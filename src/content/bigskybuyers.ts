@@ -8,6 +8,18 @@ interface ScanItem {
   paymentDate: string | null;
 }
 
+// Verified via a captured API-spy response (real submitted-but-unscanned
+// tracking number): { tracking, trackingCreated, trackingId, carrier }.
+// Note the tracking-number field is "tracking" here, NOT "trackingNumber"
+// like every other BigSky endpoint — don't assume field-name consistency
+// across their tRPC procedures.
+interface NotCheckedInRow {
+  tracking: string;
+  trackingCreated: string;
+  trackingId: number;
+  carrier: string;
+}
+
 interface SyncGroup {
   trackingNumber: string;
   itemDescription: string;
@@ -26,6 +38,17 @@ async function fetchScanItems(): Promise<ScanItem[]> {
   const res = await fetch(url, { credentials: 'include' });
   if (!res.ok) throw new Error(`BigSky tRPC error ${res.status}`);
   const json = await res.json() as [{ result?: { data?: { json?: ScanItem[] } }; error?: unknown }];
+  const items = json?.[0]?.result?.data?.json;
+  if (!Array.isArray(items)) throw new Error('Unexpected BigSky tRPC response shape');
+  return items;
+}
+
+async function fetchNotCheckedInTracking(): Promise<NotCheckedInRow[]> {
+  const input = encodeURIComponent(JSON.stringify({ '0': { json: null, meta: { values: ['undefined'] } } }));
+  const url = `https://www.bigskybuyers.com/api/trpc/tracking.getNotCheckedInTracking?batch=1&input=${input}`;
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) throw new Error(`BigSky tRPC error ${res.status}`);
+  const json = await res.json() as [{ result?: { data?: { json?: NotCheckedInRow[] } }; error?: unknown }];
   const items = json?.[0]?.result?.data?.json;
   if (!Array.isArray(items)) throw new Error('Unexpected BigSky tRPC response shape');
   return items;
@@ -85,6 +108,9 @@ async function runSync() {
 
     const items = await fetchScanItems();
     const groups = groupByTracking(items);
+    // Best-effort: a fetch failure here shouldn't block the scan-data sync,
+    // which is the primary purpose of this run.
+    const notCheckedIn = await fetchNotCheckedInTracking().catch(() => [] as NotCheckedInRow[]);
 
     broadcast({
       type: 'SYNC_PROGRESS', platform: 'BigSkyBuyers', scraped: groups.length,
@@ -97,6 +123,7 @@ async function runSync() {
       apiKey: settings.apiKey,
       userId: settings.userId,
       groups,
+      notCheckedInTracking: notCheckedIn.map(r => r.tracking),
     });
 
     if (result?.error) throw new Error(result.error);

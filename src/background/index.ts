@@ -363,7 +363,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'PUSH_BIGSKY_ORDERS') {
-    handlePushBigskyOrders(message.trackerUrl, message.apiKey, message.userId, message.groups)
+    handlePushBigskyOrders(message.trackerUrl, message.apiKey, message.userId, message.groups, message.notCheckedInTracking)
       .then(sendResponse)
       .catch(e => sendResponse({ error: String(e) }));
     return true;
@@ -882,6 +882,7 @@ async function handlePushBigskyOrders(
   apiKey: string,
   userId: string,
   groups: Array<{ trackingNumber: string; itemDescription: string; salePrice: number; scanDate: string; paymentDate: string | null }>,
+  notCheckedInTracking?: string[],
 ) {
   const url = `${upgradeUrl(trackerUrl)}/api/bigsky/sync-orders`;
   const { extensionSecret } = await import('../lib/storage').then(m => m.getSettings());
@@ -893,7 +894,7 @@ async function handlePushBigskyOrders(
       ...(apiKey ? { 'X-API-Key': apiKey } : {}),
       ...(extensionSecret ? { 'X-Extension-Secret': extensionSecret } : {}),
     },
-    body: JSON.stringify({ groups }),
+    body: JSON.stringify({ groups, notCheckedInTracking: notCheckedInTracking ?? [] }),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);

@@ -366,7 +366,7 @@
           return true;
         }
         if (message.type === "PUSH_BIGSKY_ORDERS") {
-          handlePushBigskyOrders(message.trackerUrl, message.apiKey, message.userId, message.groups).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
+          handlePushBigskyOrders(message.trackerUrl, message.apiKey, message.userId, message.groups, message.notCheckedInTracking).then(sendResponse).catch((e) => sendResponse({ error: String(e) }));
           return true;
         }
         if (message.type === "CBM_SCRAPE_DONE") {
@@ -820,7 +820,7 @@
         }
         return { merchants: results };
       }
-      async function handlePushBigskyOrders(trackerUrl, apiKey, userId, groups) {
+      async function handlePushBigskyOrders(trackerUrl, apiKey, userId, groups, notCheckedInTracking) {
         const url = `${upgradeUrl(trackerUrl)}/api/bigsky/sync-orders`;
         const { extensionSecret } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
         const res = await fetch(url, {
@@ -831,7 +831,7 @@
             ...apiKey ? { "X-API-Key": apiKey } : {},
             ...extensionSecret ? { "X-Extension-Secret": extensionSecret } : {}
           },
-          body: JSON.stringify({ groups })
+          body: JSON.stringify({ groups, notCheckedInTracking: notCheckedInTracking ?? [] })
         });
         if (!res.ok) {
           const text = await res.text().catch(() => res.statusText);
