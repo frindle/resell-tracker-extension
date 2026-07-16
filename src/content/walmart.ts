@@ -520,6 +520,29 @@ async function startSync() {
 
     console.log('[WM] done scraping, total orders:', allOrders.length);
 
+    // Skip locked orders — detail fetch is wasted on them (server rejects writes)
+    if (allOrders.length > 0) {
+      try {
+        const lockedRes = await fetch(`${settings.trackerUrl.replace(/\/$/, '')}/api/orders/locked-order-numbers?platform=walmart`, {
+          headers: { 'X-Extension-User-Id': settings.userId, 'X-API-Key': settings.apiKey ?? '' },
+          credentials: 'include',
+        });
+        if (lockedRes.ok) {
+          const lockedData = await lockedRes.json() as { orderNumbers?: string[] };
+          const lockedSet = new Set(lockedData.orderNumbers ?? []);
+          if (lockedSet.size > 0) {
+            const before = allOrders.length;
+            const kept = allOrders.filter(o => !lockedSet.has(o.orderNumber));
+            allOrders.length = 0;
+            for (const o of kept) allOrders.push(o);
+            console.log(`[WM] skipping ${before - allOrders.length} locked order(s); ${allOrders.length} remain`);
+          }
+        }
+      } catch (e) {
+        console.warn('[WM] locked-order-numbers fetch failed:', e);
+      }
+    }
+
     if (allOrders.length === 0) {
       setBadge('—');
       await setLastSync('walmart', new Date().toISOString().split('T')[0]);
