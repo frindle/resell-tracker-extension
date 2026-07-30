@@ -500,7 +500,7 @@ async function fetchOrderDetails(orderId: string, extraTrackingUrls: string[] = 
   // Drop any entry that is a superstring of another (keep the shorter canonical form)
   const unique = cleanedNonEmpty.filter(t => !cleanedNonEmpty.some(other => other !== t && t.startsWith(other))).slice(0, 5);
   console.log('[AMZ] tracking for', orderId, ':', unique, '| title:', title || '(none)', '| addr:', address || '(none)', '| cost:', cost, '| orderDate:', orderDate, '| last4:', paymentLast4 ?? '(none)', '| photo:', deliveryPhotoUrl ? 'yes' : 'no');
-  return { tracking: unique, title, address, cost, orderDate, paymentLast4, deliveryPhotoUrl };
+  return { tracking: unique, title, address, cost, orderDate, paymentLast4, noRushBonusPercent, deliveryPhotoUrl };
 }
 
 // Probe Amazon's order detail page for a placed timestamp. Amazon's UI usually
@@ -864,8 +864,17 @@ async function startSync() {
 
   const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
   const lastSyncDate = settings.amazonLastSync ? new Date(settings.amazonLastSync) : null;
-  // Use whichever is further back: 60 days ago or the last sync date
-  const sinceDate = lastSyncDate && lastSyncDate < sixtyDaysAgo ? lastSyncDate : sixtyDaysAgo;
+  // First sync (no lastSyncDate): fall back to the 60-day floor.
+  // Long gap (lastSyncDate older than 60 days): keep scanning back to
+  // lastSyncDate so catch-up is complete.
+  // Normal case: scan from lastSyncDate + 1-day overlap buffer, NOT the
+  // 60-day floor — forcing the floor every time re-walked the full
+  // 60-day window on every routine sync, which was the over-scrape bug.
+  const sinceDate = !lastSyncDate
+    ? sixtyDaysAgo
+    : lastSyncDate < sixtyDaysAgo
+      ? lastSyncDate
+      : new Date(lastSyncDate.getTime() - 24 * 60 * 60 * 1000);
 
   setBadge('…');
   sendMessage({ type: 'SYNC_STARTED', platform: 'Amazon' });
