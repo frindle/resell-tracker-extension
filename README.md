@@ -51,6 +51,10 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.76
+- **Fix: Amazon sync re-scraped the full 60-day window on every routine sync.** `startSync()` always used `min(lastSyncDate, 60 days ago)` as the scan floor, so once `lastSyncDate` was more recent than 60 days ago (the normal case after the first sync), the 60-day floor won every time instead of `lastSyncDate` — re-walking the whole window each sync. Now: no `lastSyncDate` (first sync) falls back to the 60-day floor; a `lastSyncDate` older than 60 days keeps scanning back to it for full catch-up; otherwise scans from `lastSyncDate` minus a 1-day overlap buffer.
+- `noRushBonusPercent` was being extracted from the Amazon order page but dropped before it reached the returned order object — card sync never saw it. Now included.
+
 ### 1.1.75
 - **BigSky: sync now confirms tracking submissions, not just requests them.** New `fetchNotCheckedInTracking()` calls `tracking.getNotCheckedInTracking` (real field shape confirmed via the spy panel: `tracking`/`trackingCreated`/`trackingId`/`carrier` — note `tracking`, not `trackingNumber`, unlike every other BigSky endpoint) and passes the list through `PUSH_BIGSKY_ORDERS` to `/api/bigsky/sync-orders`, which now flips `trackingSubmittedToBg` true for any matching order once BigSky itself confirms receipt — previously that flag was only ever set locally at submit time, with no verification it actually landed.
 

@@ -398,8 +398,27 @@
             return;
           }
         }
-        const filteredOrders = allOrders.filter((o) => new Date(o.orderDate) >= sinceDate);
+        let filteredOrders = allOrders.filter((o) => new Date(o.orderDate) >= sinceDate);
         console.log("[CST] filtered to", filteredOrders.length, "orders on/after", startDate, "(dropped", allOrders.length - filteredOrders.length, "older)");
+        if (filteredOrders.length > 0) {
+          try {
+            const lockedRes = await fetch(`${settings.trackerUrl.replace(/\/$/, "")}/api/orders/locked-order-numbers?platform=costco`, {
+              headers: { "X-Extension-User-Id": settings.userId, "X-API-Key": settings.apiKey ?? "" },
+              credentials: "include"
+            });
+            if (lockedRes.ok) {
+              const lockedData = await lockedRes.json();
+              const lockedSet = new Set(lockedData.orderNumbers ?? []);
+              if (lockedSet.size > 0) {
+                const before = filteredOrders.length;
+                filteredOrders = filteredOrders.filter((o) => !lockedSet.has(o.orderNumber));
+                console.log(`[CST] skipping ${before - filteredOrders.length} locked order(s); ${filteredOrders.length} remain`);
+              }
+            }
+          } catch (e) {
+            console.warn("[CST] locked-order-numbers fetch failed:", e);
+          }
+        }
         try {
           const result = filteredOrders.length > 0 ? await pushOrders(settings.trackerUrl, settings.apiKey ?? "", settings.userId, filteredOrders) : { imported: 0, updated: 0 };
           sendMessage({ type: "SYNC_PROGRESS", platform: "Costco", scraped: filteredOrders.length, message: "Fetching receipts\u2026" });

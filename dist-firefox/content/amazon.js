@@ -550,7 +550,7 @@
         const cleanedNonEmpty = [...new Set(cleaned)].filter((t) => t && t.length >= 8);
         const unique = cleanedNonEmpty.filter((t) => !cleanedNonEmpty.some((other) => other !== t && t.startsWith(other))).slice(0, 5);
         console.log("[AMZ] tracking for", orderId, ":", unique, "| title:", title || "(none)", "| addr:", address || "(none)", "| cost:", cost, "| orderDate:", orderDate, "| last4:", paymentLast4 ?? "(none)", "| photo:", deliveryPhotoUrl ? "yes" : "no");
-        return { tracking: unique, title, address, cost, orderDate, paymentLast4, deliveryPhotoUrl };
+        return { tracking: unique, title, address, cost, orderDate, paymentLast4, noRushBonusPercent, deliveryPhotoUrl };
       }
       function extractOrderDateFromDoc(doc, orderId) {
         const html = doc.documentElement.outerHTML;
@@ -822,7 +822,7 @@
         }
         const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1e3);
         const lastSyncDate = settings.amazonLastSync ? new Date(settings.amazonLastSync) : null;
-        const sinceDate = lastSyncDate && lastSyncDate < sixtyDaysAgo ? lastSyncDate : sixtyDaysAgo;
+        const sinceDate = !lastSyncDate ? sixtyDaysAgo : lastSyncDate < sixtyDaysAgo ? lastSyncDate : new Date(lastSyncDate.getTime() - 24 * 60 * 60 * 1e3);
         setBadge("\u2026");
         sendMessage({ type: "SYNC_STARTED", platform: "Amazon" });
         const state = {
