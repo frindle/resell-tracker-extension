@@ -26,9 +26,9 @@
     mod
   ));
 
-  // node_modules/webextension-polyfill/dist/browser-polyfill.min.js
+  // ../../../node_modules/webextension-polyfill/dist/browser-polyfill.min.js
   var require_browser_polyfill_min = __commonJS({
-    "node_modules/webextension-polyfill/dist/browser-polyfill.min.js"(exports, module) {
+    "../../../node_modules/webextension-polyfill/dist/browser-polyfill.min.js"(exports, module) {
       (function(a, b) {
         if ("function" == typeof define && define.amd) define("webextension-polyfill", ["module"], b);
         else if ("undefined" != typeof exports) b(module);

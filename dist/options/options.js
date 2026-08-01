@@ -29,9 +29,9 @@
     mod
   ));
 
-  // node_modules/webextension-polyfill/dist/browser-polyfill.min.js
+  // ../../../node_modules/webextension-polyfill/dist/browser-polyfill.min.js
   var require_browser_polyfill_min = __commonJS({
-    "node_modules/webextension-polyfill/dist/browser-polyfill.min.js"(exports, module) {
+    "../../../node_modules/webextension-polyfill/dist/browser-polyfill.min.js"(exports, module) {
       (function(a, b) {
         if ("function" == typeof define && define.amd) define("webextension-polyfill", ["module"], b);
         else if ("undefined" != typeof exports) b(module);
@@ -194,12 +194,58 @@
     }
   });
 
+  // src/lib/tracker-script.ts
+  function hostPatternFor(trackerUrl) {
+    try {
+      const u = new URL(trackerUrl.startsWith("http") ? trackerUrl : `http://${trackerUrl}`);
+      return `*://${u.hostname}/*`;
+    } catch {
+      return null;
+    }
+  }
+  async function registerTrackerScript(pattern) {
+    try {
+      await chrome.scripting.unregisterContentScripts({ ids: [TRACKER_SCRIPT_ID] });
+    } catch {
+    }
+    await chrome.scripting.registerContentScripts([{
+      id: TRACKER_SCRIPT_ID,
+      matches: [pattern],
+      js: ["content/tracker-status.js"],
+      runAt: "document_idle"
+    }]);
+  }
+  async function grantTrackerAccess(trackerUrl) {
+    const pattern = hostPatternFor(trackerUrl);
+    if (!pattern) return false;
+    const granted = await chrome.permissions.request({ origins: [pattern] });
+    if (!granted) return false;
+    await registerTrackerScript(pattern);
+    return true;
+  }
+  async function ensureTrackerScriptRegistered(trackerUrl) {
+    const pattern = hostPatternFor(trackerUrl);
+    if (!pattern) return;
+    const has = await chrome.permissions.contains({ origins: [pattern] }).catch(() => false);
+    if (!has) return;
+    await registerTrackerScript(pattern);
+  }
+  var import_browser_polyfill_min3, TRACKER_SCRIPT_ID;
+  var init_tracker_script = __esm({
+    "src/lib/tracker-script.ts"() {
+      "use strict";
+      import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min());
+      TRACKER_SCRIPT_ID = "tracker-status";
+    }
+  });
+
   // src/options/options.ts
   var require_options = __commonJS({
     "src/options/options.ts"() {
-      var import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min());
+      var import_browser_polyfill_min4 = __toESM(require_browser_polyfill_min());
       init_storage();
       init_api();
+      init_tracker_script();
       var users = [];
       async function loadUsers(trackerUrl) {
         const select = document.getElementById("userSelect");
@@ -235,11 +281,14 @@
         if (settings.trackerUrl) {
           await loadUsers(settings.trackerUrl);
           if (settings.userId) select.value = settings.userId;
+          await ensureTrackerScriptRegistered(settings.trackerUrl);
         }
         document.getElementById("connect").addEventListener("click", async () => {
           const trackerUrl = document.getElementById("trackerUrl").value.trim();
           if (!trackerUrl) return;
           await saveSettings({ trackerUrl });
+          await grantTrackerAccess(trackerUrl).catch(() => {
+          });
           await loadUsers(trackerUrl);
         });
         document.getElementById("saveUser").addEventListener("click", async () => {

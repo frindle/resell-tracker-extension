@@ -1,5 +1,6 @@
 import { getSettings, saveSettings } from '../lib/storage';
 import { fetchUsers } from '../lib/api';
+import { grantTrackerAccess, ensureTrackerScriptRegistered } from '../lib/tracker-script';
 import type { TrackerUser } from '../lib/types';
 
 let users: TrackerUser[] = [];
@@ -48,12 +49,18 @@ async function init() {
   if (settings.trackerUrl) {
     await loadUsers(settings.trackerUrl);
     if (settings.userId) select.value = settings.userId;
+    // Re-register the status-banner content script if we already hold
+    // permission for this origin (e.g. after a browser restart).
+    await ensureTrackerScriptRegistered(settings.trackerUrl);
   }
 
   document.getElementById('connect')!.addEventListener('click', async () => {
     const trackerUrl = (document.getElementById('trackerUrl') as HTMLInputElement).value.trim();
     if (!trackerUrl) return;
     await saveSettings({ trackerUrl });
+    // Ask for access to just this origin so the sync-status banner can run
+    // there, instead of the extension holding <all_urls> permanently.
+    await grantTrackerAccess(trackerUrl).catch(() => {});
     await loadUsers(trackerUrl);
   });
 

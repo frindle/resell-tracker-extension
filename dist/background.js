@@ -13,6 +13,42 @@
       __defProp(target, name, { get: all[name], enumerable: true });
   };
 
+  // src/lib/tracker-script.ts
+  function hostPatternFor(trackerUrl) {
+    try {
+      const u = new URL(trackerUrl.startsWith("http") ? trackerUrl : `http://${trackerUrl}`);
+      return `*://${u.hostname}/*`;
+    } catch {
+      return null;
+    }
+  }
+  async function registerTrackerScript(pattern) {
+    try {
+      await chrome.scripting.unregisterContentScripts({ ids: [TRACKER_SCRIPT_ID] });
+    } catch {
+    }
+    await chrome.scripting.registerContentScripts([{
+      id: TRACKER_SCRIPT_ID,
+      matches: [pattern],
+      js: ["content/tracker-status.js"],
+      runAt: "document_idle"
+    }]);
+  }
+  async function ensureTrackerScriptRegistered(trackerUrl) {
+    const pattern = hostPatternFor(trackerUrl);
+    if (!pattern) return;
+    const has = await chrome.permissions.contains({ origins: [pattern] }).catch(() => false);
+    if (!has) return;
+    await registerTrackerScript(pattern);
+  }
+  var TRACKER_SCRIPT_ID;
+  var init_tracker_script = __esm({
+    "src/lib/tracker-script.ts"() {
+      "use strict";
+      TRACKER_SCRIPT_ID = "tracker-status";
+    }
+  });
+
   // src/lib/storage.ts
   var storage_exports = {};
   __export(storage_exports, {
@@ -52,6 +88,7 @@
   // src/background/index.ts
   var require_background = __commonJS({
     "src/background/index.ts"() {
+      init_tracker_script();
       var ICON_PATHS_CHROME = { 16: "icons/icon16.png", 32: "icons/icon32.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
       var ICON_PATH_FIREFOX = "icons/icon.svg";
       var _browser = globalThis.browser;
@@ -65,16 +102,25 @@
         }
       }
       setToolbarIcon();
+      function reregisterTrackerScript() {
+        Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings()).then(({ trackerUrl }) => {
+          if (trackerUrl) ensureTrackerScriptRegistered(trackerUrl).catch(() => {
+          });
+        }).catch(() => {
+        });
+      }
       chrome.runtime.onInstalled.addListener(() => {
         console.log("[Reselling Tracker] Extension installed.");
         setToolbarIcon();
         chrome.alarms.create("pollCommands", { when: Date.now() + 2e3, periodInMinutes: 1 });
         pollAndExecuteCommands().catch(console.error);
+        reregisterTrackerScript();
       });
       chrome.runtime.onStartup.addListener(() => {
         setToolbarIcon();
         chrome.alarms.create("pollCommands", { when: Date.now() + 2e3, periodInMinutes: 1 });
         pollAndExecuteCommands().catch(console.error);
+        reregisterTrackerScript();
       });
       chrome.alarms.onAlarm.addListener((alarm) => {
         if (alarm.name === "pollCommands") pollAndExecuteCommands().catch(console.error);

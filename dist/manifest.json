@@ -13,7 +13,9 @@
     "https://www.amazon.com/*",
     "https://www.walmart.com/*",
     "https://www.costco.com/*",
-    "https://ecom-api.costco.com/*",
+    "https://ecom-api.costco.com/*"
+  ],
+  "optional_host_permissions": [
     "http://*/*",
     "https://*/*"
   ],
@@ -73,16 +75,6 @@
       ],
       "js": [
         "content/cashbackmonitor.js"
-      ],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "http://*/*",
-        "https://*/*"
-      ],
-      "js": [
-        "content/tracker-status.js"
       ],
       "run_at": "document_idle"
     }

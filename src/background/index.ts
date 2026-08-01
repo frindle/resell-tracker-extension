@@ -1,4 +1,5 @@
 import type { ScrapedOrder } from '../lib/types';
+import { ensureTrackerScriptRegistered } from '../lib/tracker-script';
 
 const ICON_PATHS_CHROME = { 16: 'icons/icon16.png', 32: 'icons/icon32.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' };
 const ICON_PATH_FIREFOX = 'icons/icon.svg';
@@ -16,16 +17,26 @@ function setToolbarIcon() {
 }
 
 setToolbarIcon();
+function reregisterTrackerScript() {
+  // No-op if the user hasn't granted the optional host permission yet
+  // (requesting it needs a user gesture, so that only happens from the
+  // options page — see grantTrackerAccess in lib/tracker-script.ts).
+  import('../lib/storage').then(m => m.getSettings()).then(({ trackerUrl }) => {
+    if (trackerUrl) ensureTrackerScriptRegistered(trackerUrl).catch(() => {});
+  }).catch(() => {});
+}
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[Reselling Tracker] Extension installed.');
   setToolbarIcon();
   chrome.alarms.create('pollCommands', { when: Date.now() + 2000, periodInMinutes: 1 });
   pollAndExecuteCommands().catch(console.error);
+  reregisterTrackerScript();
 });
 chrome.runtime.onStartup.addListener(() => {
   setToolbarIcon();
   chrome.alarms.create('pollCommands', { when: Date.now() + 2000, periodInMinutes: 1 });
   pollAndExecuteCommands().catch(console.error);
+  reregisterTrackerScript();
 });
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === 'pollCommands') pollAndExecuteCommands().catch(console.error);
