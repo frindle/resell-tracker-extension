@@ -29,9 +29,9 @@
     mod
   ));
 
-  // ../../../node_modules/webextension-polyfill/dist/browser-polyfill.min.js
+  // node_modules/webextension-polyfill/dist/browser-polyfill.min.js
   var require_browser_polyfill_min = __commonJS({
-    "../../../node_modules/webextension-polyfill/dist/browser-polyfill.min.js"(exports, module) {
+    "node_modules/webextension-polyfill/dist/browser-polyfill.min.js"(exports, module) {
       (function(a, b) {
         if ("function" == typeof define && define.amd) define("webextension-polyfill", ["module"], b);
         else if ("undefined" != typeof exports) b(module);
@@ -497,8 +497,9 @@
         let noRushBonusPercent;
         const noRushMatch = detailDocHtml.match(/(?:extra|additional)\s+(\d+(?:\.\d+)?)\s*%[^<]{0,80}No[- ]?Rush/i);
         if (noRushMatch) noRushBonusPercent = parseFloat(noRushMatch[1]);
+        const paymentBoxes = Array.from(detailDoc.querySelectorAll('[class*="paystationpaymentmethod"]'));
+        const detailHtml = paymentBoxes.length > 0 ? paymentBoxes.map((el) => el.outerHTML).join(" ") : detailDoc.documentElement?.outerHTML ?? "";
         let paymentLast4;
-        const detailHtml = detailDoc.documentElement?.outerHTML ?? "";
         const detailPats = [
           /\bending\s+in\s+(\d{4})\b/i,
           /\bending\s+(\d{4})\b/i,
@@ -513,6 +514,13 @@
             break;
           }
         }
+        let paymentRatePercent;
+        const rateMatch = detailHtml.match(/Earns\s+(\d+(?:\.\d+)?)\s*%\s*back/i);
+        if (rateMatch) {
+          paymentRatePercent = parseFloat(rateMatch[1]);
+          const extraMatches = detailHtml.matchAll(/extra\s+(\d+(?:\.\d+)?)\s*%/gi);
+          for (const m of extraMatches) paymentRatePercent += parseFloat(m[1]);
+        }
         const detailPageUrls = Array.from(detailDoc.querySelectorAll(
           'a[href*="ship-track"], a[href*="progress-tracker"], a[href*="package-tracking"]'
         )).map((a) => a.href).filter((h) => !/\/(preship|cancel-items?|return|refund|replacement)\b/i.test(h));
@@ -523,7 +531,7 @@
         const fromDetail = extractCarrierTracking(detailDoc);
         if (trackingPageUrls.length === 0 && fromDetail.length === 0) {
           console.log("[AMZ] no tracking pages or inline tracking for", orderId, "| title:", title || "(none)", "| addr:", address || "(none)", "| cost:", cost, "| noRush:", noRushBonusPercent ?? "-");
-          return { tracking: [], title, address, cost, orderDate, paymentLast4, noRushBonusPercent };
+          return { tracking: [], title, address, cost, orderDate, paymentLast4, paymentRatePercent, noRushBonusPercent };
         }
         const tracking = [...fromDetail];
         let deliveryPhotoUrl;
@@ -550,7 +558,7 @@
         const cleanedNonEmpty = [...new Set(cleaned)].filter((t) => t && t.length >= 8);
         const unique = cleanedNonEmpty.filter((t) => !cleanedNonEmpty.some((other) => other !== t && t.startsWith(other))).slice(0, 5);
         console.log("[AMZ] tracking for", orderId, ":", unique, "| title:", title || "(none)", "| addr:", address || "(none)", "| cost:", cost, "| orderDate:", orderDate, "| last4:", paymentLast4 ?? "(none)", "| photo:", deliveryPhotoUrl ? "yes" : "no");
-        return { tracking: unique, title, address, cost, orderDate, paymentLast4, noRushBonusPercent, deliveryPhotoUrl };
+        return { tracking: unique, title, address, cost, orderDate, paymentLast4, paymentRatePercent, noRushBonusPercent, deliveryPhotoUrl };
       }
       function extractOrderDateFromDoc(doc, orderId) {
         const html = doc.documentElement.outerHTML;
@@ -764,7 +772,7 @@
               const timeout = new Promise(
                 (r) => setTimeout(() => r({ tracking: [], title: "", address: "", cost: 0, orderDate: null }), 12e3)
               );
-              const { tracking, title, address, cost, orderDate, paymentLast4, noRushBonusPercent, deliveryPhotoUrl, notFound } = await Promise.race([fetchOrderDetails(order.orderNumber, order._listTrackingUrls ?? []), timeout]);
+              const { tracking, title, address, cost, orderDate, paymentLast4, paymentRatePercent, noRushBonusPercent, deliveryPhotoUrl, notFound } = await Promise.race([fetchOrderDetails(order.orderNumber, order._listTrackingUrls ?? []), timeout]);
               if (notFound) {
                 order._skipBusiness = true;
                 continue;
@@ -775,6 +783,7 @@
               if (!order.cost && cost) order.cost = cost;
               if (deliveryPhotoUrl) order.deliveryPhotoUrl = deliveryPhotoUrl;
               if (!order.paymentLast4 && paymentLast4) order.paymentLast4 = paymentLast4;
+              if (paymentRatePercent != null) order.paymentRatePercent = paymentRatePercent;
               if (noRushBonusPercent != null) order.noRushBonusPercent = noRushBonusPercent;
               if (orderDate && /T\d{2}:\d{2}/.test(orderDate)) order.orderDate = orderDate;
             }
@@ -884,7 +893,7 @@
           const timeout = new Promise(
             (r) => setTimeout(() => r({ tracking: [], title: "", address: "", cost: 0, orderDate: null }), 2e4)
           );
-          const { tracking, title, address, cost, orderDate, paymentLast4 } = await Promise.race([fetchOrderDetails(orderId), timeout]);
+          const { tracking, title, address, cost, orderDate, paymentLast4, paymentRatePercent } = await Promise.race([fetchOrderDetails(orderId), timeout]);
           const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
           orders.push({
             platform: "Amazon",
@@ -896,7 +905,8 @@
             shippingAddress: address,
             trackingNumbers: tracking,
             sourceUrl: `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`,
-            paymentLast4
+            paymentLast4,
+            paymentRatePercent
           });
           await new Promise((r) => setTimeout(r, 800));
         }

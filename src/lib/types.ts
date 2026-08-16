@@ -11,6 +11,7 @@ export interface ScrapedOrder {
   trackingNumbers: string[];
   sourceUrl: string;
   paymentLast4?: string;   // last 4 digits scraped from payment method — enables card auto-assign on import
+  paymentRatePercent?: number; // scraped total "Earns X% back[, extra Y%]" rate — disambiguates last4 matches against multiple saved cards for the same physical card at different bonus-rate tiers
   noRushBonusPercent?: number; // Amazon "Earns extra N% on items using No-Rush delivery" — set when detected on detail page
   deliveryPhotoUrl?: string;      // proof-of-delivery image URL (signed, expires). Server downloads bytes on import.
   deliveryPhotoBase64?: string;   // when set, server uses these bytes directly instead of fetching. Required for Walmart (URL requires session cookies); optional for Amazon (S3 URL is self-contained).

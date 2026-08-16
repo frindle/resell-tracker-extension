@@ -51,6 +51,18 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.77
+- **Amazon card auto-assign never fired for orders where the same physical
+  card has multiple saved bonus-rate tiers** (e.g. one Amazon Store Card at
+  5%/6%/7% for base/Amazon Day/stacked promos) — the server correctly
+  refuses to guess among same-last4 duplicates, but the extension never
+  scraped the payment box's own "Earns X% back[, extra Y%]" text needed to
+  disambiguate. Also scoped `paymentLast4` extraction to the actual
+  payment-method box(es) instead of the whole page, matching a fix already
+  shipped server-side in the sidecar — other "ending in ####" text
+  elsewhere on the order page (gift card balance, promo upsells) could
+  otherwise win the old whole-page regex search.
+
 ### 1.1.76
 - **Fix: Amazon sync re-scraped the full 60-day window on every routine sync.** `startSync()` always used `min(lastSyncDate, 60 days ago)` as the scan floor, so once `lastSyncDate` was more recent than 60 days ago (the normal case after the first sync), the 60-day floor won every time instead of `lastSyncDate` — re-walking the whole window each sync. Now: no `lastSyncDate` (first sync) falls back to the 60-day floor; a `lastSyncDate` older than 60 days keeps scanning back to it for full catch-up; otherwise scans from `lastSyncDate` minus a 1-day overlap buffer.
 - `noRushBonusPercent` was being extracted from the Amazon order page but dropped before it reached the returned order object — card sync never saw it. Now included.

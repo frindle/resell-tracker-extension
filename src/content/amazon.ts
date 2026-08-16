@@ -368,7 +368,7 @@ function extractCostFromDoc(doc: Document): number {
   return 0;
 }
 
-async function fetchOrderDetails(orderId: string, extraTrackingUrls: string[] = []): Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string; noRushBonusPercent?: number; deliveryPhotoUrl?: string; notFound?: boolean }> {
+async function fetchOrderDetails(orderId: string, extraTrackingUrls: string[] = []): Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string; paymentRatePercent?: number; noRushBonusPercent?: number; deliveryPhotoUrl?: string; notFound?: boolean }> {
   console.log('[AMZ] fetchOrderDetails', orderId);
   const detailDoc = await fetchHtml(`https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`);
   if (!detailDoc) { console.warn('[AMZ] fetchOrderDetails: no doc for', orderId); return { tracking: [], title: '', address: '', cost: 0, orderDate: null, paymentLast4: undefined }; }
@@ -410,8 +410,18 @@ async function fetchOrderDetails(orderId: string, extraTrackingUrls: string[] = 
   const noRushMatch = detailDocHtml.match(/(?:extra|additional)\s+(\d+(?:\.\d+)?)\s*%[^<]{0,80}No[- ]?Rush/i);
   if (noRushMatch) noRushBonusPercent = parseFloat(noRushMatch[1]);
 
+  // Scope to the actual charged-payment-method box(es) first — the whole
+  // page can contain other "ending in ####" text (gift card balance, promo
+  // card upsells, split-payment lines) earlier in the DOM than the real
+  // charge. The rewards-rate text ("Earns 5% back and extra 1% on...")
+  // lives in a sibling supplemental box with the same class fragment, so
+  // scope to ALL matching boxes, not just the first.
+  const paymentBoxes = Array.from(detailDoc.querySelectorAll('[class*="paystationpaymentmethod"]'));
+  const detailHtml = paymentBoxes.length > 0
+    ? paymentBoxes.map(el => el.outerHTML).join(' ')
+    : (detailDoc.documentElement?.outerHTML ?? '');
+
   let paymentLast4: string | undefined;
-  const detailHtml = detailDoc.documentElement?.outerHTML ?? '';
   const detailPats: Array<RegExp> = [
     /\bending\s+in\s+(\d{4})\b/i,
     /\bending\s+(\d{4})\b/i,
@@ -422,6 +432,20 @@ async function fetchOrderDetails(orderId: string, extraTrackingUrls: string[] = 
   for (const pat of detailPats) {
     const m = detailHtml.match(pat);
     if (m) { paymentLast4 = m[1]; break; }
+  }
+
+  // Total effective cashback rate for the card actually used, per the
+  // payment box's own "Earns X% back[, and extra Y% on ...]" text — this
+  // is how Amazon Store Card's variable-bonus tiers (base / +Amazon Day /
+  // +No-Rush / stacked) show up, and it's the only reliable signal for
+  // picking the right rate-tier card when several saved cards share the
+  // same last4 (same physical card, different bonus-rate entries).
+  let paymentRatePercent: number | undefined;
+  const rateMatch = detailHtml.match(/Earns\s+(\d+(?:\.\d+)?)\s*%\s*back/i);
+  if (rateMatch) {
+    paymentRatePercent = parseFloat(rateMatch[1]);
+    const extraMatches = detailHtml.matchAll(/extra\s+(\d+(?:\.\d+)?)\s*%/gi);
+    for (const m of extraMatches) paymentRatePercent += parseFloat(m[1]);
   }
 
   // Extract tracking sub-page URLs. Amazon uses two patterns:
@@ -454,7 +478,7 @@ async function fetchOrderDetails(orderId: string, extraTrackingUrls: string[] = 
   const fromDetail = extractCarrierTracking(detailDoc);
   if (trackingPageUrls.length === 0 && fromDetail.length === 0) {
     console.log('[AMZ] no tracking pages or inline tracking for', orderId, '| title:', title || '(none)', '| addr:', address || '(none)', '| cost:', cost, '| noRush:', noRushBonusPercent ?? '-');
-    return { tracking: [], title, address, cost, orderDate, paymentLast4, noRushBonusPercent };
+    return { tracking: [], title, address, cost, orderDate, paymentLast4, paymentRatePercent, noRushBonusPercent };
   }
 
   // Fetch each tracking page and extract carrier tracking numbers.
@@ -500,7 +524,7 @@ async function fetchOrderDetails(orderId: string, extraTrackingUrls: string[] = 
   // Drop any entry that is a superstring of another (keep the shorter canonical form)
   const unique = cleanedNonEmpty.filter(t => !cleanedNonEmpty.some(other => other !== t && t.startsWith(other))).slice(0, 5);
   console.log('[AMZ] tracking for', orderId, ':', unique, '| title:', title || '(none)', '| addr:', address || '(none)', '| cost:', cost, '| orderDate:', orderDate, '| last4:', paymentLast4 ?? '(none)', '| photo:', deliveryPhotoUrl ? 'yes' : 'no');
-  return { tracking: unique, title, address, cost, orderDate, paymentLast4, noRushBonusPercent, deliveryPhotoUrl };
+  return { tracking: unique, title, address, cost, orderDate, paymentLast4, paymentRatePercent, noRushBonusPercent, deliveryPhotoUrl };
 }
 
 // Probe Amazon's order detail page for a placed timestamp. Amazon's UI usually
@@ -791,10 +815,10 @@ async function runSync(state: SyncState) {
       const order = allOrders[i];
       sendMessage({ type: 'SYNC_PROGRESS', platform: 'Amazon', scraped: allOrders.length, message: `Fetching details for order ${i + 1} of ${allOrders.length}…` });
       await new Promise(r => setTimeout(r, 800));
-      const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string; noRushBonusPercent?: number; deliveryPhotoUrl?: string; notFound?: boolean }>(
+      const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string; paymentRatePercent?: number; noRushBonusPercent?: number; deliveryPhotoUrl?: string; notFound?: boolean }>(
         r => setTimeout(() => r({ tracking: [], title: '', address: '', cost: 0, orderDate: null }), 12000)
       );
-      const { tracking, title, address, cost, orderDate, paymentLast4, noRushBonusPercent, deliveryPhotoUrl, notFound } = await Promise.race([fetchOrderDetails(order.orderNumber, order._listTrackingUrls ?? []), timeout]);
+      const { tracking, title, address, cost, orderDate, paymentLast4, paymentRatePercent, noRushBonusPercent, deliveryPhotoUrl, notFound } = await Promise.race([fetchOrderDetails(order.orderNumber, order._listTrackingUrls ?? []), timeout]);
       if (notFound) {
         // Amazon Business order or otherwise inaccessible — mark for
         // exclusion from the import so we don't pollute the orders list.
@@ -807,6 +831,7 @@ async function runSync(state: SyncState) {
       if (!order.cost && cost) order.cost = cost;
       if (deliveryPhotoUrl) order.deliveryPhotoUrl = deliveryPhotoUrl;
       if (!order.paymentLast4 && paymentLast4) order.paymentLast4 = paymentLast4;
+      if (paymentRatePercent != null) order.paymentRatePercent = paymentRatePercent;
       if (noRushBonusPercent != null) order.noRushBonusPercent = noRushBonusPercent;
       // Prefer detail's orderDate if it has a time component (T...:); otherwise
       // keep the listing's date-only value.
@@ -946,10 +971,10 @@ async function scrapeAmazonOrders(orderNumbers: string[]): Promise<{ scraped: nu
   const orders: ScrapedOrder[] = [];
   for (const orderId of filtered) {
     console.log('[AMZ] SCRAPE_AMAZON_ORDER: fetching', orderId);
-    const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string }>(
+    const timeout = new Promise<{ tracking: string[]; title: string; address: string; cost: number; orderDate: string | null; paymentLast4?: string; paymentRatePercent?: number }>(
       r => setTimeout(() => r({ tracking: [], title: '', address: '', cost: 0, orderDate: null }), 20000)
     );
-    const { tracking, title, address, cost, orderDate, paymentLast4 } = await Promise.race([fetchOrderDetails(orderId), timeout]);
+    const { tracking, title, address, cost, orderDate, paymentLast4, paymentRatePercent } = await Promise.race([fetchOrderDetails(orderId), timeout]);
     const today = new Date().toISOString().split('T')[0];
     orders.push({
       platform: 'Amazon',
@@ -962,6 +987,7 @@ async function scrapeAmazonOrders(orderNumbers: string[]): Promise<{ scraped: nu
       trackingNumbers: tracking,
       sourceUrl: `https://www.amazon.com/gp/your-account/order-details?orderID=${orderId}`,
       paymentLast4,
+      paymentRatePercent,
     });
     await new Promise(r => setTimeout(r, 800));
   }

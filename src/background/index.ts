@@ -981,6 +981,10 @@ async function handlePushOrders(
       // here silently dropped it, which is why card auto-assign never fired
       // even when last4 was visible in extension logs.
       ...(o.paymentLast4 ? { paymentLast4: o.paymentLast4 } : {}),
+      // Scraped total "Earns X% back[, extra Y%]" rate — disambiguates
+      // last4 matches against multiple saved cards sharing one physical
+      // card at different bonus-rate tiers (e.g. Amazon Store Card).
+      ...(o.paymentRatePercent != null ? { paymentRatePercent: o.paymentRatePercent } : {}),
       // Amazon No-Rush delivery bonus, when detected on detail page.
       ...(o.noRushBonusPercent != null ? { noRushBonusPercent: o.noRushBonusPercent } : {}),
       // Carrier proof-of-delivery photo URL. Server downloads + attaches.
