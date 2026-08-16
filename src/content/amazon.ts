@@ -441,7 +441,7 @@ async function fetchOrderDetails(orderId: string, extraTrackingUrls: string[] = 
   // picking the right rate-tier card when several saved cards share the
   // same last4 (same physical card, different bonus-rate entries).
   let paymentRatePercent: number | undefined;
-  const rateMatch = detailHtml.match(/Earns\s+(\d+(?:\.\d+)?)\s*%\s*back/i);
+  const rateMatch = detailHtml.match(/(?:Earns|Get)\s+(\d+(?:\.\d+)?)\s*%\s*back/i);
   if (rateMatch) {
     paymentRatePercent = parseFloat(rateMatch[1]);
     const extraMatches = detailHtml.matchAll(/extra\s+(\d+(?:\.\d+)?)\s*%/gi);
