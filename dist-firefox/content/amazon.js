@@ -515,7 +515,7 @@
           }
         }
         let paymentRatePercent;
-        const rateMatch = detailHtml.match(/Earns\s+(\d+(?:\.\d+)?)\s*%\s*back/i);
+        const rateMatch = detailHtml.match(/(?:Earns|Get)\s+(\d+(?:\.\d+)?)\s*%\s*back/i);
         if (rateMatch) {
           paymentRatePercent = parseFloat(rateMatch[1]);
           const extraMatches = detailHtml.matchAll(/extra\s+(\d+(?:\.\d+)?)\s*%/gi);

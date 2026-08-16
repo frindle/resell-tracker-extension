@@ -51,6 +51,14 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.1.78
+- **Amazon card auto-assign still missed some orders after 1.1.77.** The
+  rewards-rate regex only matched "Earns X% back[, extra Y%]" phrasing,
+  but Amazon's payment box also uses "Get X% back, and additional
+  reward on selected items..." on some orders (same physical card,
+  different generic-promo copy — confirmed live against a real order).
+  Broadened to match either verb.
+
 ### 1.1.77
 - **Amazon card auto-assign never fired for orders where the same physical
   card has multiple saved bonus-rate tiers** (e.g. one Amazon Store Card at
