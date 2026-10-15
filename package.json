@@ -19,7 +19,7 @@
     "@types/chrome": "^0.1.42",
     "@types/webextension-polyfill": "^0.12.5",
     "esbuild": "^0.28.0",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "webextension-polyfill": "^0.12.0"
   }
 }
