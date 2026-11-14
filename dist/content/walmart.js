@@ -163,7 +163,7 @@
   var init_storage = __esm({
     "src/lib/storage.ts"() {
       "use strict";
-      import_browser_polyfill_min = __toESM(require_browser_polyfill_min());
+      import_browser_polyfill_min = __toESM(require_browser_polyfill_min(), 1);
       DEFAULTS = {
         trackerUrl: "",
         apiKey: "",
@@ -188,7 +188,7 @@
   var init_api = __esm({
     "src/lib/api.ts"() {
       "use strict";
-      import_browser_polyfill_min2 = __toESM(require_browser_polyfill_min());
+      import_browser_polyfill_min2 = __toESM(require_browser_polyfill_min(), 1);
     }
   });
 

@@ -1,4 +1,5 @@
 import { getSettings } from '../lib/storage';
+import { hostPatternFor } from '../lib/tracker-script';
 import type { ApiLogEntry } from '../lib/types';
 
 async function checkVersions(trackerUrl: string | undefined) {
@@ -42,6 +43,39 @@ async function init() {
     document.getElementById('pollStatus')!.textContent = 'active';
     document.getElementById('pollStatus')!.className = 'status ok';
   }
+
+  try {
+    const cap = await chrome.runtime.sendMessage({ type: 'AMAZON_CAPTURE_STATUS' }) as
+      { sentToday: number; lastOk: boolean; lastText: string; queued: number; running: boolean; run: { text: string; status: string } | null } | null;
+    if (cap) {
+      document.getElementById('capStatus')!.textContent = `${cap.sentToday} today`;
+      document.getElementById('capStatus')!.className = `status ${cap.lastText ? (cap.lastOk ? 'ok' : 'fail') : 'idle'}`;
+      const q = cap.queued ? ` (${cap.queued} queued)` : '';
+      document.getElementById('capMeta')!.textContent = (cap.lastText || 'no pages sent yet') + q;
+      if (cap.run) document.getElementById('runMeta')!.textContent = `Last sync: ${cap.run.text}`;
+      (document.getElementById('syncNowBtn') as HTMLButtonElement).disabled = cap.running;
+    }
+  } catch { /* background asleep */ }
+
+  // Firefox MV3 treats host permissions as opt-in: show a clear grant state instead of failing silently.
+  const wanted = ['https://www.amazon.com/*', ...(settings.trackerUrl ? [hostPatternFor(settings.trackerUrl)] : [])].filter((x): x is string => !!x);
+  const hasAccess = await chrome.permissions.contains({ origins: wanted }).catch(() => true);
+  if (!hasAccess) {
+    document.getElementById('accessRow')!.style.display = 'flex';
+    (document.getElementById('syncNowBtn') as HTMLButtonElement).disabled = true;
+    document.getElementById('grantBtn')!.addEventListener('click', async () => {
+      const ok = await chrome.permissions.request({ origins: wanted }).catch(() => false);
+      if (ok) location.reload();
+      else document.getElementById('runMeta')!.textContent = 'Access was not granted; capture will not work until it is.';
+    });
+  }
+
+  document.getElementById('syncNowBtn')!.addEventListener('click', async () => {
+    const btn = document.getElementById('syncNowBtn') as HTMLButtonElement;
+    btn.disabled = true;
+    const r = await chrome.runtime.sendMessage({ type: 'AMAZON_SYNC_NOW' }).catch(() => null) as { started?: boolean; reason?: string } | null;
+    document.getElementById('runMeta')!.textContent = r?.started ? 'Sync running in a visible tab...' : (r?.reason ?? 'could not start');
+  });
 
   document.getElementById('openSettings')!.addEventListener('click', e => {
     e.preventDefault();

@@ -6,7 +6,7 @@
 
 const TRACKER_SCRIPT_ID = 'tracker-status';
 
-function hostPatternFor(trackerUrl: string): string | null {
+export function hostPatternFor(trackerUrl: string): string | null {
   try {
     const u = new URL(trackerUrl.startsWith('http') ? trackerUrl : `http://${trackerUrl}`);
     return `*://${u.hostname}/*`; // scheme-agnostic, mirrors isOnTrackerPage()'s hostname-only check

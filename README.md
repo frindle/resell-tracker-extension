@@ -51,6 +51,27 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.2.0
+- **Amazon is now passive-only.** The extension reads the Amazon order pages
+  you open yourself (Your Orders, order details, package tracking), sends a
+  cleaned copy to your tracker's `/api/extension/amazon-page`, and the tracker
+  parses and compares it. The extension never fetches, opens, navigates to or
+  clicks anything on Amazon. Sign-in, CAPTCHA and block pages are ignored.
+- Removed the automated Amazon sync (list/detail/tracking fetches, the
+  SYNC_AMAZON and SYNC_AMAZON_ORDER commands, and the Amazon branch of the
+  options-page backfill). Walmart, Costco and BigSky are unchanged.
+- Identical pages are not resent within 10 minutes. Failed sends are queued
+  (max 20 pages, persisted) and retried on the existing one-minute tracker poll.
+- **Sync now** (popup button, or the tracker's Sync Amazon button via the
+  command queue): opens ONE visible tab on Your Orders, walks the order-list
+  pages back about 14 days (or to orders the tracker already has complete),
+  then visits detail/tracking pages only for orders the tracker says need
+  them, a few seconds apart, max 40 pages. Every page goes through the same
+  passive capture path. Only a click starts it; no timers or alarms. If a page
+  is a sign-in, CAPTCHA or block page the run stops and leaves the tab open.
+- Toolbar badge shows pages sent today (amber with a count when pages are
+  queued); the popup shows the last result.
+
 ### 1.1.78
 - **Amazon card auto-assign still missed some orders after 1.1.77.** The
   rewards-rate regex only matched "Earns X% back[, extra Y%]" phrasing,
@@ -326,3 +347,8 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ### 1.0.0
 - Initial release
+
+### Loading the Amazon passive-capture build (1.2.0)
+
+- Brave / Chrome: `brave://extensions` (or `chrome://extensions`), turn on Developer mode, Load unpacked, pick `dist/`.
+- Firefox: `about:debugging` > This Firefox > Load Temporary Add-on, pick `dist-firefox/manifest.json`. Firefox treats host access as opt-in: open the popup and press "Grant access" if it shows.

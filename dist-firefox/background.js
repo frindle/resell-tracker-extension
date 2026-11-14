@@ -85,10 +85,398 @@
     }
   });
 
+  // src/lib/amazonCapture.ts
+  function classifyAmazonUrl(rawUrl) {
+    let u;
+    try {
+      u = new URL(rawUrl);
+    } catch {
+      return null;
+    }
+    if (u.protocol !== "https:" || u.hostname !== "www.amazon.com") return null;
+    const p = u.pathname.replace(/\/+$/, "");
+    if (p === "/your-orders/orders" || p === "/gp/css/order-history" || p === "/gp/your-account/order-history") return "orders";
+    if (p === "/gp/your-account/order-details" || p === "/your-orders/order-details" || p === "/gp/css/summary/edit.html") return "detail";
+    if (p === "/progress-tracker/package" || p.startsWith("/progress-tracker/package/") || p === "/gp/your-account/ship-track" || p === "/gp/css/shiptrack/view.html") return "tracking";
+    return null;
+  }
+  function isDuplicate(seen, hash, now, windowMs = DEDUPE_WINDOW_MS) {
+    const t = seen[hash];
+    return typeof t === "number" && now - t < windowMs;
+  }
+  function markSeen(seen, hash, now, windowMs = DEDUPE_WINDOW_MS) {
+    const out = {};
+    for (const [h, t] of Object.entries(seen)) if (now - t < windowMs) out[h] = t;
+    out[hash] = now;
+    return out;
+  }
+  function enqueue(queue, item, maxEntries = QUEUE_MAX_ENTRIES, maxBytes = QUEUE_MAX_BYTES) {
+    const q = queue.filter((i) => i.hash !== item.hash);
+    q.push(item);
+    while (q.length > maxEntries) q.shift();
+    let total = q.reduce((n, i) => n + i.html.length, 0);
+    while (q.length > 1 && total > maxBytes) {
+      total -= q[0].html.length;
+      q.shift();
+    }
+    return q;
+  }
+  function summarizeResult(r) {
+    if (r.blocked) return "ignored (sign-in or block page)";
+    if (r.parseFailed) return "could not parse page";
+    const parts = [];
+    const verb = r.mode === "compare" ? ["would create", "would update"] : ["new", "updated"];
+    if (r.created) parts.push(`${r.created} ${verb[0]}`);
+    if (r.updated) parts.push(`${r.updated} ${verb[1]}`);
+    if (r.unchanged) parts.push(`${r.unchanged} unchanged`);
+    if (r.discrepancies) parts.push(`${r.discrepancies} needs review`);
+    const text = parts.length ? parts.join(", ") : "nothing found";
+    return r.mode === "compare" ? `${text} (compare only)` : text;
+  }
+  var DEDUPE_WINDOW_MS, QUEUE_MAX_ENTRIES, QUEUE_MAX_BYTES;
+  var init_amazonCapture = __esm({
+    "src/lib/amazonCapture.ts"() {
+      "use strict";
+      DEDUPE_WINDOW_MS = 10 * 60 * 1e3;
+      QUEUE_MAX_ENTRIES = 20;
+      QUEUE_MAX_BYTES = 6e6;
+    }
+  });
+
+  // src/background/amazonCapture.ts
+  function today() {
+    const d = /* @__PURE__ */ new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  function upgradeUrl(trackerUrl) {
+    const stripped = trackerUrl.replace(/\/$/, "");
+    if (/^http:\/\/(localhost|\d)/i.test(stripped)) return stripped;
+    return stripped.replace(/^http:\/\//i, "https://");
+  }
+  async function getStats() {
+    const r = await chrome.storage.local.get(K_STATS);
+    const s = r[K_STATS];
+    if (!s || s.day !== today()) return { day: today(), sentToday: 0, lastAt: s?.lastAt ?? 0, lastOk: s?.lastOk ?? true, lastText: s?.lastText ?? "" };
+    return s;
+  }
+  async function setStats(s) {
+    await chrome.storage.local.set({ [K_STATS]: s });
+    try {
+      const queued = (await chrome.storage.local.get(K_QUEUE))[K_QUEUE]?.length ?? 0;
+      const text = queued > 0 ? `!${queued}` : s.sentToday > 0 ? String(s.sentToday) : "";
+      await chrome.action.setBadgeText({ text });
+      await chrome.action.setBadgeBackgroundColor({ color: queued > 0 ? "#d97706" : "#16a34a" });
+    } catch {
+    }
+  }
+  async function postPage(item) {
+    const { trackerUrl, apiKey, extensionSecret, userId } = await getSettings();
+    if (!trackerUrl) throw new Error("tracker URL not set");
+    const res = await fetch(`${upgradeUrl(trackerUrl)}/api/extension/amazon-page`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...apiKey ? { "X-API-Key": apiKey } : {},
+        ...extensionSecret ? { "X-Extension-Secret": extensionSecret } : {},
+        ...userId ? { "X-Extension-User-Id": userId } : {}
+      },
+      body: JSON.stringify({ url: item.url, kind: item.kind, html: item.html, hash: item.hash, capturedAt: item.capturedAt })
+    });
+    if (!res.ok) {
+      const err = new Error(`tracker responded ${res.status}`);
+      err.permanent = res.status >= 400 && res.status < 500 && ![401, 403, 408, 429].includes(res.status);
+      throw err;
+    }
+    return await res.json();
+  }
+  async function recordResult(r) {
+    const s = await getStats();
+    s.sentToday += 1;
+    s.lastAt = Date.now();
+    s.lastOk = true;
+    s.lastText = summarizeResult(r);
+    await setStats(s);
+  }
+  async function recordFailure(msg) {
+    const s = await getStats();
+    s.lastAt = Date.now();
+    s.lastOk = false;
+    s.lastText = `send failed: ${msg}; queued for retry`;
+    await setStats(s);
+  }
+  async function handleCapture(msg, force = false) {
+    const kind = classifyAmazonUrl(msg.url);
+    if (!kind || typeof msg.html !== "string" || !msg.hash) return { ok: false, reason: "rejected" };
+    const now = Date.now();
+    const seen = (await chrome.storage.local.get(K_SEEN))[K_SEEN] ?? {};
+    if (!force && isDuplicate(seen, msg.hash, now)) return { ok: true, duplicate: true };
+    await chrome.storage.local.set({ [K_SEEN]: markSeen(seen, msg.hash, now) });
+    const item = { url: msg.url, kind, html: msg.html, hash: msg.hash, capturedAt: now, attempts: 0 };
+    try {
+      const result = await postPage(item);
+      await recordResult(result);
+      return { ok: true, result };
+    } catch (e) {
+      const permanent = e.permanent === true;
+      if (!permanent) {
+        const q = (await chrome.storage.local.get(K_QUEUE))[K_QUEUE] ?? [];
+        await chrome.storage.local.set({ [K_QUEUE]: enqueue(q, item) });
+      }
+      await recordFailure(String(e.message || e));
+      return { ok: false, queued: !permanent };
+    }
+  }
+  async function flushQueue() {
+    const q = (await chrome.storage.local.get(K_QUEUE))[K_QUEUE] ?? [];
+    if (!q.length) return;
+    const remaining = [];
+    for (let i = 0; i < q.length; i++) {
+      const item = q[i];
+      try {
+        const result = await postPage(item);
+        await recordResult(result);
+      } catch (e) {
+        const permanent = e.permanent === true;
+        item.attempts += 1;
+        if (!permanent && item.attempts < 20) remaining.push(item);
+        if (!permanent) {
+          remaining.push(...q.slice(i + 1));
+          break;
+        }
+      }
+    }
+    await chrome.storage.local.set({ [K_QUEUE]: remaining });
+    await setStats(await getStats());
+  }
+  async function getCaptureStatus() {
+    const q = (await chrome.storage.local.get(K_QUEUE))[K_QUEUE] ?? [];
+    return { ...await getStats(), queued: q.length };
+  }
+  async function saveRun(text, status) {
+    await chrome.storage.local.set({ amazonLastRun: { at: Date.now(), text, status } });
+  }
+  async function getLastRun() {
+    return (await chrome.storage.local.get("amazonLastRun")).amazonLastRun ?? null;
+  }
+  async function reportRun(summary) {
+    try {
+      const { trackerUrl, apiKey, extensionSecret, userId } = await getSettings();
+      if (!trackerUrl) return;
+      await fetch(`${upgradeUrl(trackerUrl)}/api/extension/amazon-run`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...apiKey ? { "X-API-Key": apiKey } : {},
+          ...extensionSecret ? { "X-Extension-Secret": extensionSecret } : {},
+          ...userId ? { "X-Extension-User-Id": userId } : {}
+        },
+        body: JSON.stringify(summary)
+      });
+    } catch {
+    }
+  }
+  var K_QUEUE, K_SEEN, K_STATS;
+  var init_amazonCapture2 = __esm({
+    "src/background/amazonCapture.ts"() {
+      "use strict";
+      init_storage();
+      init_amazonCapture();
+      K_QUEUE = "amazonCaptureQueue";
+      K_SEEN = "amazonCaptureSeen";
+      K_STATS = "amazonCaptureStats";
+    }
+  });
+
+  // src/lib/syncRun.ts
+  function formatRunSummary(s) {
+    if (s.status === "blocked") return `blocked after ${s.pages} page(s); tab left open for you`;
+    const base = `${s.pages} page(s): ${s.created} new, ${s.updated} updated, ${s.unchanged} unchanged, ${s.discrepancies} needs review`;
+    return s.status === "capped" ? `${base} (page cap reached)` : s.status === "error" ? `${base} (${s.message})` : base;
+  }
+  function createSyncRunner(deps2) {
+    let running = false;
+    async function run(opts = {}) {
+      if (running) return { started: false, reason: "a sync is already running" };
+      running = true;
+      const maxPages = opts.maxPages ?? DEFAULT_MAX_PAGES;
+      const paceMs = opts.paceMs ?? DEFAULT_PACE_MS;
+      const sum = { status: "done", pages: 0, created: 0, updated: 0, unchanged: 0, discrepancies: 0, message: "" };
+      let tabId = null;
+      let consecutiveTimeouts = 0;
+      const needs = /* @__PURE__ */ new Map();
+      const visit = async (url) => {
+        if (!classifyAmazonUrl(url)) return { kind: "error", message: "skipped non-order url" };
+        if (sum.pages >= maxPages) {
+          sum.status = "capped";
+          return null;
+        }
+        if (tabId === null) {
+          tabId = await deps2.openTab(url);
+        } else {
+          await deps2.sleep(paceMs);
+          await deps2.navigate(tabId, url);
+        }
+        sum.pages += 1;
+        const out = await deps2.waitForOutcome(tabId);
+        if (out.kind === "blocked") {
+          sum.status = "blocked";
+          sum.blockedUrl = void 0;
+          sum.message = "sign-in, CAPTCHA or block page";
+          return null;
+        }
+        if (out.kind === "timeout") {
+          consecutiveTimeouts += 1;
+          if (consecutiveTimeouts >= 3) {
+            sum.status = "error";
+            sum.message = "pages did not load";
+            return null;
+          }
+        } else {
+          consecutiveTimeouts = 0;
+        }
+        if (out.kind === "result") {
+          sum.created += out.result.created ?? 0;
+          sum.updated += out.result.updated ?? 0;
+          sum.unchanged += out.result.unchanged ?? 0;
+          sum.discrepancies += out.result.discrepancies ?? 0;
+        }
+        return out;
+      };
+      try {
+        let listUrl = opts.startUrl ?? START_URL;
+        const seenLists = /* @__PURE__ */ new Set();
+        while (listUrl && !seenLists.has(listUrl)) {
+          seenLists.add(listUrl);
+          const out = await visit(listUrl);
+          if (!out) break;
+          const list = out.kind === "result" ? out.result.list : void 0;
+          for (const n of list?.needs ?? []) if (!needs.has(n.orderNumber)) needs.set(n.orderNumber, n);
+          if (!list || list.reachedWindow || list.allComplete || !list.nextUrl) break;
+          listUrl = list.nextUrl;
+        }
+        if (sum.status === "done") {
+          outer: for (const n of needs.values()) {
+            const urls = [n.detailUrl, n.trackUrls?.[0]].filter((u) => !!u);
+            for (const u of urls) {
+              const out = await visit(u);
+              if (!out) break outer;
+            }
+          }
+        }
+      } catch (e) {
+        sum.status = "error";
+        sum.message = String(e.message || e);
+      } finally {
+        if (tabId !== null && sum.status !== "blocked") {
+          try {
+            await deps2.closeTab(tabId);
+          } catch {
+          }
+        }
+        running = false;
+      }
+      return sum;
+    }
+    return { run, isRunning: () => running };
+  }
+  var START_URL, DEFAULT_MAX_PAGES, DEFAULT_PACE_MS;
+  var init_syncRun = __esm({
+    "src/lib/syncRun.ts"() {
+      "use strict";
+      init_amazonCapture();
+      START_URL = "https://www.amazon.com/your-orders/orders?timeFilter=last30";
+      DEFAULT_MAX_PAGES = 40;
+      DEFAULT_PACE_MS = 4e3;
+    }
+  });
+
+  // src/background/amazonRun.ts
+  function expect(tabId) {
+    return new Promise((resolve) => {
+      const done = (o) => {
+        clearTimeout(t);
+        pending.delete(tabId);
+        resolve(o);
+      };
+      const t = setTimeout(() => done({ kind: "timeout" }), WAIT_MS);
+      pending.set(tabId, done);
+      const e = early.get(tabId);
+      if (e) {
+        early.delete(tabId);
+        done(e);
+      }
+    });
+  }
+  function isRunTab(tabId) {
+    return tabId !== void 0 && tabId === runTabId;
+  }
+  function notifyOutcome(tabId, outcome) {
+    if (!isRunTab(tabId)) return;
+    const p = pending.get(tabId);
+    if (p) p(outcome);
+    else early.set(tabId, outcome);
+  }
+  async function startAmazonRun() {
+    await saveRun("running...", "running");
+    const out = await runner.run();
+    runTabId = null;
+    if ("started" in out) return { started: false, reason: out.reason };
+    const text = formatRunSummary(out);
+    await saveRun(text, out.status);
+    await reportRun({ ...out, text });
+    return { ...out, text };
+  }
+  function amazonRunActive() {
+    return runner.isRunning();
+  }
+  var WAIT_MS, pending, early, runTabId, waiter, deps, runner;
+  var init_amazonRun = __esm({
+    "src/background/amazonRun.ts"() {
+      "use strict";
+      init_syncRun();
+      init_amazonCapture2();
+      WAIT_MS = 3e4;
+      pending = /* @__PURE__ */ new Map();
+      early = /* @__PURE__ */ new Map();
+      runTabId = null;
+      waiter = null;
+      deps = {
+        async openTab(url) {
+          const tab = await chrome.tabs.create({ url, active: true });
+          if (!tab.id) throw new Error("could not open a tab");
+          runTabId = tab.id;
+          early.delete(tab.id);
+          waiter = expect(tab.id);
+          return tab.id;
+        },
+        async navigate(tabId, url) {
+          early.delete(tabId);
+          waiter = expect(tabId);
+          await chrome.tabs.update(tabId, { url, active: true });
+        },
+        async waitForOutcome() {
+          return waiter ?? { kind: "timeout" };
+        },
+        async closeTab(tabId) {
+          await chrome.tabs.remove(tabId);
+        },
+        sleep: (ms) => new Promise((r) => setTimeout(r, ms))
+      };
+      chrome.tabs.onRemoved.addListener((tabId) => {
+        if (tabId === runTabId) {
+          notifyOutcome(tabId, { kind: "error", message: "tab closed" });
+        }
+      });
+      runner = createSyncRunner(deps);
+    }
+  });
+
   // src/background/index.ts
   var require_background = __commonJS({
     "src/background/index.ts"() {
       init_tracker_script();
+      init_amazonCapture2();
+      init_amazonRun();
       var ICON_PATHS_CHROME = { 16: "icons/icon16.png", 32: "icons/icon32.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
       var ICON_PATH_FIREFOX = "icons/icon.svg";
       var _browser = globalThis.browser;
@@ -109,6 +497,8 @@
         }).catch(() => {
         });
       }
+      flushQueue().catch(() => {
+      });
       chrome.runtime.onInstalled.addListener(() => {
         console.log("[Reselling Tracker] Extension installed.");
         setToolbarIcon();
@@ -123,10 +513,12 @@
         reregisterTrackerScript();
       });
       chrome.alarms.onAlarm.addListener((alarm) => {
-        if (alarm.name === "pollCommands") pollAndExecuteCommands().catch(console.error);
+        if (alarm.name === "pollCommands") {
+          pollAndExecuteCommands().catch(console.error);
+          flushQueue().catch(console.error);
+        }
       });
       var PLATFORM_CONFIG = {
-        Amazon: { host: "www.amazon.com", url: "https://www.amazon.com/your-orders/orders", script: "content/amazon.js" },
         Walmart: { host: "www.walmart.com", url: "https://www.walmart.com/orders", script: "content/walmart.js" },
         Costco: { host: "www.costco.com", url: "https://www.costco.com/myaccount/", script: "content/costco.js" },
         BigSkyBuyers: { host: "www.bigskybuyers.com", url: "https://www.bigskybuyers.com/main", script: "content/bigskybuyers.js" }
@@ -297,6 +689,18 @@
           );
           return true;
         }
+        if (message.type === "FETCH_HTML" || message.type === "FETCH_IMAGE_BYTES") {
+          if (/(^|\.)amazon\.com$/i.test((() => {
+            try {
+              return new URL(String(message.url)).hostname;
+            } catch {
+              return "";
+            }
+          })())) {
+            sendResponse({ error: "Amazon is passive-only; the extension does not fetch Amazon URLs" });
+            return true;
+          }
+        }
         if (message.type === "FETCH_HTML") {
           fetch(message.url, { credentials: "include" }).then((r) => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))).then((html) => sendResponse({ html })).catch((e) => sendResponse({ error: String(e) }));
           return true;
@@ -401,6 +805,36 @@
             func: inPageCostcoGraphql,
             args: [message.token, message.clientId, message.body]
           }).then((results) => sendResponse(results[0]?.result ?? { error: "no result" })).catch((e) => sendResponse({ error: String(e) }));
+          return true;
+        }
+        if (message.type === "AMAZON_PAGE_CAPTURE") {
+          const tabId = sender.tab?.id;
+          handleCapture(message, isRunTab(tabId)).then((r) => {
+            if ("result" in r && r.result) notifyOutcome(tabId, { kind: "result", result: r.result });
+            else if (!r.ok) notifyOutcome(tabId, { kind: "error", message: "send failed" });
+            else notifyOutcome(tabId, { kind: "result", result: {} });
+            sendResponse(r);
+          }).catch((e) => {
+            notifyOutcome(tabId, { kind: "error", message: String(e) });
+            sendResponse({ ok: false, error: String(e) });
+          });
+          return true;
+        }
+        if (message.type === "AMAZON_PAGE_BLOCKED") {
+          notifyOutcome(sender.tab?.id, { kind: "blocked" });
+          return false;
+        }
+        if (message.type === "AMAZON_SYNC_NOW") {
+          if (amazonRunActive()) {
+            sendResponse({ started: false, reason: "a sync is already running" });
+            return false;
+          }
+          startAmazonRun().catch(console.error);
+          sendResponse({ started: true });
+          return false;
+        }
+        if (message.type === "AMAZON_CAPTURE_STATUS") {
+          Promise.all([getCaptureStatus(), getLastRun()]).then(([st, run]) => sendResponse({ ...st, run, running: amazonRunActive() })).catch(() => sendResponse(null));
           return true;
         }
         if (message.type === "PUSH_ORDERS") {
@@ -705,7 +1139,7 @@
         await chrome.storage.local.set({ lastPoll: Date.now() });
         const { trackerUrl, apiKey, extensionSecret, userId } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
         if (!trackerUrl) return;
-        const base = upgradeUrl(trackerUrl);
+        const base = upgradeUrl2(trackerUrl);
         const headers = {};
         if (apiKey) headers["X-API-Key"] = apiKey;
         if (extensionSecret) headers["X-Extension-Secret"] = extensionSecret;
@@ -723,22 +1157,14 @@
           await patchCommand(base, cmd.id, "running", headers);
           try {
             let result;
-            if (cmd.type === "SYNC_AMAZON") result = await runSyncCommand("Amazon");
-            else if (cmd.type === "SYNC_WALMART") result = await runSyncCommand("Walmart");
+            if (cmd.type === "SYNC_AMAZON" || cmd.type === "SYNC_AMAZON_ORDER") {
+              throw new Error("Amazon sync is disabled; use Sync Amazon (visible tab) or just browse your orders.");
+            } else if (cmd.type === "SYNC_AMAZON_PAGES") {
+              result = await startAmazonRun();
+            } else if (cmd.type === "SYNC_WALMART") result = await runSyncCommand("Walmart");
             else if (cmd.type === "SYNC_COSTCO") result = await runSyncCommand("Costco");
             else if (cmd.type === "SYNC_BIGSKY") result = await runSyncCommand("BigSkyBuyers");
             else if (cmd.type === "SCRAPE_CBM") result = await runScrapeCbm(base, headers, cmd.payload);
-            else if (cmd.type === "SYNC_AMAZON_ORDER") {
-              let orderNumbers = [];
-              if (cmd.payload) {
-                try {
-                  const parsed = JSON.parse(cmd.payload);
-                  if (Array.isArray(parsed.orderNumbers)) orderNumbers = parsed.orderNumbers;
-                } catch {
-                }
-              }
-              result = await runAmazonOrderSync(orderNumbers);
-            }
             await patchCommand(base, cmd.id, "done", headers, result);
           } catch (e) {
             await patchCommand(base, cmd.id, "failed", headers, String(e));
@@ -762,60 +1188,6 @@
       async function runSyncCommand(platform) {
         return new Promise((resolve, reject) => {
           triggerSyncInBackground(platform).then(() => resolve({ ok: true })).catch(reject);
-        });
-      }
-      async function runAmazonOrderSync(orderNumbers) {
-        if (!orderNumbers.length) return { skipped: true, reason: "no order numbers" };
-        const config = PLATFORM_CONFIG["Amazon"];
-        let targetTabId;
-        let existingTabs = [];
-        try {
-          existingTabs = await chrome.tabs.query({ url: `https://${config.host}/*` });
-        } catch {
-        }
-        if (existingTabs.length > 0 && existingTabs[0].id) {
-          targetTabId = existingTabs[0].id;
-        } else {
-          const newTab = await chrome.tabs.create({ url: config.url, active: false });
-          if (!newTab.id) throw new Error("failed to open Amazon tab");
-          targetTabId = newTab.id;
-          await new Promise((resolve) => {
-            let tabListener;
-            const timeout = setTimeout(() => {
-              chrome.tabs.onUpdated.removeListener(tabListener);
-              resolve();
-            }, 15e3);
-            tabListener = (tabId, info) => {
-              if (tabId === targetTabId && info.status === "complete") {
-                chrome.tabs.onUpdated.removeListener(tabListener);
-                clearTimeout(timeout);
-                resolve();
-              }
-            };
-            chrome.tabs.onUpdated.addListener(tabListener);
-          });
-        }
-        const alive = await chrome.tabs.sendMessage(targetTabId, { type: "PING" }).catch(() => null);
-        if (!alive) {
-          try {
-            await chrome.scripting.executeScript({ target: { tabId: targetTabId }, files: [config.script] });
-          } catch (e) {
-            console.error("[BG] injection failed for SYNC_AMAZON_ORDER", e);
-            throw e;
-          }
-        }
-        return new Promise((resolve) => {
-          chrome.tabs.sendMessage(
-            targetTabId,
-            { type: "SCRAPE_AMAZON_ORDER", orderNumbers },
-            (response) => {
-              if (chrome.runtime.lastError) {
-                resolve({ ok: false, error: chrome.runtime.lastError.message });
-              } else {
-                resolve(response ?? { ok: false, error: "no response" });
-              }
-            }
-          );
         });
       }
       var pendingCbmScrapes = /* @__PURE__ */ new Map();
@@ -867,7 +1239,7 @@
         return { merchants: results };
       }
       async function handlePushBigskyOrders(trackerUrl, apiKey, userId, groups, notCheckedInTracking) {
-        const url = `${upgradeUrl(trackerUrl)}/api/bigsky/sync-orders`;
+        const url = `${upgradeUrl2(trackerUrl)}/api/bigsky/sync-orders`;
         const { extensionSecret } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
         const res = await fetch(url, {
           method: "POST",
@@ -885,19 +1257,19 @@
         }
         return res.json();
       }
-      function upgradeUrl(trackerUrl) {
+      function upgradeUrl2(trackerUrl) {
         const stripped = trackerUrl.replace(/\/$/, "");
         if (/^http:\/\/(localhost|\d)/i.test(stripped)) return stripped;
         return stripped.replace(/^http:\/\//i, "https://");
       }
       async function handleFetchUsers(trackerUrl) {
-        const url = `${upgradeUrl(trackerUrl)}/api/users`;
+        const url = `${upgradeUrl2(trackerUrl)}/api/users`;
         const res = await fetch(url);
         if (!res.ok) throw new Error(`${res.status}: ${res.statusText}`);
         return res.json();
       }
       async function handlePushCostcoReceipts(trackerUrl, apiKey, userId, receipts, receiptHtml) {
-        const url = `${upgradeUrl(trackerUrl)}/api/costco/receipts`;
+        const url = `${upgradeUrl2(trackerUrl)}/api/costco/receipts`;
         console.log("[RECEIPTS] pushing", receipts.length, "receipts, userId=", userId, "url=", url);
         const { extensionSecret } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
         const res = await fetch(url, {
@@ -916,7 +1288,7 @@
         return JSON.parse(text);
       }
       async function handlePushOrders(trackerUrl, apiKey, userId, orders) {
-        const url = `${upgradeUrl(trackerUrl)}/api/import`;
+        const url = `${upgradeUrl2(trackerUrl)}/api/import`;
         const { extensionSecret } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
         const res = await fetch(url, {
           method: "POST",
