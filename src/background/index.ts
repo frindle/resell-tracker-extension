@@ -1,5 +1,7 @@
 import type { ScrapedOrder } from '../lib/types';
 import { ensureTrackerScriptRegistered } from '../lib/tracker-script';
+import { handleCapture, flushQueue, getCaptureStatus, getLastRun } from './amazonCapture';
+import { startAmazonRun, notifyOutcome, isRunTab, amazonRunActive } from './amazonRun';
 
 const ICON_PATHS_CHROME = { 16: 'icons/icon16.png', 32: 'icons/icon32.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' };
 const ICON_PATH_FIREFOX = 'icons/icon.svg';
@@ -39,11 +41,13 @@ chrome.runtime.onStartup.addListener(() => {
   reregisterTrackerScript();
 });
 chrome.alarms.onAlarm.addListener(alarm => {
-  if (alarm.name === 'pollCommands') pollAndExecuteCommands().catch(console.error);
+  if (alarm.name === 'pollCommands') {
+    pollAndExecuteCommands().catch(console.error);
+    flushQueue().catch(console.error); // retries queued captures against the tracker only
+  }
 });
 
 const PLATFORM_CONFIG: Record<string, { host: string; url: string; script: string }> = {
-  Amazon: { host: 'www.amazon.com', url: 'https://www.amazon.com/your-orders/orders', script: 'content/amazon.js' },
   Walmart: { host: 'www.walmart.com', url: 'https://www.walmart.com/orders', script: 'content/walmart.js' },
   Costco: { host: 'www.costco.com', url: 'https://www.costco.com/myaccount/', script: 'content/costco.js' },
   BigSkyBuyers: { host: 'www.bigskybuyers.com', url: 'https://www.bigskybuyers.com/main', script: 'content/bigskybuyers.js' },
@@ -249,6 +253,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // keep channel open for async response
   }
 
+  if (message.type === 'FETCH_HTML' || message.type === 'FETCH_IMAGE_BYTES') {
+    if (/(^|\.)amazon\.com$/i.test((() => { try { return new URL(String(message.url)).hostname; } catch { return ''; } })())) {
+      sendResponse({ error: 'Amazon is passive-only; the extension does not fetch Amazon URLs' });
+      return true;
+    }
+  }
+
   if (message.type === 'FETCH_HTML') {
     fetch(message.url, { credentials: 'include' })
       .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
@@ -356,6 +367,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       args: [message.token, message.clientId, message.body],
     }).then(results => sendResponse(results[0]?.result ?? { error: 'no result' }))
       .catch(e => sendResponse({ error: String(e) }));
+    return true;
+  }
+
+  if (message.type === 'AMAZON_PAGE_CAPTURE') {
+    const tabId = sender.tab?.id;
+    handleCapture(message, isRunTab(tabId))
+      .then(r => {
+        if ('result' in r && r.result) notifyOutcome(tabId, { kind: 'result', result: r.result as never });
+        else if (!r.ok) notifyOutcome(tabId, { kind: 'error', message: 'send failed' });
+        else notifyOutcome(tabId, { kind: 'result', result: {} });
+        sendResponse(r);
+      })
+      .catch(e => { notifyOutcome(tabId, { kind: 'error', message: String(e) }); sendResponse({ ok: false, error: String(e) }); });
+    return true;
+  }
+
+  if (message.type === 'AMAZON_PAGE_BLOCKED') {
+    notifyOutcome(sender.tab?.id, { kind: 'blocked' });
+    return false;
+  }
+
+  if (message.type === 'AMAZON_SYNC_NOW') {
+    // Started by a person clicking the popup button.
+    if (amazonRunActive()) { sendResponse({ started: false, reason: 'a sync is already running' }); return false; }
+    startAmazonRun().catch(console.error);
+    sendResponse({ started: true });
+    return false;
+  }
+
+  if (message.type === 'AMAZON_CAPTURE_STATUS') {
+    Promise.all([getCaptureStatus(), getLastRun()]).then(([st, run]) => sendResponse({ ...st, run, running: amazonRunActive() })).catch(() => sendResponse(null));
     return true;
   }
 
@@ -722,21 +764,16 @@ async function pollAndExecuteCommands() {
     await patchCommand(base, cmd.id, 'running', headers);
     try {
       let result: unknown;
-      if (cmd.type === 'SYNC_AMAZON') result = await runSyncCommand('Amazon');
-      else if (cmd.type === 'SYNC_WALMART') result = await runSyncCommand('Walmart');
+      if (cmd.type === 'SYNC_AMAZON' || cmd.type === 'SYNC_AMAZON_ORDER') {
+        // The old automated Amazon sync is gone; use SYNC_AMAZON_PAGES (user click).
+        throw new Error('Amazon sync is disabled; use Sync Amazon (visible tab) or just browse your orders.');
+      } else if (cmd.type === 'SYNC_AMAZON_PAGES') {
+        // Queued only by a person clicking Sync Amazon in the tracker.
+        result = await startAmazonRun();
+      } else if (cmd.type === 'SYNC_WALMART') result = await runSyncCommand('Walmart');
       else if (cmd.type === 'SYNC_COSTCO') result = await runSyncCommand('Costco');
       else if (cmd.type === 'SYNC_BIGSKY') result = await runSyncCommand('BigSkyBuyers');
       else if (cmd.type === 'SCRAPE_CBM') result = await runScrapeCbm(base, headers, cmd.payload);
-      else if (cmd.type === 'SYNC_AMAZON_ORDER') {
-        let orderNumbers: string[] = [];
-        if (cmd.payload) {
-          try {
-            const parsed = JSON.parse(cmd.payload) as { orderNumbers?: string[] };
-            if (Array.isArray(parsed.orderNumbers)) orderNumbers = parsed.orderNumbers;
-          } catch { /* ignore */ }
-        }
-        result = await runAmazonOrderSync(orderNumbers);
-      }
       await patchCommand(base, cmd.id, 'done', headers, result);
     } catch (e) {
       await patchCommand(base, cmd.id, 'failed', headers, String(e));
@@ -763,67 +800,6 @@ async function runSyncCommand(platform: string): Promise<unknown> {
     triggerSyncInBackground(platform)
       .then(() => resolve({ ok: true }))
       .catch(reject);
-  });
-}
-
-async function runAmazonOrderSync(orderNumbers: string[]): Promise<unknown> {
-  if (!orderNumbers.length) return { skipped: true, reason: 'no order numbers' };
-
-  const config = PLATFORM_CONFIG['Amazon'];
-
-  // Find or open an Amazon tab
-  let targetTabId: number | undefined;
-  let existingTabs: chrome.tabs.Tab[] = [];
-  try { existingTabs = await chrome.tabs.query({ url: `https://${config.host}/*` }); } catch { /* Firefox may not support url filter */ }
-
-  if (existingTabs.length > 0 && existingTabs[0].id) {
-    targetTabId = existingTabs[0].id;
-  } else {
-    // Open the orders page so content script is available
-    const newTab = await chrome.tabs.create({ url: config.url, active: false });
-    if (!newTab.id) throw new Error('failed to open Amazon tab');
-    targetTabId = newTab.id;
-    await new Promise<void>(resolve => {
-      let tabListener: (tabId: number, info: { status?: string }) => void;
-      const timeout = setTimeout(() => {
-        chrome.tabs.onUpdated.removeListener(tabListener);
-        resolve();
-      }, 15000);
-      tabListener = (tabId: number, info: { status?: string }) => {
-        if (tabId === targetTabId && info.status === 'complete') {
-          chrome.tabs.onUpdated.removeListener(tabListener);
-          clearTimeout(timeout);
-          resolve();
-        }
-      };
-      chrome.tabs.onUpdated.addListener(tabListener);
-    });
-  }
-
-  // Ping to check if content script is already loaded; inject if not
-  const alive = await chrome.tabs.sendMessage(targetTabId, { type: 'PING' }).catch(() => null);
-  if (!alive) {
-    try {
-      await chrome.scripting.executeScript({ target: { tabId: targetTabId }, files: [config.script] });
-    } catch (e) {
-      console.error('[BG] injection failed for SYNC_AMAZON_ORDER', e);
-      throw e;
-    }
-  }
-
-  // Send SCRAPE_AMAZON_ORDER and wait for response
-  return new Promise(resolve => {
-    chrome.tabs.sendMessage(
-      targetTabId!,
-      { type: 'SCRAPE_AMAZON_ORDER', orderNumbers },
-      (response: unknown) => {
-        if (chrome.runtime.lastError) {
-          resolve({ ok: false, error: chrome.runtime.lastError.message });
-        } else {
-          resolve(response ?? { ok: false, error: 'no response' });
-        }
-      }
-    );
   });
 }
 

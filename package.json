@@ -1,6 +1,6 @@
 {
   "name": "resell-tracker-extension",
-  "version": "1.0.1",
+  "version": "1.2.0",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -9,7 +9,8 @@
     "build:all": "node build.js && node build.js --firefox",
     "package:firefox": "node build.js --firefox && cd dist-firefox && zip -r ../resell-tracker-sync-firefox.zip .",
     "watch": "node build.js --watch",
-    "watch:firefox": "node build.js --firefox --watch"
+    "watch:firefox": "node build.js --firefox --watch",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
   },
   "keywords": [],
   "author": "",
@@ -20,6 +21,7 @@
     "@types/webextension-polyfill": "^0.12.5",
     "esbuild": "^0.28.0",
     "typescript": "^6.0.3",
-    "webextension-polyfill": "^0.12.0"
+    "webextension-polyfill": "^0.12.0",
+    "linkedom": "^0.18.5"
   }
 }

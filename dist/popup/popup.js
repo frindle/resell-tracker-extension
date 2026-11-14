@@ -159,7 +159,7 @@
   var init_storage = __esm({
     "src/lib/storage.ts"() {
       "use strict";
-      import_browser_polyfill_min = __toESM(require_browser_polyfill_min());
+      import_browser_polyfill_min = __toESM(require_browser_polyfill_min(), 1);
       DEFAULTS = {
         trackerUrl: "",
         apiKey: "",
@@ -211,6 +211,24 @@
           document.getElementById("pollStatus").textContent = "active";
           document.getElementById("pollStatus").className = "status ok";
         }
+        try {
+          const cap = await chrome.runtime.sendMessage({ type: "AMAZON_CAPTURE_STATUS" });
+          if (cap) {
+            document.getElementById("capStatus").textContent = `${cap.sentToday} today`;
+            document.getElementById("capStatus").className = `status ${cap.lastText ? cap.lastOk ? "ok" : "fail" : "idle"}`;
+            const q = cap.queued ? ` (${cap.queued} queued)` : "";
+            document.getElementById("capMeta").textContent = (cap.lastText || "no pages sent yet") + q;
+            if (cap.run) document.getElementById("runMeta").textContent = `Last sync: ${cap.run.text}`;
+            document.getElementById("syncNowBtn").disabled = cap.running;
+          }
+        } catch {
+        }
+        document.getElementById("syncNowBtn").addEventListener("click", async () => {
+          const btn = document.getElementById("syncNowBtn");
+          btn.disabled = true;
+          const r = await chrome.runtime.sendMessage({ type: "AMAZON_SYNC_NOW" }).catch(() => null);
+          document.getElementById("runMeta").textContent = r?.started ? "Sync running in a visible tab..." : r?.reason ?? "could not start";
+        });
         document.getElementById("openSettings").addEventListener("click", (e) => {
           e.preventDefault();
           chrome.runtime.openOptionsPage();
