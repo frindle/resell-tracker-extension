@@ -174,11 +174,29 @@
     }
   });
 
+  // src/lib/tracker-script.ts
+  function hostPatternFor(trackerUrl) {
+    try {
+      const u = new URL(trackerUrl.startsWith("http") ? trackerUrl : `http://${trackerUrl}`);
+      return `*://${u.hostname}/*`;
+    } catch {
+      return null;
+    }
+  }
+  var import_browser_polyfill_min2;
+  var init_tracker_script = __esm({
+    "src/lib/tracker-script.ts"() {
+      "use strict";
+      import_browser_polyfill_min2 = __toESM(require_browser_polyfill_min(), 1);
+    }
+  });
+
   // src/popup/popup.ts
   var require_popup = __commonJS({
     "src/popup/popup.ts"() {
-      var import_browser_polyfill_min2 = __toESM(require_browser_polyfill_min());
+      var import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min());
       init_storage();
+      init_tracker_script();
       async function checkVersions(trackerUrl) {
         const manifest = chrome.runtime.getManifest();
         const extVersion = manifest.version;
@@ -222,6 +240,17 @@
             document.getElementById("syncNowBtn").disabled = cap.running;
           }
         } catch {
+        }
+        const wanted = ["https://www.amazon.com/*", ...settings.trackerUrl ? [hostPatternFor(settings.trackerUrl)] : []].filter((x) => !!x);
+        const hasAccess = await chrome.permissions.contains({ origins: wanted }).catch(() => true);
+        if (!hasAccess) {
+          document.getElementById("accessRow").style.display = "flex";
+          document.getElementById("syncNowBtn").disabled = true;
+          document.getElementById("grantBtn").addEventListener("click", async () => {
+            const ok = await chrome.permissions.request({ origins: wanted }).catch(() => false);
+            if (ok) location.reload();
+            else document.getElementById("runMeta").textContent = "Access was not granted; capture will not work until it is.";
+          });
         }
         document.getElementById("syncNowBtn").addEventListener("click", async () => {
           const btn = document.getElementById("syncNowBtn");

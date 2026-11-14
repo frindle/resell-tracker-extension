@@ -497,6 +497,8 @@
         }).catch(() => {
         });
       }
+      flushQueue().catch(() => {
+      });
       chrome.runtime.onInstalled.addListener(() => {
         console.log("[Reselling Tracker] Extension installed.");
         setToolbarIcon();

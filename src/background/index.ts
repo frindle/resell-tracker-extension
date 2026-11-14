@@ -27,6 +27,12 @@ function reregisterTrackerScript() {
     if (trackerUrl) ensureTrackerScriptRegistered(trackerUrl).catch(() => {});
   }).catch(() => {});
 }
+// Firefox runs this file as an event page that is torn down when idle, and
+// Chrome as a service worker that is too: no timer can be relied on to retry
+// later. The retry queue lives in storage.local, so it is drained every time
+// the background wakes (module load) as well as on the tracker-poll alarm.
+flushQueue().catch(() => { /* tracker unreachable: stays queued */ });
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[Reselling Tracker] Extension installed.');
   setToolbarIcon();

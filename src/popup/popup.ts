@@ -1,4 +1,5 @@
 import { getSettings } from '../lib/storage';
+import { hostPatternFor } from '../lib/tracker-script';
 import type { ApiLogEntry } from '../lib/types';
 
 async function checkVersions(trackerUrl: string | undefined) {
@@ -55,6 +56,19 @@ async function init() {
       (document.getElementById('syncNowBtn') as HTMLButtonElement).disabled = cap.running;
     }
   } catch { /* background asleep */ }
+
+  // Firefox MV3 treats host permissions as opt-in: show a clear grant state instead of failing silently.
+  const wanted = ['https://www.amazon.com/*', ...(settings.trackerUrl ? [hostPatternFor(settings.trackerUrl)] : [])].filter((x): x is string => !!x);
+  const hasAccess = await chrome.permissions.contains({ origins: wanted }).catch(() => true);
+  if (!hasAccess) {
+    document.getElementById('accessRow')!.style.display = 'flex';
+    (document.getElementById('syncNowBtn') as HTMLButtonElement).disabled = true;
+    document.getElementById('grantBtn')!.addEventListener('click', async () => {
+      const ok = await chrome.permissions.request({ origins: wanted }).catch(() => false);
+      if (ok) location.reload();
+      else document.getElementById('runMeta')!.textContent = 'Access was not granted; capture will not work until it is.';
+    });
+  }
 
   document.getElementById('syncNowBtn')!.addEventListener('click', async () => {
     const btn = document.getElementById('syncNowBtn') as HTMLButtonElement;

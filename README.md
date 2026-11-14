@@ -347,3 +347,8 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ### 1.0.0
 - Initial release
+
+### Loading the Amazon passive-capture build (1.2.0)
+
+- Brave / Chrome: `brave://extensions` (or `chrome://extensions`), turn on Developer mode, Load unpacked, pick `dist/`.
+- Firefox: `about:debugging` > This Firefox > Load Temporary Add-on, pick `dist-firefox/manifest.json`. Firefox treats host access as opt-in: open the popup and press "Grant access" if it shows.
