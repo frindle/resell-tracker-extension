@@ -1,6 +1,8 @@
-// Wires the Sync now controller to real Chrome tabs. Started only by a user
-// click: the popup button, or the tracker's Sync Amazon button (a queued
-// command). Uses one visible tab and real navigation; never fetch().
+// Wires the Sync now controller to real Chrome tabs. Started by a user click
+// (the popup button, or the tracker's Sync Amazon button), which uses one
+// visible tab, or by the tracker's TRACK_AMAZON command, which uses one tab in
+// a minimized window that closes when done (left open on a block page). Real
+// navigation only; never fetch().
 import { createSyncRunner, formatRunSummary, type PageOutcome, type RunDeps } from '../lib/syncRun';
 import { saveRun, reportRun } from './amazonCapture';
 
@@ -8,6 +10,9 @@ const WAIT_MS = 30000;
 const pending = new Map<number, (o: PageOutcome) => void>();
 const early = new Map<number, PageOutcome>();
 let runTabId: number | null = null;
+// Tracking runs: the minimized window, and whether pages may fill tracking.
+let background = false;
+let runWindowId: number | null = null;
 
 function expect(tabId: number): Promise<PageOutcome> {
   return new Promise<PageOutcome>(resolve => {
@@ -34,8 +39,20 @@ let waiter: Promise<PageOutcome> | null = null;
 
 const deps: RunDeps = {
   async openTab(url) {
-    const tab = await chrome.tabs.create({ url, active: true });
-    if (!tab.id) throw new Error('could not open a tab');
+    let tab: chrome.tabs.Tab | undefined;
+    if (background) {
+      try {
+        const win = await chrome.windows.create({ url, state: 'minimized', focused: false });
+        runWindowId = win?.id ?? null;
+        tab = win?.tabs?.[0];
+      } catch {
+        // Some window managers refuse a minimized window: a background tab instead.
+        tab = await chrome.tabs.create({ url, active: false });
+      }
+    } else {
+      tab = await chrome.tabs.create({ url, active: true });
+    }
+    if (!tab?.id) throw new Error('could not open a tab');
     runTabId = tab.id;
     early.delete(tab.id);
     waiter = expect(tab.id);
@@ -44,10 +61,13 @@ const deps: RunDeps = {
   async navigate(tabId, url) {
     early.delete(tabId);
     waiter = expect(tabId);
-    await chrome.tabs.update(tabId, { url, active: true });
+    await chrome.tabs.update(tabId, background ? { url } : { url, active: true });
   },
   async waitForOutcome() { return waiter ?? { kind: 'timeout' }; },
-  async closeTab(tabId) { await chrome.tabs.remove(tabId); },
+  async closeTab(tabId) {
+    if (runWindowId !== null) await chrome.windows.remove(runWindowId);
+    else await chrome.tabs.remove(tabId);
+  },
   sleep: ms => new Promise(r => setTimeout(r, ms)),
 };
 
@@ -69,6 +89,32 @@ export async function startAmazonRun(): Promise<Record<string, unknown>> {
   await saveRun(text, out.status);
   await reportRun({ ...out, text });
   return { ...out, text };
+}
+
+/**
+ * TRACK_AMAZON: tracking for these orders, in a minimized window. Resolves
+ * with the summary, or {started:false} when a run is already going.
+ */
+export async function startTrackingRun(orders: string[]): Promise<Record<string, unknown>> {
+  if (runner.isRunning()) return { started: false, reason: 'a sync is already running' };
+  background = true;
+  runWindowId = null;
+  try {
+    const out = await runner.run({ orders, maxPages: orders.length * 4 });
+    if ('started' in out) return { started: false, reason: out.reason };
+    const text = `tracking: ${formatRunSummary(out)}`;
+    await saveRun(text, out.status);
+    return { ...out, text };
+  } finally {
+    background = false;
+    runWindowId = null;
+    runTabId = null;
+  }
+}
+
+/** True while a tracking run owns this tab: its pages may fill a blank tracking number. */
+export function isTrackRunTab(tabId: number | undefined): boolean {
+  return background && isRunTab(tabId);
 }
 
 export function amazonRunActive(): boolean { return runner.isRunning(); }

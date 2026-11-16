@@ -88,3 +88,29 @@ test('refuses non-order URLs from the tracker', async () => {
   assert.equal(s.pages, 1);
   assert.deepEqual(log.navs, []);
 });
+
+test('tracking run: each order detail page, then the track links the tracker returned (max 3), no list pages', async () => {
+  const dA = 'https://www.amazon.com/gp/your-account/order-details?orderID=111-0000000-0000001';
+  const dB = 'https://www.amazon.com/gp/your-account/order-details?orderID=112-0000000-0000002';
+  const t = (i: number) => `https://www.amazon.com/progress-tracker/package?orderId=111-0000000-0000001&i=${i}`;
+  const detail = (trackUrls: string[]): PageOutcome => ({ kind: 'result', result: { updated: 0, detail: { trackUrls } } as never });
+  const { deps, log } = fake({
+    [dA]: detail([t(1), t(2), t(3), t(4)]), [t(1)]: res({}, { updated: 1 }), [t(2)]: res({}), [t(3)]: res({}),
+    [dB]: detail([]),
+  });
+  const s = await createSyncRunner(deps).run({ orders: ['111-0000000-0000001', '112-0000000-0000002'], paceMs: 1 }) as any;
+  assert.equal(s.status, 'done');
+  assert.deepEqual(log.opened, [dA]);
+  assert.deepEqual(log.navs, [t(1), t(2), t(3), dB]);
+  assert.equal(s.updated, 1);
+  assert.deepEqual(log.closed, [7]);
+});
+
+test('tracking run stops on a block page and leaves the tab', async () => {
+  const dA = 'https://www.amazon.com/gp/your-account/order-details?orderID=111-0000000-0000001';
+  const { deps, log } = fake({ [dA]: { kind: 'blocked' } });
+  const s = await createSyncRunner(deps).run({ orders: ['111-0000000-0000001', '112-0000000-0000002'], paceMs: 1 }) as any;
+  assert.equal(s.status, 'blocked');
+  assert.equal(log.navs.length, 0);
+  assert.deepEqual(log.closed, []);
+});

@@ -51,6 +51,19 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.3.0
+- **Amazon tracking lookups in a minimized window.** When the tracker's
+  sidecar can't read an Amazon order's tracking (Amazon blocked it or it is
+  signed out), the tracker queues a `TRACK_AMAZON` command for this browser.
+  The extension opens that order's detail page and up to 3 Track package
+  pages in one minimized window, closes it when done, and the tracker saves
+  a tracking number on orders that have none (even in compare mode). Penn's
+  call, 2026-11-15.
+- It still never gets past a sign-in, CAPTCHA or block page: the run stops,
+  the minimized window stays open for you, and the tracker sends one Pushover
+  note. Orders for another tracker user are refused.
+- Waits (leaves the command queued) while another Amazon run is going.
+
 ### 1.2.0
 - **Amazon is now passive-only.** The extension reads the Amazon order pages
   you open yourself (Your Orders, order details, package tracking), sends a
