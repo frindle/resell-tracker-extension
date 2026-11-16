@@ -96,6 +96,8 @@ export interface QueueItem {
   hash: string;
   capturedAt: number;
   attempts: number;
+  /** From a TRACK_AMAZON run: the tracker may fill a blank tracking number. */
+  trackRun?: boolean;
 }
 
 /** Adds an item to the retry queue, replacing the same hash, and enforces the entry and byte caps (oldest dropped first). */

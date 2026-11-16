@@ -180,7 +180,7 @@
         ...extensionSecret ? { "X-Extension-Secret": extensionSecret } : {},
         ...userId ? { "X-Extension-User-Id": userId } : {}
       },
-      body: JSON.stringify({ url: item.url, kind: item.kind, html: item.html, hash: item.hash, capturedAt: item.capturedAt })
+      body: JSON.stringify({ url: item.url, kind: item.kind, html: item.html, hash: item.hash, capturedAt: item.capturedAt, ...item.trackRun ? { trackRun: true } : {} })
     });
     if (!res.ok) {
       const err = new Error(`tracker responded ${res.status}`);
@@ -204,14 +204,14 @@
     s.lastText = `send failed: ${msg}; queued for retry`;
     await setStats(s);
   }
-  async function handleCapture(msg, force = false) {
+  async function handleCapture(msg, force = false, trackRun = false) {
     const kind = classifyAmazonUrl(msg.url);
     if (!kind || typeof msg.html !== "string" || !msg.hash) return { ok: false, reason: "rejected" };
     const now = Date.now();
     const seen = (await chrome.storage.local.get(K_SEEN))[K_SEEN] ?? {};
     if (!force && isDuplicate(seen, msg.hash, now)) return { ok: true, duplicate: true };
     await chrome.storage.local.set({ [K_SEEN]: markSeen(seen, msg.hash, now) });
-    const item = { url: msg.url, kind, html: msg.html, hash: msg.hash, capturedAt: now, attempts: 0 };
+    const item = { url: msg.url, kind, html: msg.html, hash: msg.hash, capturedAt: now, attempts: 0, ...trackRun ? { trackRun: true } : {} };
     try {
       const result = await postPage(item);
       await recordResult(result);
@@ -343,6 +343,17 @@
         return out;
       };
       try {
+        if (opts.orders) {
+          outer: for (const o of opts.orders) {
+            const out = await visit(detailUrlFor(o));
+            if (!out) break;
+            const trackUrls = out.kind === "result" ? (out.result.detail?.trackUrls ?? []).slice(0, MAX_TRACK_PAGES_PER_ORDER) : [];
+            for (const u of trackUrls) {
+              if (!await visit(u)) break outer;
+            }
+          }
+          return sum;
+        }
         let listUrl = opts.startUrl ?? START_URL;
         const seenLists = /* @__PURE__ */ new Set();
         while (listUrl && !seenLists.has(listUrl)) {
@@ -379,7 +390,7 @@
     }
     return { run, isRunning: () => running };
   }
-  var START_URL, DEFAULT_MAX_PAGES, DEFAULT_PACE_MS;
+  var START_URL, DEFAULT_MAX_PAGES, DEFAULT_PACE_MS, MAX_TRACK_PAGES_PER_ORDER, detailUrlFor;
   var init_syncRun = __esm({
     "src/lib/syncRun.ts"() {
       "use strict";
@@ -387,6 +398,8 @@
       START_URL = "https://www.amazon.com/your-orders/orders?timeFilter=last30";
       DEFAULT_MAX_PAGES = 40;
       DEFAULT_PACE_MS = 4e3;
+      MAX_TRACK_PAGES_PER_ORDER = 3;
+      detailUrlFor = (orderNumber) => `https://www.amazon.com/gp/your-account/order-details?orderID=${encodeURIComponent(orderNumber)}`;
     }
   });
 
@@ -426,10 +439,29 @@
     await reportRun({ ...out, text });
     return { ...out, text };
   }
+  async function startTrackingRun(orders) {
+    if (runner.isRunning()) return { started: false, reason: "a sync is already running" };
+    background = true;
+    runWindowId = null;
+    try {
+      const out = await runner.run({ orders, maxPages: orders.length * 4 });
+      if ("started" in out) return { started: false, reason: out.reason };
+      const text = `tracking: ${formatRunSummary(out)}`;
+      await saveRun(text, out.status);
+      return { ...out, text };
+    } finally {
+      background = false;
+      runWindowId = null;
+      runTabId = null;
+    }
+  }
+  function isTrackRunTab(tabId) {
+    return background && isRunTab(tabId);
+  }
   function amazonRunActive() {
     return runner.isRunning();
   }
-  var WAIT_MS, pending, early, runTabId, waiter, deps, runner;
+  var WAIT_MS, pending, early, runTabId, background, runWindowId, waiter, deps, runner;
   var init_amazonRun = __esm({
     "src/background/amazonRun.ts"() {
       "use strict";
@@ -439,11 +471,24 @@
       pending = /* @__PURE__ */ new Map();
       early = /* @__PURE__ */ new Map();
       runTabId = null;
+      background = false;
+      runWindowId = null;
       waiter = null;
       deps = {
         async openTab(url) {
-          const tab = await chrome.tabs.create({ url, active: true });
-          if (!tab.id) throw new Error("could not open a tab");
+          let tab;
+          if (background) {
+            try {
+              const win = await chrome.windows.create({ url, state: "minimized", focused: false });
+              runWindowId = win?.id ?? null;
+              tab = win?.tabs?.[0];
+            } catch {
+              tab = await chrome.tabs.create({ url, active: false });
+            }
+          } else {
+            tab = await chrome.tabs.create({ url, active: true });
+          }
+          if (!tab?.id) throw new Error("could not open a tab");
           runTabId = tab.id;
           early.delete(tab.id);
           waiter = expect(tab.id);
@@ -452,13 +497,14 @@
         async navigate(tabId, url) {
           early.delete(tabId);
           waiter = expect(tabId);
-          await chrome.tabs.update(tabId, { url, active: true });
+          await chrome.tabs.update(tabId, background ? { url } : { url, active: true });
         },
         async waitForOutcome() {
           return waiter ?? { kind: "timeout" };
         },
         async closeTab(tabId) {
-          await chrome.tabs.remove(tabId);
+          if (runWindowId !== null) await chrome.windows.remove(runWindowId);
+          else await chrome.tabs.remove(tabId);
         },
         sleep: (ms) => new Promise((r) => setTimeout(r, ms))
       };
@@ -471,12 +517,38 @@
     }
   });
 
+  // src/lib/trackCommand.ts
+  function trackCommandPlan(payloadJson, settingsUserId, runActive) {
+    if (runActive) return { action: "wait" };
+    let p = null;
+    try {
+      p = payloadJson ? JSON.parse(payloadJson) : null;
+    } catch {
+      p = null;
+    }
+    if (!p || !Array.isArray(p.orderNumbers)) return { action: "fail", error: "bad payload" };
+    if (p.userId != null && String(p.userId) !== String(settingsUserId ?? "")) {
+      return { action: "fail", error: `orders belong to user ${String(p.userId)}, this extension is user ${String(settingsUserId ?? "unset")}` };
+    }
+    const orders = [...new Set(p.orderNumbers.map((o) => String(o).trim()).filter((o) => AMAZON_ORDER.test(o)))];
+    if (!orders.length) return { action: "fail", error: "no Amazon order numbers" };
+    return { action: "run", orders };
+  }
+  var AMAZON_ORDER;
+  var init_trackCommand = __esm({
+    "src/lib/trackCommand.ts"() {
+      "use strict";
+      AMAZON_ORDER = /^\d{3}-\d{7}-\d{7}$/;
+    }
+  });
+
   // src/background/index.ts
   var require_background = __commonJS({
     "src/background/index.ts"() {
       init_tracker_script();
       init_amazonCapture2();
       init_amazonRun();
+      init_trackCommand();
       var ICON_PATHS_CHROME = { 16: "icons/icon16.png", 32: "icons/icon32.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
       var ICON_PATH_FIREFOX = "icons/icon.svg";
       var _browser = globalThis.browser;
@@ -809,7 +881,7 @@
         }
         if (message.type === "AMAZON_PAGE_CAPTURE") {
           const tabId = sender.tab?.id;
-          handleCapture(message, isRunTab(tabId)).then((r) => {
+          handleCapture(message, isRunTab(tabId), isTrackRunTab(tabId)).then((r) => {
             if ("result" in r && r.result) notifyOutcome(tabId, { kind: "result", result: r.result });
             else if (!r.ok) notifyOutcome(tabId, { kind: "error", message: "send failed" });
             else notifyOutcome(tabId, { kind: "result", result: {} });
@@ -1154,6 +1226,26 @@
           return;
         }
         for (const cmd of commands) {
+          if (cmd.type === "TRACK_AMAZON") {
+            const plan = trackCommandPlan(cmd.payload, userId, amazonRunActive());
+            if (plan.action === "wait") continue;
+            await patchCommand(base, cmd.id, "running", headers);
+            if (plan.action === "fail") {
+              await patchCommand(base, cmd.id, "failed", headers, { error: plan.error });
+              continue;
+            }
+            try {
+              const out = await startTrackingRun(plan.orders);
+              const status = out.status;
+              if (out.started === false) await patchCommand(base, cmd.id, "failed", headers, { error: String(out.reason) });
+              else if (status === "blocked") await patchCommand(base, cmd.id, "failed", headers, { blocked: true, error: "sign-in, CAPTCHA or block page", text: out.text });
+              else if (status === "error") await patchCommand(base, cmd.id, "failed", headers, { error: String(out.message || "run failed"), text: out.text });
+              else await patchCommand(base, cmd.id, "done", headers, out);
+            } catch (e) {
+              await patchCommand(base, cmd.id, "failed", headers, { error: String(e) });
+            }
+            continue;
+          }
           await patchCommand(base, cmd.id, "running", headers);
           try {
             let result;

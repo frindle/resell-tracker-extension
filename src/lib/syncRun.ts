@@ -1,10 +1,12 @@
-// "Sync now" run controller. Only a person's click starts a run (popup button,
-// or the tracker's Sync Amazon button queueing a command). It opens ONE normal,
-// visible tab and navigates it page by page; each page is then read by the same
-// passive capture path as any page the user opens by hand. No fetch() of Amazon
-// pages, no timers or alarms that start a run, no workarounds for blocks: if a
-// page is a sign-in, CAPTCHA or agent-block page the run stops and leaves the
-// tab open for the user.
+// "Sync now" run controller. A run starts from a person's click (popup button,
+// or the tracker's Sync Amazon button queueing a command), or, since Penn's
+// call on 2026-11-15, from the tracker's TRACK_AMAZON command: tracking for
+// orders whose shipped email had none, after the sidecar was blocked. A
+// tracking run visits only those orders' detail and Track package pages, in a
+// minimized window. It navigates ONE tab page by page; each page is read by the
+// same passive capture path as any page the user opens by hand. No fetch() of
+// Amazon pages, no workarounds for blocks: if a page is a sign-in, CAPTCHA or
+// agent-block page the run stops and leaves the tab open for the user.
 import { classifyAmazonUrl, type PageResult } from './amazonCapture.ts';
 
 export const START_URL = 'https://www.amazon.com/your-orders/orders?timeFilter=last30';
@@ -12,6 +14,10 @@ export const DEFAULT_MAX_PAGES = 40;
 export const DEFAULT_PACE_MS = 4000;
 
 export interface NeedItem { orderNumber: string; detailUrl?: string | null; trackUrls?: string[] }
+export const MAX_TRACK_PAGES_PER_ORDER = 3;
+export const detailUrlFor = (orderNumber: string) =>
+  `https://www.amazon.com/gp/your-account/order-details?orderID=${encodeURIComponent(orderNumber)}`;
+
 export interface ListInfo {
   nextUrl?: string | null;
   reachedWindow?: boolean;
@@ -19,7 +25,7 @@ export interface ListInfo {
   needs?: NeedItem[];
 }
 export type PageOutcome =
-  | { kind: 'result'; result: PageResult & { list?: ListInfo } }
+  | { kind: 'result'; result: PageResult & { list?: ListInfo; detail?: { trackUrls?: string[] } } }
   | { kind: 'blocked' }
   | { kind: 'timeout' }
   | { kind: 'error'; message: string };
@@ -52,7 +58,8 @@ export function formatRunSummary(s: RunSummary): string {
 export function createSyncRunner(deps: RunDeps) {
   let running = false;
 
-  async function run(opts: { maxPages?: number; paceMs?: number; startUrl?: string } = {}): Promise<RunSummary | { started: false; reason: string }> {
+  /** opts.orders: a tracking run, only these orders' detail and Track package pages. */
+  async function run(opts: { maxPages?: number; paceMs?: number; startUrl?: string; orders?: string[] } = {}): Promise<RunSummary | { started: false; reason: string }> {
     if (running) return { started: false, reason: 'a sync is already running' };
     running = true;
     const maxPages = opts.maxPages ?? DEFAULT_MAX_PAGES;
@@ -96,6 +103,20 @@ export function createSyncRunner(deps: RunDeps) {
     };
 
     try {
+      if (opts.orders) {
+        // Tracking run: each order's detail page, then the Track package
+        // links the tracker returns for it while it still has no tracking.
+        outer: for (const o of opts.orders) {
+          const out = await visit(detailUrlFor(o));
+          if (!out) break;
+          const trackUrls = out.kind === 'result' ? (out.result.detail?.trackUrls ?? []).slice(0, MAX_TRACK_PAGES_PER_ORDER) : [];
+          for (const u of trackUrls) {
+            if (!(await visit(u))) break outer;
+          }
+        }
+        return sum;
+      }
+
       // 1. Walk the order-list pages until the window / known-complete orders / no next page.
       let listUrl: string | null = opts.startUrl ?? START_URL;
       const seenLists = new Set<string>();

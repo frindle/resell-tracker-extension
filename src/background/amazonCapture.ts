@@ -58,7 +58,7 @@ async function postPage(item: QueueItem): Promise<PageResult & { list?: unknown 
       ...(extensionSecret ? { 'X-Extension-Secret': extensionSecret } : {}),
       ...(userId ? { 'X-Extension-User-Id': userId } : {}),
     },
-    body: JSON.stringify({ url: item.url, kind: item.kind, html: item.html, hash: item.hash, capturedAt: item.capturedAt }),
+    body: JSON.stringify({ url: item.url, kind: item.kind, html: item.html, hash: item.hash, capturedAt: item.capturedAt, ...(item.trackRun ? { trackRun: true } : {}) }),
   });
   if (!res.ok) {
     // 4xx other than auth/rate limit will never succeed on retry.
@@ -86,7 +86,7 @@ async function recordFailure(msg: string) {
   await setStats(s);
 }
 
-export async function handleCapture(msg: { url: string; kind: AmazonPageKind; html: string; hash: string }, force = false) {
+export async function handleCapture(msg: { url: string; kind: AmazonPageKind; html: string; hash: string }, force = false, trackRun = false) {
   // Re-validate in the worker: only known Amazon order pages are accepted.
   const kind = classifyAmazonUrl(msg.url);
   if (!kind || typeof msg.html !== 'string' || !msg.hash) return { ok: false, reason: 'rejected' };
@@ -95,7 +95,7 @@ export async function handleCapture(msg: { url: string; kind: AmazonPageKind; ht
   if (!force && isDuplicate(seen, msg.hash, now)) return { ok: true, duplicate: true };
   await chrome.storage.local.set({ [K_SEEN]: markSeen(seen, msg.hash, now) });
 
-  const item: QueueItem = { url: msg.url, kind, html: msg.html, hash: msg.hash, capturedAt: now, attempts: 0 };
+  const item: QueueItem = { url: msg.url, kind, html: msg.html, hash: msg.hash, capturedAt: now, attempts: 0, ...(trackRun ? { trackRun: true } : {}) };
   try {
     const result = await postPage(item);
     await recordResult(result);

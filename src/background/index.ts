@@ -1,7 +1,8 @@
 import type { ScrapedOrder } from '../lib/types';
 import { ensureTrackerScriptRegistered } from '../lib/tracker-script';
 import { handleCapture, flushQueue, getCaptureStatus, getLastRun } from './amazonCapture';
-import { startAmazonRun, notifyOutcome, isRunTab, amazonRunActive } from './amazonRun';
+import { startAmazonRun, startTrackingRun, notifyOutcome, isRunTab, isTrackRunTab, amazonRunActive } from './amazonRun';
+import { trackCommandPlan } from '../lib/trackCommand';
 
 const ICON_PATHS_CHROME = { 16: 'icons/icon16.png', 32: 'icons/icon32.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' };
 const ICON_PATH_FIREFOX = 'icons/icon.svg';
@@ -378,7 +379,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'AMAZON_PAGE_CAPTURE') {
     const tabId = sender.tab?.id;
-    handleCapture(message, isRunTab(tabId))
+    handleCapture(message, isRunTab(tabId), isTrackRunTab(tabId))
       .then(r => {
         if ('result' in r && r.result) notifyOutcome(tabId, { kind: 'result', result: r.result as never });
         else if (!r.ok) notifyOutcome(tabId, { kind: 'error', message: 'send failed' });
@@ -767,6 +768,25 @@ async function pollAndExecuteCommands() {
   } catch { return; }
 
   for (const cmd of commands) {
+    if (cmd.type === 'TRACK_AMAZON') {
+      // Tracking the sidecar couldn't get (blocked or signed out), in a
+      // minimized window. Left pending while another Amazon run is going.
+      const plan = trackCommandPlan(cmd.payload, userId, amazonRunActive());
+      if (plan.action === 'wait') continue;
+      await patchCommand(base, cmd.id, 'running', headers);
+      if (plan.action === 'fail') { await patchCommand(base, cmd.id, 'failed', headers, { error: plan.error }); continue; }
+      try {
+        const out = await startTrackingRun(plan.orders);
+        const status = out.status as string | undefined;
+        if (out.started === false) await patchCommand(base, cmd.id, 'failed', headers, { error: String(out.reason) });
+        else if (status === 'blocked') await patchCommand(base, cmd.id, 'failed', headers, { blocked: true, error: 'sign-in, CAPTCHA or block page', text: out.text });
+        else if (status === 'error') await patchCommand(base, cmd.id, 'failed', headers, { error: String(out.message || 'run failed'), text: out.text });
+        else await patchCommand(base, cmd.id, 'done', headers, out);
+      } catch (e) {
+        await patchCommand(base, cmd.id, 'failed', headers, { error: String(e) });
+      }
+      continue;
+    }
     await patchCommand(base, cmd.id, 'running', headers);
     try {
       let result: unknown;
