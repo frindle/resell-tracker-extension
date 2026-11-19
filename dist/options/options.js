@@ -194,6 +194,27 @@
     }
   });
 
+  // src/lib/access.ts
+  function originsFor(trackerUrl) {
+    const out = [...AMAZON_ORIGINS];
+    if (trackerUrl) {
+      try {
+        const u = new URL(trackerUrl.startsWith("http") ? trackerUrl : `http://${trackerUrl}`);
+        out.push(`http://${u.hostname}/*`, `https://${u.hostname}/*`);
+      } catch {
+      }
+    }
+    return out;
+  }
+  var import_browser_polyfill_min3, AMAZON_ORIGINS;
+  var init_access = __esm({
+    "src/lib/access.ts"() {
+      "use strict";
+      import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min(), 1);
+      AMAZON_ORIGINS = ["https://www.amazon.com/*"];
+    }
+  });
+
   // src/lib/tracker-script.ts
   function hostPatternFor(trackerUrl) {
     try {
@@ -218,8 +239,9 @@
   async function grantTrackerAccess(trackerUrl) {
     const pattern = hostPatternFor(trackerUrl);
     if (!pattern) return false;
-    const granted = await chrome.permissions.request({ origins: [pattern] });
-    if (!granted) return false;
+    const origins = originsFor(trackerUrl).filter((o) => !o.includes("amazon.com"));
+    await chrome.permissions.request({ origins }).catch(() => false);
+    if (!await chrome.permissions.contains({ origins }).catch(() => false)) return false;
     await registerTrackerScript(pattern);
     return true;
   }
@@ -230,11 +252,12 @@
     if (!has) return;
     await registerTrackerScript(pattern);
   }
-  var import_browser_polyfill_min3, TRACKER_SCRIPT_ID;
+  var import_browser_polyfill_min4, TRACKER_SCRIPT_ID;
   var init_tracker_script = __esm({
     "src/lib/tracker-script.ts"() {
       "use strict";
-      import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min(), 1);
+      import_browser_polyfill_min4 = __toESM(require_browser_polyfill_min(), 1);
+      init_access();
       TRACKER_SCRIPT_ID = "tracker-status";
     }
   });
@@ -242,7 +265,7 @@
   // src/options/options.ts
   var require_options = __commonJS({
     "src/options/options.ts"() {
-      var import_browser_polyfill_min4 = __toESM(require_browser_polyfill_min());
+      var import_browser_polyfill_min5 = __toESM(require_browser_polyfill_min());
       init_storage();
       init_api();
       init_tracker_script();
@@ -286,9 +309,9 @@
         document.getElementById("connect").addEventListener("click", async () => {
           const trackerUrl = document.getElementById("trackerUrl").value.trim();
           if (!trackerUrl) return;
+          const granting = grantTrackerAccess(trackerUrl).catch(() => false);
           await saveSettings({ trackerUrl });
-          await grantTrackerAccess(trackerUrl).catch(() => {
-          });
+          await granting;
           await loadUsers(trackerUrl);
         });
         document.getElementById("saveUser").addEventListener("click", async () => {

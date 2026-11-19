@@ -13,6 +13,13 @@
       __defProp(target, name, { get: all[name], enumerable: true });
   };
 
+  // src/lib/access.ts
+  var init_access = __esm({
+    "src/lib/access.ts"() {
+      "use strict";
+    }
+  });
+
   // src/lib/tracker-script.ts
   function hostPatternFor(trackerUrl) {
     try {
@@ -45,6 +52,7 @@
   var init_tracker_script = __esm({
     "src/lib/tracker-script.ts"() {
       "use strict";
+      init_access();
       TRACKER_SCRIPT_ID = "tracker-status";
     }
   });

@@ -51,6 +51,10 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.3.1
+
+- Fix "Grant access" not working in Brave: the grant now requests only the missing origins as explicit http/https patterns, decides success with `permissions.contains` instead of the request result, calls `permissions.request` before any await (also on the options Connect button), re-checks when the popup regains focus, offers "Grant in a tab" as a fallback, and shows Brave Site access instructions when denied.
+
 ### 1.3.0
 - **Amazon tracking lookups in a minimized window.** When the tracker's
   sidecar can't read an Amazon order's tracking (Amazon blocked it or it is

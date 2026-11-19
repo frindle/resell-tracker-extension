@@ -1,5 +1,5 @@
 import { getSettings } from '../lib/storage';
-import { hostPatternFor } from '../lib/tracker-script';
+import { originsFor, missingOrigins, requestGrant } from '../lib/access';
 import type { ApiLogEntry } from '../lib/types';
 
 async function checkVersions(trackerUrl: string | undefined) {
@@ -57,16 +57,33 @@ async function init() {
     }
   } catch { /* background asleep */ }
 
-  // Firefox MV3 treats host permissions as opt-in: show a clear grant state instead of failing silently.
-  const wanted = ['https://www.amazon.com/*', ...(settings.trackerUrl ? [hostPatternFor(settings.trackerUrl)] : [])].filter((x): x is string => !!x);
-  const hasAccess = await chrome.permissions.contains({ origins: wanted }).catch(() => true);
-  if (!hasAccess) {
-    document.getElementById('accessRow')!.style.display = 'flex';
-    (document.getElementById('syncNowBtn') as HTMLButtonElement).disabled = true;
-    document.getElementById('grantBtn')!.addEventListener('click', async () => {
-      const ok = await chrome.permissions.request({ origins: wanted }).catch(() => false);
-      if (ok) location.reload();
-      else document.getElementById('runMeta')!.textContent = 'Access was not granted; capture will not work until it is.';
+  // Host permissions can be opt-in (Firefox MV3, Brave site access): show a clear grant state instead of failing silently.
+  const wanted = originsFor(settings.trackerUrl);
+  const refresh = async () => {
+    const miss = await missingOrigins(chrome.permissions, wanted);
+    const row = document.getElementById('accessRow')!;
+    row.style.display = miss.length ? 'flex' : 'none';
+    (document.getElementById('syncNowBtn') as HTMLButtonElement).disabled = miss.length > 0;
+    return miss;
+  };
+  let missing = await refresh();
+  if (missing.length) {
+    const grantBtn = document.getElementById('grantBtn')!;
+    // No await before permissions.request: Brave drops the user gesture otherwise.
+    grantBtn.addEventListener('click', () => {
+      const p = requestGrant(chrome.permissions, missing, wanted);
+      p.then(async r => {
+        document.getElementById('runMeta')!.textContent = r.message;
+        if (r.ok) location.reload();
+        else {
+          document.getElementById('grantTabBtn')!.style.display = 'inline-block';
+        }
+      });
+    });
+    // The browser prompt can close the popup; also re-check when focus returns (tab / standalone window).
+    window.addEventListener('focus', () => { refresh().then(m => { missing = m; if (!m.length) location.reload(); }); });
+    document.getElementById('grantTabBtn')!.addEventListener('click', () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('popup/popup.html?standalone=1') });
     });
   }
 

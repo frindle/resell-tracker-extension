@@ -174,20 +174,42 @@
     }
   });
 
-  // src/lib/tracker-script.ts
-  function hostPatternFor(trackerUrl) {
-    try {
-      const u = new URL(trackerUrl.startsWith("http") ? trackerUrl : `http://${trackerUrl}`);
-      return `*://${u.hostname}/*`;
-    } catch {
-      return null;
+  // src/lib/access.ts
+  function originsFor(trackerUrl) {
+    const out = [...AMAZON_ORIGINS];
+    if (trackerUrl) {
+      try {
+        const u = new URL(trackerUrl.startsWith("http") ? trackerUrl : `http://${trackerUrl}`);
+        out.push(`http://${u.hostname}/*`, `https://${u.hostname}/*`);
+      } catch {
+      }
     }
+    return out;
   }
-  var import_browser_polyfill_min2;
-  var init_tracker_script = __esm({
-    "src/lib/tracker-script.ts"() {
+  async function missingOrigins(perms, wanted) {
+    const checks = await Promise.all(wanted.map((o) => perms.contains({ origins: [o] }).catch(() => false)));
+    return wanted.filter((_, i) => !checks[i]);
+  }
+  function requestGrant(perms, missing, wanted) {
+    let pending;
+    try {
+      pending = perms.request({ origins: missing });
+    } catch (e) {
+      pending = Promise.reject(e);
+    }
+    return pending.then(() => true, () => false).then(async () => {
+      const still = await missingOrigins(perms, wanted);
+      if (!still.length) return { ok: true, message: "Access granted." };
+      return { ok: false, message: `Access was not granted; capture will not work until it is. ${BRAVE_HELP}` };
+    });
+  }
+  var import_browser_polyfill_min2, AMAZON_ORIGINS, BRAVE_HELP;
+  var init_access = __esm({
+    "src/lib/access.ts"() {
       "use strict";
       import_browser_polyfill_min2 = __toESM(require_browser_polyfill_min(), 1);
+      AMAZON_ORIGINS = ["https://www.amazon.com/*"];
+      BRAVE_HELP = 'If it keeps failing in Brave: open brave://extensions, click Details on this extension, set "Site access" to "On all sites" (or add the sites), then reopen this popup.';
     }
   });
 
@@ -196,7 +218,7 @@
     "src/popup/popup.ts"() {
       var import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min());
       init_storage();
-      init_tracker_script();
+      init_access();
       async function checkVersions(trackerUrl) {
         const manifest = chrome.runtime.getManifest();
         const extVersion = manifest.version;
@@ -241,15 +263,35 @@
           }
         } catch {
         }
-        const wanted = ["https://www.amazon.com/*", ...settings.trackerUrl ? [hostPatternFor(settings.trackerUrl)] : []].filter((x) => !!x);
-        const hasAccess = await chrome.permissions.contains({ origins: wanted }).catch(() => true);
-        if (!hasAccess) {
-          document.getElementById("accessRow").style.display = "flex";
-          document.getElementById("syncNowBtn").disabled = true;
-          document.getElementById("grantBtn").addEventListener("click", async () => {
-            const ok = await chrome.permissions.request({ origins: wanted }).catch(() => false);
-            if (ok) location.reload();
-            else document.getElementById("runMeta").textContent = "Access was not granted; capture will not work until it is.";
+        const wanted = originsFor(settings.trackerUrl);
+        const refresh = async () => {
+          const miss = await missingOrigins(chrome.permissions, wanted);
+          const row = document.getElementById("accessRow");
+          row.style.display = miss.length ? "flex" : "none";
+          document.getElementById("syncNowBtn").disabled = miss.length > 0;
+          return miss;
+        };
+        let missing = await refresh();
+        if (missing.length) {
+          const grantBtn = document.getElementById("grantBtn");
+          grantBtn.addEventListener("click", () => {
+            const p = requestGrant(chrome.permissions, missing, wanted);
+            p.then(async (r) => {
+              document.getElementById("runMeta").textContent = r.message;
+              if (r.ok) location.reload();
+              else {
+                document.getElementById("grantTabBtn").style.display = "inline-block";
+              }
+            });
+          });
+          window.addEventListener("focus", () => {
+            refresh().then((m) => {
+              missing = m;
+              if (!m.length) location.reload();
+            });
+          });
+          document.getElementById("grantTabBtn").addEventListener("click", () => {
+            chrome.tabs.create({ url: chrome.runtime.getURL("popup/popup.html?standalone=1") });
           });
         }
         document.getElementById("syncNowBtn").addEventListener("click", async () => {

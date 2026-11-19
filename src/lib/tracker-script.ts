@@ -1,3 +1,4 @@
+import { originsFor } from './access';
 // The tracker-status banner (src/content/tracker-status.ts) only needs to run
 // on the user's own configured tracker origin, not on every site they visit.
 // Rather than a static <all_urls> content_scripts entry (which forces the
@@ -33,8 +34,10 @@ async function registerTrackerScript(pattern: string): Promise<void> {
 export async function grantTrackerAccess(trackerUrl: string): Promise<boolean> {
   const pattern = hostPatternFor(trackerUrl);
   if (!pattern) return false;
-  const granted = await chrome.permissions.request({ origins: [pattern] });
-  if (!granted) return false;
+  // First await-free call in the handler chain; explicit http/https origins (Brave rejects wildcard-scheme patterns).
+  const origins = originsFor(trackerUrl).filter(o => !o.includes('amazon.com'));
+  await chrome.permissions.request({ origins }).catch(() => false);
+  if (!(await chrome.permissions.contains({ origins }).catch(() => false))) return false;
   await registerTrackerScript(pattern);
   return true;
 }
