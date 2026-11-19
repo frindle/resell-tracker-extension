@@ -57,10 +57,13 @@ async function init() {
   document.getElementById('connect')!.addEventListener('click', async () => {
     const trackerUrl = (document.getElementById('trackerUrl') as HTMLInputElement).value.trim();
     if (!trackerUrl) return;
-    await saveSettings({ trackerUrl });
     // Ask for access to just this origin so the sync-status banner can run
     // there, instead of the extension holding <all_urls> permanently.
-    await grantTrackerAccess(trackerUrl).catch(() => {});
+    // permissions.request must be the first call in the click (before any
+    // await), or Brave drops the user gesture.
+    const granting = grantTrackerAccess(trackerUrl).catch(() => false);
+    await saveSettings({ trackerUrl });
+    await granting;
     await loadUsers(trackerUrl);
   });
 
