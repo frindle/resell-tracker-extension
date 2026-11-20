@@ -14,6 +14,38 @@ let runTabId: number | null = null;
 let background = false;
 let runWindowId: number | null = null;
 
+// The browser stops an idle background worker after 30 seconds, which used to
+// end a run half way and leave its tab open. A run keeps the worker awake, and
+// records its tab so a restarted worker can still close it.
+const RUN_TAB_KEY = 'amazonRunTab';
+const KEEPALIVE_MS = 20000;
+const store = () => chrome.storage.session ?? chrome.storage.local;
+
+async function rememberRunTab(tabId: number, windowId: number | null) {
+  try { await store().set({ [RUN_TAB_KEY]: { tabId, windowId } }); } catch { /* best-effort */ }
+}
+async function forgetRunTab() {
+  try { await store().remove(RUN_TAB_KEY); } catch { /* best-effort */ }
+}
+async function keepAwake<T>(work: () => Promise<T>): Promise<T> {
+  const t = setInterval(() => { chrome.runtime.getPlatformInfo().catch(() => {}); }, KEEPALIVE_MS);
+  try { return await work(); } finally { clearInterval(t); await forgetRunTab(); }
+}
+
+/** On worker start: closes the tab of a run the browser cut short. */
+export async function closeOrphanRunTab() {
+  if (runner.isRunning()) return;
+  try {
+    const got = await store().get(RUN_TAB_KEY);
+    const rec = got[RUN_TAB_KEY] as { tabId?: number; windowId?: number | null } | undefined;
+    if (!rec) return;
+    await forgetRunTab();
+    if (typeof rec.windowId === 'number') await chrome.windows.remove(rec.windowId).catch(() => {});
+    else if (typeof rec.tabId === 'number') await chrome.tabs.remove(rec.tabId).catch(() => {});
+    await saveRun('stopped early; tab closed', 'error');
+  } catch { /* best-effort */ }
+}
+
 function expect(tabId: number): Promise<PageOutcome> {
   return new Promise<PageOutcome>(resolve => {
     const done = (o: PageOutcome) => { clearTimeout(t); pending.delete(tabId); resolve(o); };
@@ -56,6 +88,7 @@ const deps: RunDeps = {
     runTabId = tab.id;
     early.delete(tab.id);
     waiter = expect(tab.id);
+    await rememberRunTab(tab.id, runWindowId);
     return tab.id;
   },
   async navigate(tabId, url) {
@@ -82,7 +115,7 @@ const runner = createSyncRunner(deps);
 /** Starts one run. Resolves with the summary, or {started:false} when one is already running. */
 export async function startAmazonRun(): Promise<Record<string, unknown>> {
   await saveRun('running...', 'running');
-  const out = await runner.run();
+  const out = await keepAwake(() => runner.run());
   runTabId = null;
   if ('started' in out) return { started: false, reason: out.reason };
   const text = formatRunSummary(out);
@@ -100,7 +133,7 @@ export async function startTrackingRun(orders: string[]): Promise<Record<string,
   background = true;
   runWindowId = null;
   try {
-    const out = await runner.run({ orders, maxPages: orders.length * 4 });
+    const out = await keepAwake(() => runner.run({ orders, maxPages: orders.length * 4 }));
     if ('started' in out) return { started: false, reason: out.reason };
     const text = `tracking: ${formatRunSummary(out)}`;
     await saveRun(text, out.status);

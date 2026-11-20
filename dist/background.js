@@ -423,6 +423,45 @@
   });
 
   // src/background/amazonRun.ts
+  async function rememberRunTab(tabId, windowId) {
+    try {
+      await store().set({ [RUN_TAB_KEY]: { tabId, windowId } });
+    } catch {
+    }
+  }
+  async function forgetRunTab() {
+    try {
+      await store().remove(RUN_TAB_KEY);
+    } catch {
+    }
+  }
+  async function keepAwake(work) {
+    const t = setInterval(() => {
+      chrome.runtime.getPlatformInfo().catch(() => {
+      });
+    }, KEEPALIVE_MS);
+    try {
+      return await work();
+    } finally {
+      clearInterval(t);
+      await forgetRunTab();
+    }
+  }
+  async function closeOrphanRunTab() {
+    if (runner.isRunning()) return;
+    try {
+      const got = await store().get(RUN_TAB_KEY);
+      const rec = got[RUN_TAB_KEY];
+      if (!rec) return;
+      await forgetRunTab();
+      if (typeof rec.windowId === "number") await chrome.windows.remove(rec.windowId).catch(() => {
+      });
+      else if (typeof rec.tabId === "number") await chrome.tabs.remove(rec.tabId).catch(() => {
+      });
+      await saveRun("stopped early; tab closed", "error");
+    } catch {
+    }
+  }
   function expect(tabId) {
     return new Promise((resolve) => {
       const done = (o) => {
@@ -450,7 +489,7 @@
   }
   async function startAmazonRun() {
     await saveRun("running...", "running");
-    const out = await runner.run();
+    const out = await keepAwake(() => runner.run());
     runTabId = null;
     if ("started" in out) return { started: false, reason: out.reason };
     const text = formatRunSummary(out);
@@ -463,7 +502,7 @@
     background = true;
     runWindowId = null;
     try {
-      const out = await runner.run({ orders, maxPages: orders.length * 4 });
+      const out = await keepAwake(() => runner.run({ orders, maxPages: orders.length * 4 }));
       if ("started" in out) return { started: false, reason: out.reason };
       const text = `tracking: ${formatRunSummary(out)}`;
       await saveRun(text, out.status);
@@ -480,7 +519,7 @@
   function amazonRunActive() {
     return runner.isRunning();
   }
-  var WAIT_MS, pending, early, runTabId, background, runWindowId, waiter, deps, runner;
+  var WAIT_MS, pending, early, runTabId, background, runWindowId, RUN_TAB_KEY, KEEPALIVE_MS, store, waiter, deps, runner;
   var init_amazonRun = __esm({
     "src/background/amazonRun.ts"() {
       "use strict";
@@ -492,6 +531,9 @@
       runTabId = null;
       background = false;
       runWindowId = null;
+      RUN_TAB_KEY = "amazonRunTab";
+      KEEPALIVE_MS = 2e4;
+      store = () => chrome.storage.session ?? chrome.storage.local;
       waiter = null;
       deps = {
         async openTab(url) {
@@ -511,6 +553,7 @@
           runTabId = tab.id;
           early.delete(tab.id);
           waiter = expect(tab.id);
+          await rememberRunTab(tab.id, runWindowId);
           return tab.id;
         },
         async navigate(tabId, url) {
@@ -921,6 +964,10 @@
             sendResponse({ ok: false, error: String(e) });
           });
           return true;
+        }
+        if (message.type === "AMAZON_PAGE_SKIPPED") {
+          notifyOutcome(sender.tab?.id, { kind: "error", message: "page skipped" });
+          return false;
         }
         if (message.type === "AMAZON_PAGE_BLOCKED") {
           notifyOutcome(sender.tab?.id, { kind: "blocked" });
@@ -1457,6 +1504,7 @@
         }
         return res.json();
       }
+      closeOrphanRunTab();
     }
   });
   require_background();
