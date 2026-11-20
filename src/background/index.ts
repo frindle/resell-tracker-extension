@@ -3,6 +3,7 @@ import { ensureTrackerScriptRegistered } from '../lib/tracker-script';
 import { handleCapture, flushQueue, getCaptureStatus, getLastRun } from './amazonCapture';
 import { startAmazonRun, startTrackingRun, notifyOutcome, isRunTab, isTrackRunTab, amazonRunActive } from './amazonRun';
 import { trackCommandPlan } from '../lib/trackCommand';
+import { extensionBrowser } from '../lib/browserTarget';
 
 const ICON_PATHS_CHROME = { 16: 'icons/icon16.png', 32: 'icons/icon32.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' };
 const ICON_PATH_FIREFOX = 'icons/icon.svg';
@@ -10,7 +11,7 @@ const ICON_PATH_FIREFOX = 'icons/icon.svg';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const _browser = (globalThis as any).browser;
 const extAction = (_browser ?? chrome).action as typeof chrome.action;
-const isFirefox = typeof _browser !== 'undefined';
+const isFirefox = extensionBrowser((_browser ?? chrome).runtime.getURL('')) === 'firefox';
 function setToolbarIcon() {
   if (isFirefox) {
     extAction?.setIcon({ path: ICON_PATH_FIREFOX } as Parameters<typeof chrome.action.setIcon>[0]);
