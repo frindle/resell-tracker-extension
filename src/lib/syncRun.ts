@@ -45,13 +45,22 @@ export interface RunSummary {
   updated: number;
   unchanged: number;
   discrepancies: number;
+  /** pages the tracker ignored as sign-in/block pages */
+  ignored?: number;
+  /** pages the tracker could not parse */
+  unparsed?: number;
+  mode?: string;
   message: string;
   blockedUrl?: string;
 }
 
 export function formatRunSummary(s: RunSummary): string {
   if (s.status === 'blocked') return `blocked after ${s.pages} page(s); tab left open for you`;
-  const base = `${s.pages} page(s): ${s.created} new, ${s.updated} updated, ${s.unchanged} unchanged, ${s.discrepancies} needs review`;
+  const compare = s.mode === 'compare';
+  let base = `${s.pages} page(s): ${s.created} ${compare ? 'would create' : 'new'}, ${s.updated} ${compare ? 'would update' : 'updated'}, ${s.unchanged} unchanged, ${s.discrepancies} needs review`;
+  if (s.ignored) base += ` (${s.ignored} page ignored as sign-in/block)`;
+  if (s.unparsed) base += ` (${s.unparsed} page could not be parsed)`;
+  if (compare) base += ' (compare only)';
   return s.status === 'capped' ? `${base} (page cap reached)` : s.status === 'error' ? `${base} (${s.message})` : base;
 }
 
@@ -98,6 +107,9 @@ export function createSyncRunner(deps: RunDeps) {
         sum.updated += out.result.updated ?? 0;
         sum.unchanged += out.result.unchanged ?? 0;
         sum.discrepancies += out.result.discrepancies ?? 0;
+        if (out.result.blocked) sum.ignored = (sum.ignored ?? 0) + 1;
+        if (out.result.parseFailed) sum.unparsed = (sum.unparsed ?? 0) + 1;
+        if (out.result.mode) sum.mode = out.result.mode;
       }
       return out;
     };

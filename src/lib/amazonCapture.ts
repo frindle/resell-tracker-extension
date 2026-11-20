@@ -126,6 +126,12 @@ export interface PageResult {
   parseFailed?: boolean;
 }
 
+/** The tracker answers `{ ok, result }`; the per-page numbers and `list` live under `result`. */
+export function unwrapPageResponse(body: unknown): PageResult & { list?: unknown } {
+  const b = (body ?? {}) as { result?: unknown };
+  return (b.result && typeof b.result === 'object' ? b.result : {}) as PageResult & { list?: unknown };
+}
+
 export function summarizeResult(r: PageResult): string {
   if (r.blocked) return 'ignored (sign-in or block page)';
   if (r.parseFailed) return 'could not parse page';

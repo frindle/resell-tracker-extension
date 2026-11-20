@@ -114,3 +114,13 @@ test('tracking run stops on a block page and leaves the tab', async () => {
   assert.equal(log.navs.length, 0);
   assert.deepEqual(log.closed, []);
 });
+
+import { formatRunSummary } from '../src/lib/syncRun.ts';
+test('summary counts ignored pages and says compare-only', async () => {
+  const { deps } = fake({ [L1]: { kind: 'result', result: { blocked: true, mode: 'compare' } as never } });
+  const s = await createSyncRunner(deps).run({ paceMs: 1 }) as any;
+  assert.equal(s.ignored, 1);
+  assert.match(formatRunSummary(s), /1 page ignored as sign-in\/block/);
+  assert.match(formatRunSummary(s), /compare only/);
+  assert.match(formatRunSummary({ ...s, ignored: 0, created: 2 }), /2 would create/);
+});
