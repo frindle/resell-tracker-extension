@@ -155,6 +155,55 @@
     }
   });
 
+  // src/lib/visitCommand.ts
+  function cleanVisits(raw, max) {
+    if (!Array.isArray(raw)) return [];
+    const seen = /* @__PURE__ */ new Set();
+    const out = [];
+    for (const r of raw) {
+      const v = r ?? {};
+      const orderNumber = String(v.orderNumber ?? "").trim();
+      if (!AMAZON_ORDER.test(orderNumber) || seen.has(orderNumber)) continue;
+      seen.add(orderNumber);
+      const stages = (Array.isArray(v.stages) ? v.stages : []).filter((s) => s === "detail" || s === "track");
+      const url = typeof v.url === "string" && classifyAmazonUrl(v.url) === "detail" ? v.url : null;
+      out.push({ orderNumber, url, stages: [...new Set(stages)] });
+      if (out.length >= max) break;
+    }
+    return out;
+  }
+  function visitCommandPlan(payloadJson, settingsUserId, runActive) {
+    if (runActive) return { action: "wait" };
+    let p = null;
+    try {
+      p = payloadJson ? JSON.parse(payloadJson) : null;
+    } catch {
+      p = null;
+    }
+    if (!p || !Array.isArray(p.visits)) return { action: "fail", error: "bad payload" };
+    if (p.userId != null && String(p.userId) !== String(settingsUserId ?? "")) {
+      return { action: "fail", error: `orders belong to user ${String(p.userId)}, this extension is user ${String(settingsUserId ?? "unset")}` };
+    }
+    const visits = cleanVisits(p.visits, MAX_COMMAND_VISITS);
+    if (!visits.length) return { action: "fail", error: "no Amazon order numbers" };
+    return { action: "run", visits };
+  }
+  function parseVisitPlan(body) {
+    const b = body;
+    if (!b || b.ok !== true || !Array.isArray(b.visits)) return null;
+    return { visits: cleanVisits(b.visits, MAX_PLAN_VISITS), listDue: b.listDue !== false };
+  }
+  var AMAZON_ORDER, MAX_COMMAND_VISITS, MAX_PLAN_VISITS;
+  var init_visitCommand = __esm({
+    "src/lib/visitCommand.ts"() {
+      "use strict";
+      init_amazonCapture();
+      AMAZON_ORDER = /^\d{3}-\d{7}-\d{7}$/;
+      MAX_COMMAND_VISITS = 5;
+      MAX_PLAN_VISITS = 10;
+    }
+  });
+
   // src/background/amazonCapture.ts
   function today() {
     const d = /* @__PURE__ */ new Date();
@@ -200,6 +249,24 @@
       throw err;
     }
     return unwrapPageResponse(await res.json().catch(() => null));
+  }
+  async function fetchVisitPlan() {
+    try {
+      const { trackerUrl, apiKey, extensionSecret, userId } = await getSettings();
+      if (!trackerUrl) return null;
+      const res = await fetch(`${upgradeUrl(trackerUrl)}/api/extension/amazon-visits`, {
+        method: "POST",
+        headers: {
+          ...apiKey ? { "X-API-Key": apiKey } : {},
+          ...extensionSecret ? { "X-Extension-Secret": extensionSecret } : {},
+          ...userId ? { "X-Extension-User-Id": userId } : {}
+        }
+      });
+      if (!res.ok) return null;
+      return parseVisitPlan(await res.json().catch(() => null));
+    } catch {
+      return null;
+    }
   }
   async function recordResult(r) {
     const s = await getStats();
@@ -292,6 +359,7 @@
     "src/background/amazonCapture.ts"() {
       "use strict";
       init_storage();
+      init_visitCommand();
       init_amazonCapture();
       K_QUEUE = "amazonCaptureQueue";
       K_SEEN = "amazonCaptureSeen";
@@ -311,6 +379,9 @@
       [a[i], a[j]] = [a[j], a[i]];
     }
     return a;
+  }
+  function visitUrlFor(v) {
+    return v.url && classifyAmazonUrl(v.url) === "detail" ? v.url : detailUrlFor(v.orderNumber);
   }
   function formatRunSummary(s) {
     if (s.status === "blocked") return `blocked after ${s.pages} page(s); tab left open for you`;
@@ -385,24 +456,49 @@
           }
           return sum;
         }
-        let listUrl = opts.startUrl ?? START_URL;
-        const seenLists = /* @__PURE__ */ new Set();
-        while (listUrl && !seenLists.has(listUrl)) {
-          seenLists.add(listUrl);
-          const out = await visit(listUrl);
-          if (!out) break;
-          const list = out.kind === "result" ? out.result.list : void 0;
-          for (const n of list?.needs ?? []) if (!needs.has(n.orderNumber)) needs.set(n.orderNumber, n);
-          if (!list || list.reachedWindow || list.allComplete || !list.nextUrl) break;
-          listUrl = list.nextUrl;
+        if (opts.visits) {
+          const seen = /* @__PURE__ */ new Set();
+          outer: for (const v of opts.visits) {
+            const key = digitsOf(v.orderNumber);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const out = await visit(visitUrlFor(v));
+            if (!out) break;
+            if (!v.stages.includes("track")) continue;
+            const trackUrls = out.kind === "result" ? (out.result.detail?.trackUrls ?? []).slice(0, MAX_TRACK_PAGES_PER_ORDER) : [];
+            for (const u of trackUrls) if (!await visit(u)) break outer;
+          }
+          return sum;
+        }
+        const plan = deps2.fetchVisits ? await deps2.fetchVisits().catch(() => null) : null;
+        const targets = /* @__PURE__ */ new Map();
+        for (const v of plan?.visits ?? []) targets.set(digitsOf(v.orderNumber), v);
+        if (!plan || plan.listDue) {
+          let listUrl = opts.startUrl ?? START_URL;
+          const seenLists = /* @__PURE__ */ new Set();
+          while (listUrl && !seenLists.has(listUrl)) {
+            seenLists.add(listUrl);
+            const out = await visit(listUrl);
+            if (!out) break;
+            const list = out.kind === "result" ? out.result.list : void 0;
+            for (const n of list?.needs ?? []) {
+              const key = digitsOf(n.orderNumber);
+              if (!needs.has(n.orderNumber)) needs.set(n.orderNumber, n);
+              if (n.detailUrl && classifyAmazonUrl(n.detailUrl) !== "detail") continue;
+              if (!targets.has(key)) targets.set(key, { orderNumber: n.orderNumber, url: n.detailUrl, stages: [] });
+            }
+            if (!list || list.reachedWindow || list.allComplete || !list.nextUrl) break;
+            if (plan && list.anyKnown) break;
+            listUrl = list.nextUrl;
+          }
         }
         if (sum.status === "done") {
-          outer: for (const n of shuffled([...needs.values()])) {
-            const urls = [n.detailUrl, n.trackUrls?.[0]].filter((u) => !!u);
-            for (const u of urls) {
-              const out = await visit(u);
-              if (!out) break outer;
-            }
+          outer: for (const v of shuffled([...targets.values()]).slice(0, CLICK_MAX_ORDERS)) {
+            const out = await visit(visitUrlFor(v));
+            if (!out) break;
+            const fromList = needs.get(v.orderNumber);
+            const trackUrls = v.stages.includes("track") ? out.kind === "result" ? (out.result.detail?.trackUrls ?? []).slice(0, MAX_TRACK_PAGES_PER_ORDER) : [] : fromList?.trackUrls?.slice(0, 1) ?? [];
+            for (const u of trackUrls) if (!await visit(u)) break outer;
           }
         }
       } catch (e) {
@@ -421,7 +517,7 @@
     }
     return { run, isRunning: () => running };
   }
-  var START_URL, DEFAULT_MAX_PAGES, DEFAULT_PACE_MS, MAX_TRACK_PAGES_PER_ORDER, detailUrlFor;
+  var START_URL, DEFAULT_MAX_PAGES, DEFAULT_PACE_MS, CLICK_MAX_ORDERS, MAX_TRACK_PAGES_PER_ORDER, digitsOf, detailUrlFor;
   var init_syncRun = __esm({
     "src/lib/syncRun.ts"() {
       "use strict";
@@ -429,7 +525,9 @@
       START_URL = "https://www.amazon.com/your-orders/orders?timeFilter=last30";
       DEFAULT_MAX_PAGES = 40;
       DEFAULT_PACE_MS = 4e3;
+      CLICK_MAX_ORDERS = 10;
       MAX_TRACK_PAGES_PER_ORDER = 3;
+      digitsOf = (s) => String(s ?? "").replace(/\D/g, "") || String(s ?? "");
       detailUrlFor = (orderNumber) => `https://www.amazon.com/gp/your-account/order-details?orderID=${encodeURIComponent(orderNumber)}`;
     }
   });
@@ -501,7 +599,13 @@
   }
   async function startAmazonRun() {
     await saveRun("running...", "running");
-    const out = await keepAwake(() => runner.run());
+    fillsTracking = true;
+    let out;
+    try {
+      out = await keepAwake(() => runner.run());
+    } finally {
+      fillsTracking = false;
+    }
     runTabId = null;
     if ("started" in out) return { started: false, reason: out.reason };
     const text = formatRunSummary(out);
@@ -525,13 +629,31 @@
       runTabId = null;
     }
   }
+  async function startVisitRun(visits) {
+    if (runner.isRunning()) return { started: false, reason: "a sync is already running" };
+    background = true;
+    fillsTracking = true;
+    runWindowId = null;
+    try {
+      const out = await keepAwake(() => runner.run({ visits, maxPages: visits.length * 4 }));
+      if ("started" in out) return { started: false, reason: out.reason };
+      const text = `email visits: ${formatRunSummary(out)}`;
+      await saveRun(text, out.status);
+      return { ...out, text };
+    } finally {
+      background = false;
+      fillsTracking = false;
+      runWindowId = null;
+      runTabId = null;
+    }
+  }
   function isTrackRunTab(tabId) {
-    return background && isRunTab(tabId);
+    return (background || fillsTracking) && isRunTab(tabId);
   }
   function amazonRunActive() {
     return runner.isRunning();
   }
-  var WAIT_MS, pending, early, runTabId, background, runWindowId, RUN_TAB_KEY, KEEPALIVE_MS, store, waiter, deps, runner;
+  var WAIT_MS, pending, early, runTabId, background, fillsTracking, runWindowId, RUN_TAB_KEY, KEEPALIVE_MS, store, waiter, deps, runner;
   var init_amazonRun = __esm({
     "src/background/amazonRun.ts"() {
       "use strict";
@@ -542,6 +664,7 @@
       early = /* @__PURE__ */ new Map();
       runTabId = null;
       background = false;
+      fillsTracking = false;
       runWindowId = null;
       RUN_TAB_KEY = "amazonRunTab";
       KEEPALIVE_MS = 2e4;
@@ -580,7 +703,8 @@
           if (runWindowId !== null) await chrome.windows.remove(runWindowId);
           else await chrome.tabs.remove(tabId);
         },
-        sleep: (ms) => new Promise((r) => setTimeout(r, ms))
+        sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+        fetchVisits: fetchVisitPlan
       };
       chrome.tabs.onRemoved.addListener((tabId) => {
         if (tabId === runTabId) {
@@ -604,15 +728,15 @@
     if (p.userId != null && String(p.userId) !== String(settingsUserId ?? "")) {
       return { action: "fail", error: `orders belong to user ${String(p.userId)}, this extension is user ${String(settingsUserId ?? "unset")}` };
     }
-    const orders = [...new Set(p.orderNumbers.map((o) => String(o).trim()).filter((o) => AMAZON_ORDER.test(o)))];
+    const orders = [...new Set(p.orderNumbers.map((o) => String(o).trim()).filter((o) => AMAZON_ORDER2.test(o)))];
     if (!orders.length) return { action: "fail", error: "no Amazon order numbers" };
     return { action: "run", orders };
   }
-  var AMAZON_ORDER;
+  var AMAZON_ORDER2;
   var init_trackCommand = __esm({
     "src/lib/trackCommand.ts"() {
       "use strict";
-      AMAZON_ORDER = /^\d{3}-\d{7}-\d{7}$/;
+      AMAZON_ORDER2 = /^\d{3}-\d{7}-\d{7}$/;
     }
   });
 
@@ -633,6 +757,7 @@
       init_amazonCapture2();
       init_amazonRun();
       init_trackCommand();
+      init_visitCommand();
       init_browserTarget();
       var ICON_PATHS_CHROME = { 16: "icons/icon16.png", 32: "icons/icon32.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
       var ICON_PATH_FIREFOX = "icons/icon.svg";
@@ -1325,6 +1450,26 @@
             }
             try {
               const out = await startTrackingRun(plan.orders);
+              const status = out.status;
+              if (out.started === false) await patchCommand(base, cmd.id, "failed", headers, { error: String(out.reason) });
+              else if (status === "blocked") await patchCommand(base, cmd.id, "failed", headers, { blocked: true, error: "sign-in, CAPTCHA or block page", text: out.text });
+              else if (status === "error") await patchCommand(base, cmd.id, "failed", headers, { error: String(out.message || "run failed"), text: out.text });
+              else await patchCommand(base, cmd.id, "done", headers, out);
+            } catch (e) {
+              await patchCommand(base, cmd.id, "failed", headers, { error: String(e) });
+            }
+            continue;
+          }
+          if (cmd.type === "VISIT_AMAZON") {
+            const plan = visitCommandPlan(cmd.payload, userId, amazonRunActive());
+            if (plan.action === "wait") continue;
+            await patchCommand(base, cmd.id, "running", headers);
+            if (plan.action === "fail") {
+              await patchCommand(base, cmd.id, "failed", headers, { error: plan.error });
+              continue;
+            }
+            try {
+              const out = await startVisitRun(plan.visits);
               const status = out.status;
               if (out.started === false) await patchCommand(base, cmd.id, "failed", headers, { error: String(out.reason) });
               else if (status === "blocked") await patchCommand(base, cmd.id, "failed", headers, { blocked: true, error: "sign-in, CAPTCHA or block page", text: out.text });

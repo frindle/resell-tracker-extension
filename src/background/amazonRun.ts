@@ -4,7 +4,8 @@
 // a minimized window that closes when done (left open on a block page). Real
 // navigation only; never fetch().
 import { createSyncRunner, formatRunSummary, type PageOutcome, type RunDeps } from '../lib/syncRun';
-import { saveRun, reportRun } from './amazonCapture';
+import { saveRun, reportRun, fetchVisitPlan } from './amazonCapture';
+import type { Visit } from '../lib/syncRun';
 
 const WAIT_MS = 30000;
 const pending = new Map<number, (o: PageOutcome) => void>();
@@ -12,6 +13,8 @@ const early = new Map<number, PageOutcome>();
 let runTabId: number | null = null;
 // Tracking runs: the minimized window, and whether pages may fill tracking.
 let background = false;
+// Runs that follow Track package links: their pages may fill a blank tracking number.
+let fillsTracking = false;
 let runWindowId: number | null = null;
 
 // The browser stops an idle background worker after 30 seconds, which used to
@@ -102,6 +105,7 @@ const deps: RunDeps = {
     else await chrome.tabs.remove(tabId);
   },
   sleep: ms => new Promise(r => setTimeout(r, ms)),
+  fetchVisits: fetchVisitPlan,
 };
 
 chrome.tabs.onRemoved.addListener(tabId => {
@@ -115,7 +119,10 @@ const runner = createSyncRunner(deps);
 /** Starts one run. Resolves with the summary, or {started:false} when one is already running. */
 export async function startAmazonRun(): Promise<Record<string, unknown>> {
   await saveRun('running...', 'running');
-  const out = await keepAwake(() => runner.run());
+  // A click also lets email-triggered visits run again after a block.
+  fillsTracking = true;
+  let out: Awaited<ReturnType<typeof runner.run>>;
+  try { out = await keepAwake(() => runner.run()); } finally { fillsTracking = false; }
   runTabId = null;
   if ('started' in out) return { started: false, reason: out.reason };
   const text = formatRunSummary(out);
@@ -145,9 +152,33 @@ export async function startTrackingRun(orders: string[]): Promise<Record<string,
   }
 }
 
+/**
+ * VISIT_AMAZON: the orders an Amazon email said need a page, in a minimized
+ * window that closes when done (left open on a block page). Resolves with the
+ * summary, or {started:false} when another run is going.
+ */
+export async function startVisitRun(visits: Visit[]): Promise<Record<string, unknown>> {
+  if (runner.isRunning()) return { started: false, reason: 'a sync is already running' };
+  background = true;
+  fillsTracking = true;
+  runWindowId = null;
+  try {
+    const out = await keepAwake(() => runner.run({ visits, maxPages: visits.length * 4 }));
+    if ('started' in out) return { started: false, reason: out.reason };
+    const text = `email visits: ${formatRunSummary(out)}`;
+    await saveRun(text, out.status);
+    return { ...out, text };
+  } finally {
+    background = false;
+    fillsTracking = false;
+    runWindowId = null;
+    runTabId = null;
+  }
+}
+
 /** True while a tracking run owns this tab: its pages may fill a blank tracking number. */
 export function isTrackRunTab(tabId: number | undefined): boolean {
-  return background && isRunTab(tabId);
+  return (background || fillsTracking) && isRunTab(tabId);
 }
 
 export function amazonRunActive(): boolean { return runner.isRunning(); }

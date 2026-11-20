@@ -33,12 +33,27 @@ export function shuffled<T>(items: T[], rnd: () => number = Math.random): T[] {
   return a;
 }
 
+/** What the tracker wants visited for one order (lib/amazonVisitPlan.ts on the server). */
+export interface Visit { orderNumber: string; url?: string | null; stages: ('detail' | 'track')[] }
+/** The tracker's answer to a Sync click: the pending visits, and whether order-list page 1 is due (once a day). */
+export interface VisitPlan { visits: Visit[]; listDue: boolean }
+/** Orders in one clicked run, whatever the sources (the tracker's list and the order list's own needs). */
+export const CLICK_MAX_ORDERS = 10;
+
 export interface NeedItem { orderNumber: string; detailUrl?: string | null; trackUrls?: string[] }
 export const MAX_TRACK_PAGES_PER_ORDER = 3;
+const digitsOf = (s: string) => String(s ?? '').replace(/\D/g, '') || String(s ?? '');
 export const detailUrlFor = (orderNumber: string) =>
   `https://www.amazon.com/gp/your-account/order-details?orderID=${encodeURIComponent(orderNumber)}`;
 
+/** The stored link only when it is an https www.amazon.com order-details page; otherwise the page built from the order number. */
+export function visitUrlFor(v: Visit): string {
+  return v.url && classifyAmazonUrl(v.url) === 'detail' ? v.url : detailUrlFor(v.orderNumber);
+}
+
 export interface ListInfo {
+  /** Some order on this page is already in the tracker, so the run need not page further back. */
+  anyKnown?: boolean;
   nextUrl?: string | null;
   reachedWindow?: boolean;
   allComplete?: boolean;
@@ -56,6 +71,8 @@ export interface RunDeps {
   waitForOutcome(tabId: number): Promise<PageOutcome>;
   closeTab(tabId: number): Promise<void>;
   sleep(ms: number): Promise<void>;
+  /** Clicked runs only: the tracker's pending visits. Null when it cannot be reached (the run then reads the order list as before). */
+  fetchVisits?(): Promise<VisitPlan | null>;
 }
 
 export interface RunSummary {
@@ -87,8 +104,13 @@ export function formatRunSummary(s: RunSummary): string {
 export function createSyncRunner(deps: RunDeps) {
   let running = false;
 
-  /** opts.orders: a tracking run, only these orders' detail and Track package pages. */
-  async function run(opts: { maxPages?: number; paceMs?: number; startUrl?: string; orders?: string[] } = {}): Promise<RunSummary | { started: false; reason: string }> {
+  /**
+   * opts.orders: a tracking run, only these orders' detail and Track package pages.
+   * opts.visits: the tracker's email-triggered visits (each order's detail page,
+   * then its Track package page when the visit has a track stage).
+   * Neither: a clicked run (see below).
+   */
+  async function run(opts: { maxPages?: number; paceMs?: number; startUrl?: string; orders?: string[]; visits?: Visit[] } = {}): Promise<RunSummary | { started: false; reason: string }> {
     if (running) return { started: false, reason: 'a sync is already running' };
     running = true;
     const maxPages = opts.maxPages ?? DEFAULT_MAX_PAGES;
@@ -149,27 +171,62 @@ export function createSyncRunner(deps: RunDeps) {
         return sum;
       }
 
-      // 1. Walk the order-list pages until the window / known-complete orders / no next page.
-      let listUrl: string | null = opts.startUrl ?? START_URL;
-      const seenLists = new Set<string>();
-      while (listUrl && !seenLists.has(listUrl)) {
-        seenLists.add(listUrl);
-        const out = await visit(listUrl);
-        if (!out) break;
-        const list = out.kind === 'result' ? out.result.list : undefined;
-        for (const n of list?.needs ?? []) if (!needs.has(n.orderNumber)) needs.set(n.orderNumber, n);
-        if (!list || list.reachedWindow || list.allComplete || !list.nextUrl) break;
-        listUrl = list.nextUrl;
+      if (opts.visits) {
+        // Email-triggered run: each order once, detail page first.
+        const seen = new Set<string>();
+        outer: for (const v of opts.visits) {
+          const key = digitsOf(v.orderNumber);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const out = await visit(visitUrlFor(v));
+          if (!out) break;
+          if (!v.stages.includes('track')) continue;
+          const trackUrls = out.kind === 'result' ? (out.result.detail?.trackUrls ?? []).slice(0, MAX_TRACK_PAGES_PER_ORDER) : [];
+          for (const u of trackUrls) if (!(await visit(u))) break outer;
+        }
+        return sum;
       }
 
-      // 2. Visit detail then tracking pages only for orders the tracker said need them.
-      if (sum.status === 'done') {
-        outer: for (const n of shuffled([...needs.values()])) {
-          const urls = [n.detailUrl, n.trackUrls?.[0]].filter((u): u is string => !!u);
-          for (const u of urls) {
-            const out = await visit(u);
-            if (!out) break outer;
+      // Clicked run. The tracker already knows which orders need a page, so
+      // go to them (a random few, shuffled, with the usual random waits).
+      // Order-list page 1 is read only when the tracker says it is due (about
+      // once a day, to catch an order whose email never came), and further
+      // pages only while nothing on page 1 is known to the tracker.
+      const plan = deps.fetchVisits ? await deps.fetchVisits().catch(() => null) : null;
+      const targets = new Map<string, Visit>();
+      for (const v of plan?.visits ?? []) targets.set(digitsOf(v.orderNumber), v);
+
+      if (!plan || plan.listDue) {
+        let listUrl: string | null = opts.startUrl ?? START_URL;
+        const seenLists = new Set<string>();
+        while (listUrl && !seenLists.has(listUrl)) {
+          seenLists.add(listUrl);
+          const out = await visit(listUrl);
+          if (!out) break;
+          const list = out.kind === 'result' ? out.result.list : undefined;
+          for (const n of list?.needs ?? []) {
+            const key = digitsOf(n.orderNumber);
+            if (!needs.has(n.orderNumber)) needs.set(n.orderNumber, n);
+            // A link the tracker handed over that is not an Amazon order page is never opened.
+            if (n.detailUrl && classifyAmazonUrl(n.detailUrl) !== 'detail') continue;
+            if (!targets.has(key)) targets.set(key, { orderNumber: n.orderNumber, url: n.detailUrl, stages: [] });
           }
+          if (!list || list.reachedWindow || list.allComplete || !list.nextUrl) break;
+          // Without the tracker's say-so (old server) keep the old walk; with it, stop at the first known order.
+          if (plan && list.anyKnown) break;
+          listUrl = list.nextUrl;
+        }
+      }
+
+      if (sum.status === 'done') {
+        outer: for (const v of shuffled([...targets.values()]).slice(0, CLICK_MAX_ORDERS)) {
+          const out = await visit(visitUrlFor(v));
+          if (!out) break;
+          const fromList = needs.get(v.orderNumber);
+          const trackUrls = v.stages.includes('track')
+            ? (out.kind === 'result' ? (out.result.detail?.trackUrls ?? []).slice(0, MAX_TRACK_PAGES_PER_ORDER) : [])
+            : fromList?.trackUrls?.slice(0, 1) ?? [];
+          for (const u of trackUrls) if (!(await visit(u))) break outer;
         }
       }
     } catch (e) {

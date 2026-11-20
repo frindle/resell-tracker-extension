@@ -37,7 +37,9 @@ test('normal run: walks lists, then visits only needed orders, closes tab', asyn
   assert.equal(s.pages, 5);
   assert.deepEqual([s.created, s.updated, s.discrepancies], [1, 1, 1]);
   assert.deepEqual(log.opened, [L1]);
-  assert.deepEqual(log.navs, [L2, D('A'), T('A'), D('B')]);
+  assert.equal(log.navs[0], L2);
+  assert.deepEqual(log.navs.slice(1).sort(), [D('A'), T('A'), D('B')].sort()); // orders are visited in a random order
+  assert.ok(log.navs.indexOf(D('A')) < log.navs.indexOf(T('A')));
   assert.deepEqual(log.closed, [7]);
   assert.equal(log.sleeps, 4);
 });
@@ -137,4 +139,80 @@ test('paceDelay varies and stays in range', async () => {
   assert.equal(paceDelay(4000, () => 0.5), 6000);
   assert.equal(paceDelay(4000, () => 0), 12000);
   assert.deepEqual(shuffled([1, 2, 3, 4]).sort(), [1, 2, 3, 4]);
+});
+
+// ---- tracker-driven runs ----------------------------------------------------
+const N1 = '111-0000000-0000001', N2 = '111-0000000-0000002', N3 = '111-0000000-0000003';
+const withPlan = (deps: RunDeps, plan: any): RunDeps => ({ ...deps, fetchVisits: async () => plan });
+
+test('clicked run: goes straight to the tracker\'s orders, no order list when it is not due', async () => {
+  const { deps, log } = fake({ [D(N1)]: res({}), [D(N2)]: res({}) });
+  const s = await createSyncRunner(withPlan(deps, { listDue: false, visits: [{ orderNumber: N1, stages: ['detail'] }, { orderNumber: N2, stages: ['detail'] }] })).run({ paceMs: 1 }) as any;
+  assert.equal(s.status, 'done');
+  assert.equal(s.pages, 2);
+  assert.deepEqual([log.opened[0], ...log.navs].sort(), [D(N1), D(N2)].sort());
+  assert.ok(!log.opened.concat(log.navs).includes(L1));
+});
+
+test('clicked run: nothing pending and list not due opens no tab', async () => {
+  const { deps, log } = fake({});
+  const s = await createSyncRunner(withPlan(deps, { listDue: false, visits: [] })).run({ paceMs: 1 }) as any;
+  assert.equal(s.pages, 0);
+  assert.deepEqual(log.opened, []);
+});
+
+test('clicked run: a stored link is used only when it is a safe order-details page', async () => {
+  const stored = `https://www.amazon.com/your-orders/order-details?orderID=${N1}`;
+  const { deps, log } = fake({ [stored]: res({}), [D(N2)]: res({}) });
+  await createSyncRunner(withPlan(deps, { listDue: false, visits: [{ orderNumber: N1, url: stored, stages: ['detail'] }, { orderNumber: N2, url: 'https://evil.example/x', stages: ['detail'] }] })).run({ paceMs: 1 });
+  const all = [log.opened[0], ...log.navs];
+  assert.ok(all.includes(stored));
+  assert.ok(all.includes(D(N2)));
+  assert.ok(!all.some(u => u.includes('evil')));
+});
+
+test('clicked run: page 1 when due; stops paging once an order on it is known', async () => {
+  const { deps, log } = fake({ [L1]: res({ nextUrl: L2, anyKnown: true, needs: [] }), [L2]: res({}) });
+  await createSyncRunner(withPlan(deps, { listDue: true, visits: [] })).run({ paceMs: 1 });
+  assert.deepEqual(log.opened, [L1]);
+  assert.deepEqual(log.navs, []);
+});
+
+test('clicked run: keeps paging while nothing on the page is known', async () => {
+  const { deps, log } = fake({ [L1]: res({ nextUrl: L2, anyKnown: false }), [L2]: res({ reachedWindow: true }) });
+  await createSyncRunner(withPlan(deps, { listDue: true, visits: [] })).run({ paceMs: 1 });
+  assert.deepEqual(log.navs, [L2]);
+});
+
+test('clicked run: at most 10 orders; a track stage follows the Track package link once', async () => {
+  const visits = Array.from({ length: 14 }, (_, i) => ({ orderNumber: `111-0000000-${String(i + 10).padStart(7, '0')}`, stages: ['detail'] }));
+  const pages: Record<string, PageOutcome> = {};
+  for (const v of visits) pages[D(v.orderNumber)] = res({});
+  const a = fake(pages);
+  const s = await createSyncRunner(withPlan(a.deps, { listDue: false, visits })).run({ paceMs: 1 }) as any;
+  assert.equal(s.pages, 10);
+
+  const b = fake({ [D(N3)]: { kind: 'result', result: { unchanged: 1, detail: { trackUrls: [T(N3), T('x')] } } as never }, [T(N3)]: res({}) });
+  const s2 = await createSyncRunner(withPlan(b.deps, { listDue: false, visits: [{ orderNumber: N3, stages: ['detail', 'track'] }] })).run({ paceMs: 1 }) as any;
+  assert.equal(s2.pages, 3); // detail + both Track links (max 3 per order)
+});
+
+test('tracker unreachable: falls back to reading the order list as before', async () => {
+  const { deps, log } = fake({ [L1]: res({ allComplete: true }) });
+  await createSyncRunner(withPlan(deps, null)).run({ paceMs: 1 });
+  assert.deepEqual(log.opened, [L1]);
+});
+
+test('visits run (email-triggered): each order once, detail then track, blocked stops and leaves the tab', async () => {
+  const { deps, log } = fake({
+    [D(N1)]: { kind: 'result', result: { unchanged: 1, detail: { trackUrls: [T(N1)] } } as never }, [T(N1)]: res({}),
+    [D(N2)]: { kind: 'blocked' }, [D(N3)]: res({}),
+  });
+  const s = await createSyncRunner(deps).run({ paceMs: 1, visits: [
+    { orderNumber: N1, stages: ['detail', 'track'] }, { orderNumber: N1, stages: ['detail'] },
+    { orderNumber: N2, stages: ['detail'] }, { orderNumber: N3, stages: ['detail'] },
+  ] }) as any;
+  assert.equal(s.status, 'blocked');
+  assert.deepEqual([log.opened[0], ...log.navs], [D(N1), T(N1), D(N2)]);
+  assert.deepEqual(log.closed, []);
 });
