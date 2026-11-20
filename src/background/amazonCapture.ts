@@ -3,7 +3,7 @@
 // to the user's own tracker; nothing is ever requested from amazon.com.
 import { getSettings } from '../lib/storage';
 import {
-  classifyAmazonUrl, isDuplicate, markSeen, enqueue, summarizeResult,
+  classifyAmazonUrl, isDuplicate, markSeen, enqueue, summarizeResult, unwrapPageResponse,
   type QueueItem, type SeenMap, type PageResult, type AmazonPageKind,
 } from '../lib/amazonCapture';
 
@@ -66,7 +66,7 @@ async function postPage(item: QueueItem): Promise<PageResult & { list?: unknown 
     err.permanent = res.status >= 400 && res.status < 500 && ![401, 403, 408, 429].includes(res.status);
     throw err;
   }
-  return await res.json() as PageResult & { list?: unknown };
+  return unwrapPageResponse(await res.json().catch(() => null));
 }
 
 async function recordResult(r: PageResult) {

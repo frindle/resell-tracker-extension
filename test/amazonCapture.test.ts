@@ -81,3 +81,11 @@ test('summarizeResult', () => {
   assert.match(summarizeResult({ created: 1, mode: 'compare' }), /would create.*compare only/);
   assert.match(summarizeResult({ blocked: true }), /ignored/);
 });
+
+import { unwrapPageResponse as _unwrap } from '../src/lib/amazonCapture.ts';
+test('unwrapPageResponse reads counts and list from the tracker { ok, result } envelope', () => {
+  const r = _unwrap({ ok: true, result: { created: 2, mode: 'compare', list: { nextUrl: null, needs: [{ orderNumber: 'A' }] } } }) as any;
+  assert.equal(r.created, 2);
+  assert.equal(r.list.needs.length, 1);
+  assert.deepEqual(_unwrap(null), {});
+});
