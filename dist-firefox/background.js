@@ -550,6 +550,16 @@
     }
   });
 
+  // src/lib/browserTarget.ts
+  function extensionBrowser(extensionBaseUrl) {
+    return extensionBaseUrl.startsWith("moz-extension://") ? "firefox" : "chrome";
+  }
+  var init_browserTarget = __esm({
+    "src/lib/browserTarget.ts"() {
+      "use strict";
+    }
+  });
+
   // src/background/index.ts
   var require_background = __commonJS({
     "src/background/index.ts"() {
@@ -557,11 +567,12 @@
       init_amazonCapture2();
       init_amazonRun();
       init_trackCommand();
+      init_browserTarget();
       var ICON_PATHS_CHROME = { 16: "icons/icon16.png", 32: "icons/icon32.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
       var ICON_PATH_FIREFOX = "icons/icon.svg";
       var _browser = globalThis.browser;
       var extAction = (_browser ?? chrome).action;
-      var isFirefox = typeof _browser !== "undefined";
+      var isFirefox = extensionBrowser((_browser ?? chrome).runtime.getURL("")) === "firefox";
       function setToolbarIcon() {
         if (isFirefox) {
           extAction?.setIcon({ path: ICON_PATH_FIREFOX });
