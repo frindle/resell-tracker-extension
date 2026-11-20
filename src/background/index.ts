@@ -1,8 +1,9 @@
 import type { ScrapedOrder } from '../lib/types';
 import { ensureTrackerScriptRegistered } from '../lib/tracker-script';
 import { handleCapture, flushQueue, getCaptureStatus, getLastRun } from './amazonCapture';
-import { startAmazonRun, startTrackingRun, closeOrphanRunTab, notifyOutcome, isRunTab, isTrackRunTab, amazonRunActive } from './amazonRun';
+import { startAmazonRun, startTrackingRun, startVisitRun, closeOrphanRunTab, notifyOutcome, isRunTab, isTrackRunTab, amazonRunActive } from './amazonRun';
 import { trackCommandPlan } from '../lib/trackCommand';
+import { visitCommandPlan } from '../lib/visitCommand';
 import { extensionBrowser } from '../lib/browserTarget';
 
 const ICON_PATHS_CHROME = { 16: 'icons/icon16.png', 32: 'icons/icon32.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' };
@@ -784,6 +785,27 @@ async function pollAndExecuteCommands() {
       if (plan.action === 'fail') { await patchCommand(base, cmd.id, 'failed', headers, { error: plan.error }); continue; }
       try {
         const out = await startTrackingRun(plan.orders);
+        const status = out.status as string | undefined;
+        if (out.started === false) await patchCommand(base, cmd.id, 'failed', headers, { error: String(out.reason) });
+        else if (status === 'blocked') await patchCommand(base, cmd.id, 'failed', headers, { blocked: true, error: 'sign-in, CAPTCHA or block page', text: out.text });
+        else if (status === 'error') await patchCommand(base, cmd.id, 'failed', headers, { error: String(out.message || 'run failed'), text: out.text });
+        else await patchCommand(base, cmd.id, 'done', headers, out);
+      } catch (e) {
+        await patchCommand(base, cmd.id, 'failed', headers, { error: String(e) });
+      }
+      continue;
+    }
+    if (cmd.type === 'VISIT_AMAZON') {
+      // The tracker's Amazon order/shipping emails named orders that need a
+      // page (after a random wait it chose), read in a minimized window. Left
+      // pending while another Amazon run is going. A sign-in, CAPTCHA or
+      // block page stops it and the tracker pauses these until the next Sync click.
+      const plan = visitCommandPlan(cmd.payload, userId, amazonRunActive());
+      if (plan.action === 'wait') continue;
+      await patchCommand(base, cmd.id, 'running', headers);
+      if (plan.action === 'fail') { await patchCommand(base, cmd.id, 'failed', headers, { error: plan.error }); continue; }
+      try {
+        const out = await startVisitRun(plan.visits);
         const status = out.status as string | undefined;
         if (out.started === false) await patchCommand(base, cmd.id, 'failed', headers, { error: String(out.reason) });
         else if (status === 'blocked') await patchCommand(base, cmd.id, 'failed', headers, { blocked: true, error: 'sign-in, CAPTCHA or block page', text: out.text });

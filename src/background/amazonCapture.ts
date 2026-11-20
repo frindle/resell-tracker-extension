@@ -2,6 +2,8 @@
 // persisted retry queue, badge and stats. The only network call made here goes
 // to the user's own tracker; nothing is ever requested from amazon.com.
 import { getSettings } from '../lib/storage';
+import { parseVisitPlan } from '../lib/visitCommand';
+import type { VisitPlan } from '../lib/syncRun';
 import {
   classifyAmazonUrl, isDuplicate, markSeen, enqueue, summarizeResult, unwrapPageResponse,
   type QueueItem, type SeenMap, type PageResult, type AmazonPageKind,
@@ -67,6 +69,28 @@ async function postPage(item: QueueItem): Promise<PageResult & { list?: unknown 
     throw err;
   }
   return unwrapPageResponse(await res.json().catch(() => null));
+}
+
+/**
+ * A Sync click: asks the tracker which orders need a page visit and whether the
+ * order list is due. Goes to the user's own tracker only. Null when it cannot
+ * be reached or answers something else (the run then reads the order list).
+ */
+export async function fetchVisitPlan(): Promise<VisitPlan | null> {
+  try {
+    const { trackerUrl, apiKey, extensionSecret, userId } = await getSettings();
+    if (!trackerUrl) return null;
+    const res = await fetch(`${upgradeUrl(trackerUrl)}/api/extension/amazon-visits`, {
+      method: 'POST',
+      headers: {
+        ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+        ...(extensionSecret ? { 'X-Extension-Secret': extensionSecret } : {}),
+        ...(userId ? { 'X-Extension-User-Id': userId } : {}),
+      },
+    });
+    if (!res.ok) return null;
+    return parseVisitPlan(await res.json().catch(() => null));
+  } catch { return null; }
 }
 
 async function recordResult(r: PageResult) {
