@@ -300,6 +300,18 @@
   });
 
   // src/lib/syncRun.ts
+  function paceDelay(baseMs, rnd = Math.random) {
+    if (rnd() < 1 / 6) return Math.round(baseMs * (3 + 2 * rnd()));
+    return Math.round(baseMs * (0.75 + 1.5 * rnd()));
+  }
+  function shuffled(items, rnd = Math.random) {
+    const a = items.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
   function formatRunSummary(s) {
     if (s.status === "blocked") return `blocked after ${s.pages} page(s); tab left open for you`;
     const compare = s.mode === "compare";
@@ -329,7 +341,7 @@
         if (tabId === null) {
           tabId = await deps2.openTab(url);
         } else {
-          await deps2.sleep(paceMs);
+          await deps2.sleep(paceDelay(paceMs));
           await deps2.navigate(tabId, url);
         }
         sum.pages += 1;
@@ -385,7 +397,7 @@
           listUrl = list.nextUrl;
         }
         if (sum.status === "done") {
-          outer: for (const n of needs.values()) {
+          outer: for (const n of shuffled([...needs.values()])) {
             const urls = [n.detailUrl, n.trackUrls?.[0]].filter((u) => !!u);
             for (const u of urls) {
               const out = await visit(u);

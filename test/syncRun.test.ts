@@ -124,3 +124,17 @@ test('summary counts ignored pages and says compare-only', async () => {
   assert.match(formatRunSummary(s), /compare only/);
   assert.match(formatRunSummary({ ...s, ignored: 0, created: 2 }), /2 would create/);
 });
+
+test('paceDelay varies and stays in range', async () => {
+  const { paceDelay, shuffled } = await import('../src/lib/syncRun.ts');
+  const seen = new Set<number>();
+  for (let i = 0; i < 300; i++) {
+    const d = paceDelay(4000);
+    assert.ok(d >= 3000 && d <= 20000, String(d));
+    seen.add(d);
+  }
+  assert.ok(seen.size > 50);
+  assert.equal(paceDelay(4000, () => 0.5), 6000);
+  assert.equal(paceDelay(4000, () => 0), 12000);
+  assert.deepEqual(shuffled([1, 2, 3, 4]).sort(), [1, 2, 3, 4]);
+});

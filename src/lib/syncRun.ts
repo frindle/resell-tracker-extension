@@ -13,6 +13,26 @@ export const START_URL = 'https://www.amazon.com/your-orders/orders?timeFilter=l
 export const DEFAULT_MAX_PAGES = 40;
 export const DEFAULT_PACE_MS = 4000;
 
+/**
+ * The wait before the next page. Never a fixed beat: between 0.75x and 2.25x
+ * the base, and about one time in six a longer pause of 3x to 5x, the way a
+ * person stops to read something.
+ */
+export function paceDelay(baseMs: number, rnd: () => number = Math.random): number {
+  if (rnd() < 1 / 6) return Math.round(baseMs * (3 + 2 * rnd()));
+  return Math.round(baseMs * (0.75 + 1.5 * rnd()));
+}
+
+/** A shuffled copy, so detail pages are not visited in page order every run. */
+export function shuffled<T>(items: T[], rnd: () => number = Math.random): T[] {
+  const a = items.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 export interface NeedItem { orderNumber: string; detailUrl?: string | null; trackUrls?: string[] }
 export const MAX_TRACK_PAGES_PER_ORDER = 3;
 export const detailUrlFor = (orderNumber: string) =>
@@ -85,7 +105,7 @@ export function createSyncRunner(deps: RunDeps) {
       if (tabId === null) {
         tabId = await deps.openTab(url);
       } else {
-        await deps.sleep(paceMs);
+        await deps.sleep(paceDelay(paceMs));
         await deps.navigate(tabId, url);
       }
       sum.pages += 1;
@@ -144,7 +164,7 @@ export function createSyncRunner(deps: RunDeps) {
 
       // 2. Visit detail then tracking pages only for orders the tracker said need them.
       if (sum.status === 'done') {
-        outer: for (const n of needs.values()) {
+        outer: for (const n of shuffled([...needs.values()])) {
           const urls = [n.detailUrl, n.trackUrls?.[0]].filter((u): u is string => !!u);
           for (const u of urls) {
             const out = await visit(u);
