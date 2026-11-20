@@ -1,7 +1,7 @@
 import type { ScrapedOrder } from '../lib/types';
 import { ensureTrackerScriptRegistered } from '../lib/tracker-script';
 import { handleCapture, flushQueue, getCaptureStatus, getLastRun } from './amazonCapture';
-import { startAmazonRun, startTrackingRun, notifyOutcome, isRunTab, isTrackRunTab, amazonRunActive } from './amazonRun';
+import { startAmazonRun, startTrackingRun, closeOrphanRunTab, notifyOutcome, isRunTab, isTrackRunTab, amazonRunActive } from './amazonRun';
 import { trackCommandPlan } from '../lib/trackCommand';
 import { extensionBrowser } from '../lib/browserTarget';
 
@@ -389,6 +389,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })
       .catch(e => { notifyOutcome(tabId, { kind: 'error', message: String(e) }); sendResponse({ ok: false, error: String(e) }); });
     return true;
+  }
+
+  if (message.type === 'AMAZON_PAGE_SKIPPED') {
+    // Lets a run move on at once instead of waiting out the page timeout.
+    notifyOutcome(sender.tab?.id, { kind: 'error', message: 'page skipped' });
+    return false;
   }
 
   if (message.type === 'AMAZON_PAGE_BLOCKED') {
@@ -1007,3 +1013,6 @@ async function handlePushOrders(
 
   return res.json();
 }
+
+// A run the browser cut short leaves its tab behind; close it on worker start.
+closeOrphanRunTab();
