@@ -44,6 +44,11 @@ test('isBlockedPage detects sign-in, captcha and agent block; passes normal page
   assert.equal(isBlockedPage(doc('<body><form action="/errors/validateCaptcha"></form></body>')), true);
   assert.equal(isBlockedPage(doc('<body><p>This activity violates Amazon\'s Conditions of Use: unauthorized AI agent</p></body>')), true);
   assert.equal(isBlockedPage(doc('<body><div class="order-card">Order placed</div></body>')), false);
+  // The nav's hidden account-flyout form is on every signed-in page.
+  const nav = '<header id="navbar"><form id="ap_navbar_form" name="signIn" style="display:none"></form></header>';
+  assert.equal(isBlockedPage(doc(`<body>${nav}<div class="order-card">Order placed</div></body>`)), false);
+  assert.equal(isBlockedPage(doc(`<body>${nav}<form name="signIn"><input id="ap_email"></form></body>`)), true);
+  assert.equal(isBlockedPage(doc(`<body>${nav}<input type="password" name="password"></body>`)), true);
 });
 
 test('dedupe within 10 minutes, expires after', () => {

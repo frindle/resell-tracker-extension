@@ -213,12 +213,31 @@
     }
   });
 
+  // src/lib/version.ts
+  function isNewerVersion(latest, current) {
+    const parts = (v) => v.replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0);
+    const a = parts(latest), b = parts(current);
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+      const d = (a[i] ?? 0) - (b[i] ?? 0);
+      if (d !== 0) return d > 0;
+    }
+    return false;
+  }
+  var import_browser_polyfill_min3;
+  var init_version = __esm({
+    "src/lib/version.ts"() {
+      "use strict";
+      import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min(), 1);
+    }
+  });
+
   // src/popup/popup.ts
   var require_popup = __commonJS({
     "src/popup/popup.ts"() {
-      var import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min());
+      var import_browser_polyfill_min4 = __toESM(require_browser_polyfill_min());
       init_storage();
       init_access();
+      init_version();
       async function checkVersions(trackerUrl) {
         const manifest = chrome.runtime.getManifest();
         const extVersion = manifest.version;
@@ -229,7 +248,7 @@
             trackerUrl ? fetch(`${trackerUrl.replace(/\/$/, "")}/api/version`).then((r) => r.json()).catch(() => null) : Promise.resolve(null)
           ]);
           const latestExt = extTags.find((t) => /^v?\d/.test(t.name))?.name.replace(/^v/, "");
-          const extOutdated = latestExt && latestExt !== extVersion;
+          const extOutdated = latestExt && isNewerVersion(latestExt, extVersion);
           if (extOutdated) {
             document.getElementById("versionUpdate").style.display = "inline";
             document.getElementById("versionUpdate").textContent = `update available: ext v${latestExt}`;

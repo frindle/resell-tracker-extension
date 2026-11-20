@@ -1,6 +1,7 @@
 import { getSettings } from '../lib/storage';
 import { originsFor, missingOrigins, requestGrant } from '../lib/access';
 import type { ApiLogEntry } from '../lib/types';
+import { isNewerVersion } from '../lib/version';
 
 async function checkVersions(trackerUrl: string | undefined) {
   const manifest = chrome.runtime.getManifest();
@@ -13,7 +14,7 @@ async function checkVersions(trackerUrl: string | undefined) {
       trackerUrl ? fetch(`${trackerUrl.replace(/\/$/, '')}/api/version`).then(r => r.json()).catch(() => null) : Promise.resolve(null),
     ]);
     const latestExt = (extTags as { name: string }[]).find(t => /^v?\d/.test(t.name))?.name.replace(/^v/, '');
-    const extOutdated = latestExt && latestExt !== extVersion;
+    const extOutdated = latestExt && isNewerVersion(latestExt, extVersion);
 
     // The popup is the extension's surface — only flag extension updates
     // here. Tracker/dashboard updates surface inside the tracker app
