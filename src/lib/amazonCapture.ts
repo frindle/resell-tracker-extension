@@ -27,7 +27,10 @@ const AGENT_BLOCK_RE = /unauthorized AI agent|violates Amazon'?s Conditions of U
 
 /** True for sign-in pages, CAPTCHA pages and the agent-block interstitial. Nothing is sent for these. */
 export function isBlockedPage(doc: Document): boolean {
-  if (doc.querySelector('form[name="signIn"], #ap_email, #ap_password, input[name="password"][type="password"]')) return true;
+  // Every signed-in Amazon page carries a hidden <form id="ap_navbar_form"
+  // name="signIn"> in the top nav (the account flyout). It is not a sign-in
+  // page, and counting it blocked every Sync now on page 1 (2026-11-20).
+  if (doc.querySelector('form[name="signIn"]:not(#ap_navbar_form), #ap_email, #ap_password, input[name="password"][type="password"]')) return true;
   if (doc.querySelector('form[action*="validateCaptcha"], #captchacharacters, img[src*="captcha"]')) return true;
   const text = doc.documentElement?.textContent ?? '';
   if (AGENT_BLOCK_RE.test(text.slice(0, 20000))) return true;

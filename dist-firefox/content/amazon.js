@@ -166,7 +166,7 @@
     return null;
   }
   function isBlockedPage(doc) {
-    if (doc.querySelector('form[name="signIn"], #ap_email, #ap_password, input[name="password"][type="password"]')) return true;
+    if (doc.querySelector('form[name="signIn"]:not(#ap_navbar_form), #ap_email, #ap_password, input[name="password"][type="password"]')) return true;
     if (doc.querySelector('form[action*="validateCaptcha"], #captchacharacters, img[src*="captcha"]')) return true;
     const text = doc.documentElement?.textContent ?? "";
     if (AGENT_BLOCK_RE.test(text.slice(0, 2e4))) return true;
