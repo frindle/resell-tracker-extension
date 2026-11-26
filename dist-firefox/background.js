@@ -102,9 +102,9 @@
       return null;
     }
     if (u.protocol !== "https:" || u.hostname !== "www.amazon.com") return null;
-    const p = u.pathname.replace(/\/+$/, "");
+    const p = u.pathname.replace(/\/ref=[^/]*\/?$/, "").replace(/\/+$/, "");
     if (p === "/your-orders/orders" || p === "/gp/css/order-history" || p === "/gp/your-account/order-history") return "orders";
-    if (p === "/gp/your-account/order-details" || p === "/your-orders/order-details" || p === "/gp/css/summary/edit.html") return "detail";
+    if (p === "/gp/your-account/order-details" || p === "/your-orders/order-details" || p === "/gp/css/order-details" || p === "/gp/css/summary/edit.html") return "detail";
     if (p === "/progress-tracker/package" || p.startsWith("/progress-tracker/package/") || p === "/gp/your-account/ship-track" || p === "/gp/css/shiptrack/view.html") return "tracking";
     return null;
   }
@@ -385,10 +385,12 @@
   }
   function formatRunSummary(s) {
     if (s.status === "blocked") return `blocked after ${s.pages} page(s); tab left open for you`;
+    if (s.status === "done" && s.pages === 0) return "nothing needed a visit";
     const compare = s.mode === "compare";
     let base = `${s.pages} page(s): ${s.created} ${compare ? "would create" : "new"}, ${s.updated} ${compare ? "would update" : "updated"}, ${s.unchanged} unchanged, ${s.discrepancies} needs review`;
     if (s.ignored) base += ` (${s.ignored} page ignored as sign-in/block)`;
     if (s.unparsed) base += ` (${s.unparsed} page could not be parsed)`;
+    if (s.unread) base += ` (${s.unread} page(s) not read)`;
     if (compare) base += " (compare only)";
     return s.status === "capped" ? `${base} (page cap reached)` : s.status === "error" ? `${base} (${s.message})` : base;
   }
@@ -402,6 +404,8 @@
       const sum = { status: "done", pages: 0, created: 0, updated: 0, unchanged: 0, discrepancies: 0, message: "" };
       let tabId = null;
       let consecutiveTimeouts = 0;
+      let unread = 0;
+      let lastNote = "";
       const needs = /* @__PURE__ */ new Map();
       const visit = async (url) => {
         if (!classifyAmazonUrl(url)) return { kind: "error", message: "skipped non-order url" };
@@ -423,11 +427,16 @@
           sum.message = "sign-in, CAPTCHA or block page";
           return null;
         }
+        if (out.kind === "timeout" || out.kind === "error") {
+          unread += 1;
+          sum.unread = unread;
+          lastNote = out.kind === "timeout" ? out.note ?? "the page did not answer in time" : out.message;
+        }
         if (out.kind === "timeout") {
           consecutiveTimeouts += 1;
           if (consecutiveTimeouts >= 3) {
             sum.status = "error";
-            sum.message = "pages did not load";
+            sum.message = `pages could not be read: ${lastNote}`;
             return null;
           }
         } else {
@@ -505,6 +514,10 @@
         sum.status = "error";
         sum.message = String(e.message || e);
       } finally {
+        if (sum.status === "done" && sum.pages > 0 && unread >= sum.pages) {
+          sum.status = "error";
+          sum.message = `no page could be read: ${lastNote}`;
+        }
         if (tabId !== null && sum.status !== "blocked") {
           try {
             await deps2.closeTab(tabId);
@@ -529,6 +542,63 @@
       MAX_TRACK_PAGES_PER_ORDER = 3;
       digitsOf = (s) => String(s ?? "").replace(/\D/g, "") || String(s ?? "");
       detailUrlFor = (orderNumber) => `https://www.amazon.com/gp/your-account/order-details?orderID=${encodeURIComponent(orderNumber)}`;
+    }
+  });
+
+  // src/lib/capturePoke.ts
+  function parsePokeReply(raw) {
+    const r = raw;
+    if (!r || typeof r !== "object" || typeof r.state !== "string" || !STATES.has(r.state)) return null;
+    if (typeof r.pageId !== "string" || !r.pageId) return null;
+    return { state: r.state, pageId: r.pageId, ...typeof r.path === "string" ? { path: r.path.slice(0, 80) } : {} };
+  }
+  function createPokeJudge(stalePageId = null) {
+    let pageId = null;
+    let unrecognised = 0;
+    let note = "the page never answered";
+    return {
+      /** One answer (anything else when the page did not answer). An outcome ends the wait. */
+      reply(raw) {
+        const r = parsePokeReply(raw);
+        if (!r) return null;
+        if (stalePageId && r.pageId === stalePageId) {
+          note = "the tab stayed on the previous page";
+          return null;
+        }
+        if (r.pageId !== pageId) {
+          pageId = r.pageId;
+          unrecognised = 0;
+        }
+        if (r.state === "unrecognised") {
+          unrecognised += 1;
+          note = `not an order page: ${r.path ?? "unknown"}`;
+          return unrecognised >= UNRECOGNISED_REPLIES ? { kind: "error", message: note } : null;
+        }
+        unrecognised = 0;
+        note = r.state === "busy" ? "the page was still loading" : r.state === "sent" ? "the page was sent but the tracker did not answer in time" : r.state === "blocked" ? "sign-in or block page" : "page too large";
+        return null;
+      },
+      /** The page that answered last, to pass as the next page's stalePageId. */
+      pageId: () => pageId,
+      /** Why the page was not read, for the run summary. */
+      note: () => note
+    };
+  }
+  function isStaleOutcome(pageId, stalePageId) {
+    return typeof pageId === "string" && !!pageId && pageId === stalePageId;
+  }
+  var POKE_FIRST_MS, POKE_EVERY_MS, POKE_FORCE_MS, POKE_FORCE_ANY_MS, UNRECOGNISED_REPLIES, STATES, shouldForce, shouldForceAny;
+  var init_capturePoke = __esm({
+    "src/lib/capturePoke.ts"() {
+      "use strict";
+      POKE_FIRST_MS = 3e3;
+      POKE_EVERY_MS = 2e3;
+      POKE_FORCE_MS = 12e3;
+      POKE_FORCE_ANY_MS = 22e3;
+      UNRECOGNISED_REPLIES = 2;
+      STATES = /* @__PURE__ */ new Set(["sent", "blocked", "too_large", "unrecognised", "busy"]);
+      shouldForce = (elapsedMs) => elapsedMs >= POKE_FORCE_MS;
+      shouldForceAny = (elapsedMs) => elapsedMs >= POKE_FORCE_ANY_MS;
     }
   });
 
@@ -574,28 +644,61 @@
   }
   function expect(tabId) {
     return new Promise((resolve) => {
-      const done = (o) => {
+      const started = Date.now();
+      const judge = createPokeJudge(lastPageId);
+      seenPageId = null;
+      let settled = false;
+      let poke = null;
+      const done = (o, pageId) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(t);
-        pending.delete(tabId);
+        if (poke) clearTimeout(poke);
+        if (pending.get(tabId) === done) pending.delete(tabId);
+        lastPageId = pageId ?? judge.pageId() ?? seenPageId ?? lastPageId;
         resolve(o);
       };
-      const t = setTimeout(() => done({ kind: "timeout" }), WAIT_MS);
+      const t = setTimeout(() => {
+        chrome.tabs.get(tabId).then((tab) => done({ kind: "timeout", note: tab.status === "loading" ? "the tab was still loading" : judge.note() })).catch(() => done({ kind: "timeout", note: judge.note() }));
+      }, WAIT_MS);
+      const ask = async () => {
+        poke = null;
+        let answer = null;
+        const elapsed = Date.now() - started;
+        try {
+          answer = await chrome.tabs.sendMessage(tabId, { type: "AMAZON_CAPTURE_NOW", force: shouldForce(elapsed), forceAny: shouldForceAny(elapsed) });
+        } catch {
+        }
+        if (settled) return;
+        const outcome = judge.reply(answer);
+        if (outcome) {
+          done(outcome);
+          return;
+        }
+        poke = setTimeout(ask, POKE_EVERY_MS);
+      };
+      poke = setTimeout(ask, POKE_FIRST_MS);
       pending.set(tabId, done);
       const e = early.get(tabId);
       if (e) {
         early.delete(tabId);
-        done(e);
+        done(e.outcome, e.pageId);
       }
     });
   }
   function isRunTab(tabId) {
     return tabId !== void 0 && tabId === runTabId;
   }
-  function notifyOutcome(tabId, outcome) {
+  function notePage(tabId, pageId) {
+    if (isRunTab(tabId) && typeof pageId === "string" && pageId && !isStaleOutcome(pageId, lastPageId)) seenPageId = pageId;
+  }
+  function notifyOutcome(tabId, outcome, pageId) {
     if (!isRunTab(tabId)) return;
+    if (isStaleOutcome(pageId, lastPageId)) return;
+    const id = typeof pageId === "string" && pageId ? pageId : void 0;
     const p = pending.get(tabId);
-    if (p) p(outcome);
-    else early.set(tabId, outcome);
+    if (p) p(outcome, id);
+    else early.set(tabId, { outcome, pageId: id });
   }
   async function startAmazonRun() {
     await saveRun("running...", "running");
@@ -653,12 +756,13 @@
   function amazonRunActive() {
     return runner.isRunning();
   }
-  var WAIT_MS, pending, early, runTabId, background, fillsTracking, runWindowId, RUN_TAB_KEY, KEEPALIVE_MS, store, waiter, deps, runner;
+  var WAIT_MS, pending, early, runTabId, background, fillsTracking, runWindowId, lastPageId, seenPageId, RUN_TAB_KEY, KEEPALIVE_MS, store, waiter, deps, runner;
   var init_amazonRun = __esm({
     "src/background/amazonRun.ts"() {
       "use strict";
       init_syncRun();
       init_amazonCapture2();
+      init_capturePoke();
       WAIT_MS = 3e4;
       pending = /* @__PURE__ */ new Map();
       early = /* @__PURE__ */ new Map();
@@ -666,6 +770,8 @@
       background = false;
       fillsTracking = false;
       runWindowId = null;
+      lastPageId = null;
+      seenPageId = null;
       RUN_TAB_KEY = "amazonRunTab";
       KEEPALIVE_MS = 2e4;
       store = () => chrome.storage.session ?? chrome.storage.local;
@@ -686,6 +792,7 @@
           }
           if (!tab?.id) throw new Error("could not open a tab");
           runTabId = tab.id;
+          lastPageId = null;
           early.delete(tab.id);
           waiter = expect(tab.id);
           await rememberRunTab(tab.id, runWindowId);
@@ -1091,23 +1198,25 @@
         }
         if (message.type === "AMAZON_PAGE_CAPTURE") {
           const tabId = sender.tab?.id;
+          const pageId = message.pageId;
+          notePage(tabId, pageId);
           handleCapture(message, isRunTab(tabId), isTrackRunTab(tabId)).then((r) => {
-            if ("result" in r && r.result) notifyOutcome(tabId, { kind: "result", result: r.result });
-            else if (!r.ok) notifyOutcome(tabId, { kind: "error", message: "send failed" });
-            else notifyOutcome(tabId, { kind: "result", result: {} });
+            if ("result" in r && r.result) notifyOutcome(tabId, { kind: "result", result: r.result }, pageId);
+            else if (!r.ok) notifyOutcome(tabId, { kind: "error", message: "send failed" }, pageId);
+            else notifyOutcome(tabId, { kind: "result", result: {} }, pageId);
             sendResponse(r);
           }).catch((e) => {
-            notifyOutcome(tabId, { kind: "error", message: String(e) });
+            notifyOutcome(tabId, { kind: "error", message: String(e) }, pageId);
             sendResponse({ ok: false, error: String(e) });
           });
           return true;
         }
         if (message.type === "AMAZON_PAGE_SKIPPED") {
-          notifyOutcome(sender.tab?.id, { kind: "error", message: "page skipped" });
+          notifyOutcome(sender.tab?.id, { kind: "error", message: "page skipped" }, message.pageId);
           return false;
         }
         if (message.type === "AMAZON_PAGE_BLOCKED") {
-          notifyOutcome(sender.tab?.id, { kind: "blocked" });
+          notifyOutcome(sender.tab?.id, { kind: "blocked" }, message.pageId);
           return false;
         }
         if (message.type === "AMAZON_SYNC_NOW") {
@@ -1471,9 +1580,9 @@
             try {
               const out = await startVisitRun(plan.visits);
               const status = out.status;
-              if (out.started === false) await patchCommand(base, cmd.id, "failed", headers, { error: String(out.reason) });
-              else if (status === "blocked") await patchCommand(base, cmd.id, "failed", headers, { blocked: true, error: "sign-in, CAPTCHA or block page", text: out.text });
-              else if (status === "error") await patchCommand(base, cmd.id, "failed", headers, { error: String(out.message || "run failed"), text: out.text });
+              if (out.started === false) await patchCommand(base, cmd.id, "failed", headers, { notStarted: true, error: String(out.reason) });
+              else if (status === "blocked") await patchCommand(base, cmd.id, "failed", headers, { blocked: true, error: "sign-in, CAPTCHA or block page", text: out.text, pages: out.pages });
+              else if (status === "error") await patchCommand(base, cmd.id, "failed", headers, { error: String(out.message || "run failed"), text: out.text, pages: out.pages });
               else await patchCommand(base, cmd.id, "done", headers, out);
             } catch (e) {
               await patchCommand(base, cmd.id, "failed", headers, { error: String(e) });
@@ -1486,7 +1595,16 @@
             if (cmd.type === "SYNC_AMAZON" || cmd.type === "SYNC_AMAZON_ORDER") {
               throw new Error("Amazon sync is disabled; use Sync Amazon (visible tab) or just browse your orders.");
             } else if (cmd.type === "SYNC_AMAZON_PAGES") {
-              result = await startAmazonRun();
+              const out = await startAmazonRun();
+              if (out.status === "error") {
+                await patchCommand(base, cmd.id, "failed", headers, { error: String(out.message || "run failed"), text: out.text });
+                continue;
+              }
+              if (out.status === "blocked") {
+                await patchCommand(base, cmd.id, "failed", headers, { blocked: true, error: "sign-in, CAPTCHA or block page", text: out.text });
+                continue;
+              }
+              result = out;
             } else if (cmd.type === "SYNC_WALMART") result = await runSyncCommand("Walmart");
             else if (cmd.type === "SYNC_COSTCO") result = await runSyncCommand("Costco");
             else if (cmd.type === "SYNC_BIGSKY") result = await runSyncCommand("BigSkyBuyers");

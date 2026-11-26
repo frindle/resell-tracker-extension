@@ -1,7 +1,7 @@
 import type { ScrapedOrder } from '../lib/types';
 import { ensureTrackerScriptRegistered } from '../lib/tracker-script';
 import { handleCapture, flushQueue, getCaptureStatus, getLastRun } from './amazonCapture';
-import { startAmazonRun, startTrackingRun, startVisitRun, closeOrphanRunTab, notifyOutcome, isRunTab, isTrackRunTab, amazonRunActive } from './amazonRun';
+import { startAmazonRun, startTrackingRun, startVisitRun, closeOrphanRunTab, notifyOutcome, notePage, isRunTab, isTrackRunTab, amazonRunActive } from './amazonRun';
 import { trackCommandPlan } from '../lib/trackCommand';
 import { visitCommandPlan } from '../lib/visitCommand';
 import { extensionBrowser } from '../lib/browserTarget';
@@ -381,25 +381,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'AMAZON_PAGE_CAPTURE') {
     const tabId = sender.tab?.id;
+    // The page's id travels with its result: a result that arrives after the
+    // run moved on must not be taken for the next page's.
+    const pageId: unknown = message.pageId;
+    notePage(tabId, pageId);
     handleCapture(message, isRunTab(tabId), isTrackRunTab(tabId))
       .then(r => {
-        if ('result' in r && r.result) notifyOutcome(tabId, { kind: 'result', result: r.result as never });
-        else if (!r.ok) notifyOutcome(tabId, { kind: 'error', message: 'send failed' });
-        else notifyOutcome(tabId, { kind: 'result', result: {} });
+        if ('result' in r && r.result) notifyOutcome(tabId, { kind: 'result', result: r.result as never }, pageId);
+        else if (!r.ok) notifyOutcome(tabId, { kind: 'error', message: 'send failed' }, pageId);
+        else notifyOutcome(tabId, { kind: 'result', result: {} }, pageId);
         sendResponse(r);
       })
-      .catch(e => { notifyOutcome(tabId, { kind: 'error', message: String(e) }); sendResponse({ ok: false, error: String(e) }); });
+      .catch(e => { notifyOutcome(tabId, { kind: 'error', message: String(e) }, pageId); sendResponse({ ok: false, error: String(e) }); });
     return true;
   }
 
   if (message.type === 'AMAZON_PAGE_SKIPPED') {
     // Lets a run move on at once instead of waiting out the page timeout.
-    notifyOutcome(sender.tab?.id, { kind: 'error', message: 'page skipped' });
+    notifyOutcome(sender.tab?.id, { kind: 'error', message: 'page skipped' }, message.pageId);
     return false;
   }
 
   if (message.type === 'AMAZON_PAGE_BLOCKED') {
-    notifyOutcome(sender.tab?.id, { kind: 'blocked' });
+    notifyOutcome(sender.tab?.id, { kind: 'blocked' }, message.pageId);
     return false;
   }
 
@@ -807,9 +811,10 @@ async function pollAndExecuteCommands() {
       try {
         const out = await startVisitRun(plan.visits);
         const status = out.status as string | undefined;
-        if (out.started === false) await patchCommand(base, cmd.id, 'failed', headers, { error: String(out.reason) });
-        else if (status === 'blocked') await patchCommand(base, cmd.id, 'failed', headers, { blocked: true, error: 'sign-in, CAPTCHA or block page', text: out.text });
-        else if (status === 'error') await patchCommand(base, cmd.id, 'failed', headers, { error: String(out.message || 'run failed'), text: out.text });
+        // notStarted and blocked tell the tracker the orders were not at fault; pages is what the run really opened.
+        if (out.started === false) await patchCommand(base, cmd.id, 'failed', headers, { notStarted: true, error: String(out.reason) });
+        else if (status === 'blocked') await patchCommand(base, cmd.id, 'failed', headers, { blocked: true, error: 'sign-in, CAPTCHA or block page', text: out.text, pages: out.pages });
+        else if (status === 'error') await patchCommand(base, cmd.id, 'failed', headers, { error: String(out.message || 'run failed'), text: out.text, pages: out.pages });
         else await patchCommand(base, cmd.id, 'done', headers, out);
       } catch (e) {
         await patchCommand(base, cmd.id, 'failed', headers, { error: String(e) });
@@ -824,7 +829,11 @@ async function pollAndExecuteCommands() {
         throw new Error('Amazon sync is disabled; use Sync Amazon (visible tab) or just browse your orders.');
       } else if (cmd.type === 'SYNC_AMAZON_PAGES') {
         // Queued only by a person clicking Sync Amazon in the tracker.
-        result = await startAmazonRun();
+        const out = await startAmazonRun();
+        // A run that read nothing shows as failed, with the reason, in Sync Status.
+        if (out.status === 'error') { await patchCommand(base, cmd.id, 'failed', headers, { error: String(out.message || 'run failed'), text: out.text }); continue; }
+        if (out.status === 'blocked') { await patchCommand(base, cmd.id, 'failed', headers, { blocked: true, error: 'sign-in, CAPTCHA or block page', text: out.text }); continue; }
+        result = out;
       } else if (cmd.type === 'SYNC_WALMART') result = await runSyncCommand('Walmart');
       else if (cmd.type === 'SYNC_COSTCO') result = await runSyncCommand('Costco');
       else if (cmd.type === 'SYNC_BIGSKY') result = await runSyncCommand('BigSkyBuyers');

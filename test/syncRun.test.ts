@@ -158,7 +158,33 @@ test('clicked run: nothing pending and list not due opens no tab', async () => {
   const { deps, log } = fake({});
   const s = await createSyncRunner(withPlan(deps, { listDue: false, visits: [] })).run({ paceMs: 1 }) as any;
   assert.equal(s.pages, 0);
+  assert.equal(s.status, 'done');
+  assert.equal(formatRunSummary(s), 'nothing needed a visit');
   assert.deepEqual(log.opened, []);
+});
+
+test('a run whose pages were all opened but never read ends as an error, with the reason', async () => {
+  const a = fake({ [D(N1)]: { kind: 'timeout', note: 'the page was still loading' }, [D(N2)]: { kind: 'error', message: 'not an order page: /ap/signin' } });
+  const s = await createSyncRunner(a.deps).run({ paceMs: 1, visits: [{ orderNumber: N1, stages: ['detail'] }, { orderNumber: N2, stages: ['detail'] }] }) as any;
+  assert.equal(s.status, 'error');
+  assert.equal(s.pages, 2);
+  assert.equal(s.unread, 2);
+  assert.match(s.message, /no page could be read: not an order page: \/ap\/signin/);
+  assert.deepEqual(a.log.closed, [7]);
+
+  const b = fake({});
+  const s2 = await createSyncRunner(b.deps).run({ paceMs: 1, visits: [1, 2, 3, 4].map(i => ({ orderNumber: `111-0000000-000000${i}`, stages: ['detail' as const] })) }) as any;
+  assert.equal(s2.status, 'error');
+  assert.equal(s2.pages, 3); // three in a row: stop
+  assert.match(s2.message, /pages could not be read: the page did not answer in time/);
+});
+
+test('a run with some pages read stays done and counts the ones that were not', async () => {
+  const { deps } = fake({ [D(N1)]: res({}, { updated: 1 }), [D(N2)]: { kind: 'timeout' } });
+  const s = await createSyncRunner(deps).run({ paceMs: 1, visits: [{ orderNumber: N1, stages: ['detail'] }, { orderNumber: N2, stages: ['detail'] }] }) as any;
+  assert.equal(s.status, 'done');
+  assert.equal(s.unread, 1);
+  assert.match(formatRunSummary(s), /1 page\(s\) not read/);
 });
 
 test('clicked run: a stored link is used only when it is a safe order-details page', async () => {

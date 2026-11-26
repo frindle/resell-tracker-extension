@@ -62,7 +62,7 @@ export interface ListInfo {
 export type PageOutcome =
   | { kind: 'result'; result: PageResult & { list?: ListInfo; detail?: { trackUrls?: string[] } } }
   | { kind: 'blocked' }
-  | { kind: 'timeout' }
+  | { kind: 'timeout'; note?: string }
   | { kind: 'error'; message: string };
 
 export interface RunDeps {
@@ -86,6 +86,8 @@ export interface RunSummary {
   ignored?: number;
   /** pages the tracker could not parse */
   unparsed?: number;
+  /** pages that were opened but never read (timed out, not an order page, send failed) */
+  unread?: number;
   mode?: string;
   message: string;
   blockedUrl?: string;
@@ -93,10 +95,12 @@ export interface RunSummary {
 
 export function formatRunSummary(s: RunSummary): string {
   if (s.status === 'blocked') return `blocked after ${s.pages} page(s); tab left open for you`;
+  if (s.status === 'done' && s.pages === 0) return 'nothing needed a visit';
   const compare = s.mode === 'compare';
   let base = `${s.pages} page(s): ${s.created} ${compare ? 'would create' : 'new'}, ${s.updated} ${compare ? 'would update' : 'updated'}, ${s.unchanged} unchanged, ${s.discrepancies} needs review`;
   if (s.ignored) base += ` (${s.ignored} page ignored as sign-in/block)`;
   if (s.unparsed) base += ` (${s.unparsed} page could not be parsed)`;
+  if (s.unread) base += ` (${s.unread} page(s) not read)`;
   if (compare) base += ' (compare only)';
   return s.status === 'capped' ? `${base} (page cap reached)` : s.status === 'error' ? `${base} (${s.message})` : base;
 }
@@ -118,6 +122,8 @@ export function createSyncRunner(deps: RunDeps) {
     const sum: RunSummary = { status: 'done', pages: 0, created: 0, updated: 0, unchanged: 0, discrepancies: 0, message: '' };
     let tabId: number | null = null;
     let consecutiveTimeouts = 0;
+    let unread = 0;
+    let lastNote = '';
     const needs = new Map<string, NeedItem>();
 
     // Visits one URL; returns the outcome, or null when the run must stop.
@@ -138,9 +144,14 @@ export function createSyncRunner(deps: RunDeps) {
         sum.message = 'sign-in, CAPTCHA or block page';
         return null;
       }
+      if (out.kind === 'timeout' || out.kind === 'error') {
+        unread += 1;
+        sum.unread = unread;
+        lastNote = out.kind === 'timeout' ? (out.note ?? 'the page did not answer in time') : out.message;
+      }
       if (out.kind === 'timeout') {
         consecutiveTimeouts += 1;
-        if (consecutiveTimeouts >= 3) { sum.status = 'error'; sum.message = 'pages did not load'; return null; }
+        if (consecutiveTimeouts >= 3) { sum.status = 'error'; sum.message = `pages could not be read: ${lastNote}`; return null; }
       } else {
         consecutiveTimeouts = 0;
       }
@@ -233,6 +244,11 @@ export function createSyncRunner(deps: RunDeps) {
       sum.status = 'error';
       sum.message = String((e as Error).message || e);
     } finally {
+      // Pages were opened and not one was read: that is a failed run, not a quiet one.
+      if (sum.status === 'done' && sum.pages > 0 && unread >= sum.pages) {
+        sum.status = 'error';
+        sum.message = `no page could be read: ${lastNote}`;
+      }
       // A blocked run leaves the tab exactly where it is for the user.
       if (tabId !== null && sum.status !== 'blocked') {
         try { await deps.closeTab(tabId); } catch { /* tab already closed */ }

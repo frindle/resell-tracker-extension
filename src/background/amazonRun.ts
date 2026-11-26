@@ -6,16 +6,21 @@
 import { createSyncRunner, formatRunSummary, type PageOutcome, type RunDeps } from '../lib/syncRun';
 import { saveRun, reportRun, fetchVisitPlan } from './amazonCapture';
 import type { Visit } from '../lib/syncRun';
+import { createPokeJudge, shouldForce, shouldForceAny, isStaleOutcome, POKE_FIRST_MS, POKE_EVERY_MS } from '../lib/capturePoke';
 
 const WAIT_MS = 30000;
-const pending = new Map<number, (o: PageOutcome) => void>();
-const early = new Map<number, PageOutcome>();
+const pending = new Map<number, (o: PageOutcome, pageId?: string) => void>();
+const early = new Map<number, { outcome: PageOutcome; pageId?: string }>();
 let runTabId: number | null = null;
 // Tracking runs: the minimized window, and whether pages may fill tracking.
 let background = false;
 // Runs that follow Track package links: their pages may fill a blank tracking number.
 let fillsTracking = false;
 let runWindowId: number | null = null;
+// The page the run's tab showed last, so its late answers are not taken for the next page's.
+let lastPageId: string | null = null;
+// The page that has sent something during the current wait (known before it answers an ask).
+let seenPageId: string | null = null;
 
 // The browser stops an idle background worker after 30 seconds, which used to
 // end a run half way and leave its tab open. A run keeps the worker awake, and
@@ -49,13 +54,47 @@ export async function closeOrphanRunTab() {
   } catch { /* best-effort */ }
 }
 
+// Waits for the page in the run's tab to be read. The page's own "settled"
+// timer is slowed by the browser while the tab is hidden, so the worker asks
+// the page itself (lib/capturePoke.ts) until an outcome arrives or time is up.
 function expect(tabId: number): Promise<PageOutcome> {
   return new Promise<PageOutcome>(resolve => {
-    const done = (o: PageOutcome) => { clearTimeout(t); pending.delete(tabId); resolve(o); };
-    const t = setTimeout(() => done({ kind: 'timeout' }), WAIT_MS);
+    const started = Date.now();
+    const judge = createPokeJudge(lastPageId);
+    seenPageId = null;
+    let settled = false;
+    let poke: ReturnType<typeof setTimeout> | null = null;
+    const done = (o: PageOutcome, pageId?: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(t);
+      if (poke) clearTimeout(poke);
+      if (pending.get(tabId) === done) pending.delete(tabId);
+      // Whatever this page still sends (its result can arrive after the wait ended) is not the next page's.
+      lastPageId = pageId ?? judge.pageId() ?? seenPageId ?? lastPageId;
+      resolve(o);
+    };
+    const t = setTimeout(() => {
+      // Say why: still loading, never answered, or sent but not confirmed.
+      chrome.tabs.get(tabId)
+        .then(tab => done({ kind: 'timeout', note: tab.status === 'loading' ? 'the tab was still loading' : judge.note() }))
+        .catch(() => done({ kind: 'timeout', note: judge.note() }));
+    }, WAIT_MS);
+    const ask = async () => {
+      poke = null;
+      let answer: unknown = null;
+      // Rejects while the page (or its content script) is not there yet: ask again.
+      const elapsed = Date.now() - started;
+      try { answer = await chrome.tabs.sendMessage(tabId, { type: 'AMAZON_CAPTURE_NOW', force: shouldForce(elapsed), forceAny: shouldForceAny(elapsed) }); } catch { /* not ready */ }
+      if (settled) return;
+      const outcome = judge.reply(answer);
+      if (outcome) { done(outcome); return; }
+      poke = setTimeout(ask, POKE_EVERY_MS);
+    };
+    poke = setTimeout(ask, POKE_FIRST_MS);
     pending.set(tabId, done);
     const e = early.get(tabId);
-    if (e) { early.delete(tabId); done(e); }
+    if (e) { early.delete(tabId); done(e.outcome, e.pageId); }
   });
 }
 
@@ -64,10 +103,22 @@ export function isRunTab(tabId: number | undefined): boolean {
   return tabId !== undefined && tabId === runTabId;
 }
 
-export function notifyOutcome(tabId: number | undefined, outcome: PageOutcome) {
+/** A run page started sending: remembers which page it is, in case its result comes after the wait. */
+export function notePage(tabId: number | undefined, pageId: unknown) {
+  if (isRunTab(tabId) && typeof pageId === 'string' && pageId && !isStaleOutcome(pageId, lastPageId)) seenPageId = pageId;
+}
+
+/**
+ * pageId: the page the outcome is about, when known. An outcome from the page
+ * the tab showed before the current one (its result arrived late) is dropped,
+ * so it is never taken for the page now being waited on.
+ */
+export function notifyOutcome(tabId: number | undefined, outcome: PageOutcome, pageId?: unknown) {
   if (!isRunTab(tabId)) return;
+  if (isStaleOutcome(pageId, lastPageId)) return;
+  const id = typeof pageId === 'string' && pageId ? pageId : undefined;
   const p = pending.get(tabId!);
-  if (p) p(outcome); else early.set(tabId!, outcome);
+  if (p) p(outcome, id); else early.set(tabId!, { outcome, pageId: id });
 }
 
 let waiter: Promise<PageOutcome> | null = null;
@@ -89,6 +140,7 @@ const deps: RunDeps = {
     }
     if (!tab?.id) throw new Error('could not open a tab');
     runTabId = tab.id;
+    lastPageId = null;
     early.delete(tab.id);
     waiter = expect(tab.id);
     await rememberRunTab(tab.id, runWindowId);

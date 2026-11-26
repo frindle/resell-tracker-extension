@@ -51,6 +51,24 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.3.7
+
+- **Amazon pages in a minimized window are read again.** A hidden page's timers are slowed by the browser, so the page could report itself after the run had already given up on it (every email-triggered visit timed out at 30 seconds). During a run the background worker now asks the page directly every couple of seconds. After 12 seconds a loaded page is read even if it is still changing, and after 22 seconds a page that never finished loading is read as a last resort. Nothing extra is requested from Amazon.
+- A page's result carries the page's own id, so a result that arrives after the run moved on is never taken for the next page (which could have opened one order's tracking links under another).
+- A page the worker did not receive (it was restarting) is sent again, up to twice.
+- A visit command that could not start, or that stopped at a block page, tells the tracker so the orders keep their try; the pages a run really opened are reported for the daily budget.
+- A run that opened pages and read none ends as failed, with the reason (still loading, not an order page and which path, or sent but not confirmed), instead of a quiet "done". The tracker puts those orders back in line.
+- Pages that were not read are counted in the summary; a run with nothing to do says "nothing needed a visit".
+- Order pages with a trailing `/ref=...` segment, and `/gp/css/order-details`, are recognised.
+
+### 1.3.6
+
+- Email-triggered Amazon visits (`VISIT_AMAZON`), and Sync works the same list.
+
+### 1.3.5
+
+- Close the Amazon sync tab when a run is cut short.
+
 ### 1.3.1
 
 - Fix "Grant access" not working in Brave: the grant now requests only the missing origins as explicit http/https patterns, decides success with `permissions.contains` instead of the request result, calls `permissions.request` before any await (also on the options Connect button), re-checks when the popup regains focus, offers "Grant in a tab" as a fallback, and shows Brave Site access instructions when denied.

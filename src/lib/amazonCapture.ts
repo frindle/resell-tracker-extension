@@ -16,9 +16,10 @@ export function classifyAmazonUrl(rawUrl: string): AmazonPageKind | null {
   let u: URL;
   try { u = new URL(rawUrl); } catch { return null; }
   if (u.protocol !== 'https:' || u.hostname !== 'www.amazon.com') return null;
-  const p = u.pathname.replace(/\/+$/, '');
+  // Amazon often appends a /ref=... segment to the same page.
+  const p = u.pathname.replace(/\/ref=[^/]*\/?$/, '').replace(/\/+$/, '');
   if (p === '/your-orders/orders' || p === '/gp/css/order-history' || p === '/gp/your-account/order-history') return 'orders';
-  if (p === '/gp/your-account/order-details' || p === '/your-orders/order-details' || p === '/gp/css/summary/edit.html') return 'detail';
+  if (p === '/gp/your-account/order-details' || p === '/your-orders/order-details' || p === '/gp/css/order-details' || p === '/gp/css/summary/edit.html') return 'detail';
   if (p === '/progress-tracker/package' || p.startsWith('/progress-tracker/package/') || p === '/gp/your-account/ship-track' || p === '/gp/css/shiptrack/view.html') return 'tracking';
   return null;
 }
