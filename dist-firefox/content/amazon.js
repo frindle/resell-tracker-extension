@@ -159,9 +159,9 @@
       return null;
     }
     if (u.protocol !== "https:" || u.hostname !== "www.amazon.com") return null;
-    const p = u.pathname.replace(/\/+$/, "");
+    const p = u.pathname.replace(/\/ref=[^/]*\/?$/, "").replace(/\/+$/, "");
     if (p === "/your-orders/orders" || p === "/gp/css/order-history" || p === "/gp/your-account/order-history") return "orders";
-    if (p === "/gp/your-account/order-details" || p === "/your-orders/order-details" || p === "/gp/css/summary/edit.html") return "detail";
+    if (p === "/gp/your-account/order-details" || p === "/your-orders/order-details" || p === "/gp/css/order-details" || p === "/gp/css/summary/edit.html") return "detail";
     if (p === "/progress-tracker/package" || p.startsWith("/progress-tracker/package/") || p === "/gp/your-account/ship-track" || p === "/gp/css/shiptrack/view.html") return "tracking";
     return null;
   }
@@ -221,35 +221,77 @@
     }
   });
 
+  // src/lib/capturePoke.ts
+  function mayReadNow(p) {
+    if (p.readyState === "complete" && (p.quietForMs >= p.quietMs || !!p.force || !!p.forceAny)) return true;
+    return !!p.forceAny && p.readyState !== "loading";
+  }
+  var import_browser_polyfill_min2;
+  var init_capturePoke = __esm({
+    "src/lib/capturePoke.ts"() {
+      "use strict";
+      import_browser_polyfill_min2 = __toESM(require_browser_polyfill_min(), 1);
+    }
+  });
+
   // src/content/amazon.ts
   var require_amazon = __commonJS({
     "src/content/amazon.ts"() {
-      var import_browser_polyfill_min2 = __toESM(require_browser_polyfill_min());
+      var import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min());
       init_amazonCapture();
+      init_capturePoke();
       var QUIET_MS = 1500;
       var MAX_WAIT_MS = 15e3;
+      var MAX_RESENDS = 2;
+      var PAGE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
       var lastHandledUrl = "";
+      var lastState = null;
+      var lastMutationAt = Date.now();
       var timer = null;
       var deadline = 0;
+      var failUrl = "";
+      var sendFails = 0;
+      function sendFailed(url) {
+        if (location.href !== url || lastHandledUrl !== url) return;
+        if (failUrl !== url) {
+          failUrl = url;
+          sendFails = 0;
+        }
+        if (sendFails >= MAX_RESENDS) return;
+        sendFails += 1;
+        lastHandledUrl = "";
+        lastState = null;
+        schedule();
+      }
       function capture() {
         const url = location.href;
         const kind = classifyAmazonUrl(url);
         if (isBlockedPage(document)) {
           console.log("[Resell Tracker] Amazon page looks like a sign-in or block page; nothing sent.");
-          chrome.runtime.sendMessage({ type: "AMAZON_PAGE_BLOCKED" }).catch(() => {
+          chrome.runtime.sendMessage({ type: "AMAZON_PAGE_BLOCKED", pageId: PAGE_ID }).catch(() => {
           });
-          return;
+          return "blocked";
         }
-        if (!kind) return;
+        if (!kind) return "unrecognised";
         const html = cleanDocumentHtml(document);
         if (byteLength(html) > MAX_CLEAN_BYTES) {
           console.log("[Resell Tracker] Amazon page too large after cleaning; skipped.");
-          chrome.runtime.sendMessage({ type: "AMAZON_PAGE_SKIPPED", reason: "too_large" }).catch(() => {
+          chrome.runtime.sendMessage({ type: "AMAZON_PAGE_SKIPPED", reason: "too_large", pageId: PAGE_ID }).catch(() => {
           });
-          return;
+          return "too_large";
         }
-        chrome.runtime.sendMessage({ type: "AMAZON_PAGE_CAPTURE", url, kind, html, hash: hashString(html) }).catch(() => {
-        });
+        chrome.runtime.sendMessage({ type: "AMAZON_PAGE_CAPTURE", url, kind, html, hash: hashString(html), pageId: PAGE_ID }).catch(() => sendFailed(url));
+        return "sent";
+      }
+      function handleNow() {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        deadline = 0;
+        lastHandledUrl = location.href;
+        lastState = capture();
+        return lastState;
       }
       function schedule() {
         const url = location.href;
@@ -257,12 +299,7 @@
         if (!deadline) deadline = Date.now() + MAX_WAIT_MS;
         if (timer) clearTimeout(timer);
         const remaining = Math.max(0, deadline - Date.now());
-        timer = setTimeout(() => {
-          timer = null;
-          deadline = 0;
-          lastHandledUrl = location.href;
-          capture();
-        }, Math.min(QUIET_MS, remaining));
+        timer = setTimeout(handleNow, Math.min(QUIET_MS, remaining));
       }
       function onUrlMaybeChanged() {
         if (location.href !== lastHandledUrl) {
@@ -271,6 +308,7 @@
         }
       }
       var observer = new MutationObserver(() => {
+        lastMutationAt = Date.now();
         if (location.href !== lastHandledUrl) schedule();
       });
       observer.observe(document.documentElement, { childList: true, subtree: true });
@@ -278,6 +316,21 @@
       window.addEventListener("hashchange", onUrlMaybeChanged);
       setInterval(onUrlMaybeChanged, 2e3);
       schedule();
+      chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+        if (msg?.type !== "AMAZON_CAPTURE_NOW") return void 0;
+        const reply = (state) => ({ state, pageId: PAGE_ID, path: location.pathname });
+        if (location.href === lastHandledUrl && lastState) {
+          sendResponse(reply(lastState));
+          return void 0;
+        }
+        const ready = mayReadNow({ readyState: document.readyState, quietForMs: Date.now() - lastMutationAt, quietMs: QUIET_MS, force: msg.force, forceAny: msg.forceAny });
+        if (!ready) {
+          sendResponse(reply("busy"));
+          return void 0;
+        }
+        sendResponse(reply(handleNow()));
+        return void 0;
+      });
     }
   });
   require_amazon();

@@ -15,6 +15,12 @@ test('classifyAmazonUrl accepts order, detail and tracking pages only', () => {
   assert.equal(classifyAmazonUrl('https://www.amazon.com/your-orders/order-details?orderID=x'), 'detail');
   assert.equal(classifyAmazonUrl('https://www.amazon.com/progress-tracker/package?orderId=x'), 'tracking');
   assert.equal(classifyAmazonUrl('https://www.amazon.com/gp/your-account/ship-track?orderId=x'), 'tracking');
+  assert.equal(classifyAmazonUrl('https://www.amazon.com/gp/your-account/order-details/ref=ppx_yo_dt_b_order_details?orderID=x'), 'detail');
+  assert.equal(classifyAmazonUrl('https://www.amazon.com/gp/css/order-details?orderID=x'), 'detail');
+  assert.equal(classifyAmazonUrl('https://www.amazon.com/your-orders/orders/ref=nav_orders_first'), 'orders');
+  assert.equal(classifyAmazonUrl('https://www.amazon.com/progress-tracker/package/ref=ppx_yo_dt_b_track_package?orderId=x'), 'tracking');
+  assert.equal(classifyAmazonUrl('https://www.amazon.com/ref=nav_logo'), null);
+  assert.equal(classifyAmazonUrl('https://www.amazon.com/ap/signin'), null);
   assert.equal(classifyAmazonUrl('https://www.amazon.com/dp/B000000000'), null);
   assert.equal(classifyAmazonUrl('https://evil.example/your-orders/orders'), null);
   assert.equal(classifyAmazonUrl('http://www.amazon.com/your-orders/orders'), null);
