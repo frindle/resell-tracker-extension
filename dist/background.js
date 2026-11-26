@@ -857,6 +857,333 @@
     }
   });
 
+  // src/lib/costcoCommand.ts
+  function isSignInUrl(url) {
+    return /signin\.costco\.com|\/logon|LogonForm|\/login/i.test(String(url ?? ""));
+  }
+  function isCostcoUrl(url) {
+    return /^https:\/\/([a-z0-9-]+\.)*costco\.com(\/|$)/i.test(String(url ?? ""));
+  }
+  function orderCommandPlan(payloadJson, settingsUserId) {
+    let p = null;
+    try {
+      p = payloadJson ? JSON.parse(payloadJson) : null;
+    } catch {
+      p = null;
+    }
+    if (!p || !Array.isArray(p.orderNumbers)) return { action: "fail", error: "bad payload" };
+    const mine = String(settingsUserId ?? "").trim();
+    if (mine && p.userId != null && String(p.userId) !== mine) {
+      return { action: "fail", error: `orders belong to user ${String(p.userId)}, this extension is user ${mine}` };
+    }
+    const orderNumbers = [...new Set(p.orderNumbers.map((o) => String(o ?? "").replace(/\D/g, "")).filter(Boolean))].slice(0, MAX_DETAIL_ORDERS);
+    if (!orderNumbers.length) return { action: "fail", error: "no order numbers" };
+    return { action: "run", orderNumbers };
+  }
+  function costcoCardLast4(payments) {
+    const cards = (payments ?? []).filter((p) => p && !p.isGOMPayment && !NOT_A_CARD.test(String(p.paymentType ?? ""))).map((p) => ({ raw: String(p.cardNumber ?? ""), charged: Number(p.totalCharged) || 0 })).filter((c) => /^\d{4}$/.test(c.raw) || /^[*xX•\s-]+\d{4}$/.test(c.raw)).map((c) => ({ last4: c.raw.slice(-4), charged: c.charged }));
+    if (!cards.length) return void 0;
+    cards.sort((a, b) => b.charged - a.charged);
+    return cards[0].last4;
+  }
+  function costcoShipAddress(shipTos) {
+    const s = (shipTos ?? []).find((x) => x && !x.isShipToWarehouse && String(x.line1 ?? "").trim());
+    if (!s) return "";
+    const t = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
+    const name = [t(s.firstName), t(s.lastName)].filter(Boolean).join(" ");
+    const cityLine = [t(s.city) && `${t(s.city)},`, t(s.state), t(s.postalCode)].filter(Boolean).join(" ").replace(/,$/, "");
+    return [name, t(s.line1), t(s.line2), t(s.line3), cityLine].filter(Boolean).join(", ");
+  }
+  function costcoMerchandiseSubtotal(o) {
+    if (!o || o.merchandiseTotal == null || o.merchandiseTotal === "") return null;
+    const mt = Number(o.merchandiseTotal);
+    if (!Number.isFinite(mt)) return null;
+    const disc = Math.abs(Number(o.discountAmount) || 0);
+    return Math.round(Math.max(0, mt - disc) * 100) / 100;
+  }
+  function mapOrderDetails(o) {
+    if (!o || !o.orderNumber) return null;
+    if (SKIP_STATUSES.has(String(o.status ?? "").toLowerCase())) return null;
+    const lines = (o.shipToAddress ?? []).flatMap((s) => s && s.orderLineItems || []).filter((li) => !SKIP_STATUSES.has(String(li.orderStatus ?? "").toLowerCase()));
+    const descriptions = [...new Set(lines.map((li) => String(li.itemDescription ?? "").trim()).filter(Boolean))];
+    const tracking = [...new Set(
+      lines.flatMap((li) => li.shipment ?? []).filter((s) => s && s.trackingNumber && !DIGITAL_CARRIERS.has(String(s.carrierName ?? "").toLowerCase())).map((s) => String(s.trackingNumber))
+    )];
+    const row = {
+      platform: "Costco",
+      orderNumber: String(o.orderNumber),
+      orderDate: String(o.orderPlacedDate ?? "").split("T")[0],
+      itemDescription: descriptions.join(", ").slice(0, 200),
+      cost: Number(o.orderTotal) || 0,
+      shippingCost: 0,
+      shippingAddress: costcoShipAddress(o.shipToAddress),
+      trackingNumbers: tracking,
+      sourceUrl: `https://www.costco.com/myaccount/#/app/${COSTCO_APP_ID}/orderdetails/${o.orderNumber}`
+    };
+    const last4 = costcoCardLast4(o.orderPayment);
+    if (last4) row.paymentLast4 = last4;
+    const sub = costcoMerchandiseSubtotal(o);
+    if (sub != null) row.merchandiseSubtotal = sub;
+    return row;
+  }
+  function costcoReport(o) {
+    if (o.kind === "done") return { status: "done", result: o.result };
+    if (o.kind === "timeout") return { status: "failed", result: { error: String(o.message || COSTCO_TIMEOUT_MESSAGE).slice(0, 300) } };
+    const error = String(o.message || "run failed").slice(0, 300);
+    return error === COSTCO_SIGN_IN_MESSAGE ? { status: "failed", result: { error, signInNeeded: true } } : { status: "failed", result: { error } };
+  }
+  function judgeTab(look2) {
+    if (isSignInUrl(look2.url)) return "signed-out";
+    if (look2.listSeen || look2.orderPages > 0) return "ready";
+    return "wait";
+  }
+  function judgeDeadline(look2) {
+    return isSignInUrl(look2.url) ? "signed-out" : "timeout";
+  }
+  function noDetailsMessage(timedOut, skipped, deferred = 0) {
+    const base = `Costco order details: none of ${timedOut} page(s) loaded`;
+    const notes = [
+      skipped > 0 ? `${skipped} other order(s) skipped` : "",
+      deferred > 0 ? `${deferred} not tried, out of time` : ""
+    ].filter(Boolean);
+    return notes.length ? `${base} (${notes.join(", ")})` : base;
+  }
+  var COSTCO_SIGN_IN_MESSAGE, MAX_DETAIL_ORDERS, COSTCO_APP_ID, SKIP_STATUSES, DIGITAL_CARRIERS, NOT_A_CARD, COSTCO_TIMEOUT_MESSAGE;
+  var init_costcoCommand = __esm({
+    "src/lib/costcoCommand.ts"() {
+      "use strict";
+      COSTCO_SIGN_IN_MESSAGE = "Costco sign-in needed - sign in to costco.com in this browser";
+      MAX_DETAIL_ORDERS = 25;
+      COSTCO_APP_ID = "4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf";
+      SKIP_STATUSES = /* @__PURE__ */ new Set(["cancelled", "canceled"]);
+      DIGITAL_CARRIERS = /* @__PURE__ */ new Set(["electronic delivery service", "email delivery", "email"]);
+      NOT_A_CARD = /coupon|shop\s*card|gift|cash|stored\s*value|membership/i;
+      COSTCO_TIMEOUT_MESSAGE = "Costco page did not load in time";
+    }
+  });
+
+  // src/background/costcoRun.ts
+  function claimCostcoRun(commandId) {
+    if (active || sweeping) return false;
+    active = true;
+    currentCommandId = commandId;
+    return true;
+  }
+  function releaseCostcoRun() {
+    active = false;
+    currentCommandId = null;
+  }
+  async function rememberRunTab2(tabId) {
+    const rec = { commandId: currentCommandId, tabId, startedAt: Date.now() };
+    try {
+      await store2().set({ [RUN_TAB_KEY2]: rec });
+    } catch {
+    }
+  }
+  async function forgetRunTab2() {
+    try {
+      await store2().remove(RUN_TAB_KEY2);
+    } catch {
+    }
+  }
+  async function keepAwake2(work) {
+    const t = setInterval(() => {
+      chrome.runtime.getPlatformInfo().catch(() => {
+      });
+    }, KEEPALIVE_MS2);
+    try {
+      return await work();
+    } finally {
+      clearInterval(t);
+      await forgetRunTab2();
+    }
+  }
+  async function closeOrphanCostcoTab() {
+    try {
+      const got = await store2().get(RUN_TAB_KEY2);
+      const rec = got[RUN_TAB_KEY2];
+      if (!rec) return null;
+      await store2().remove(RUN_TAB_KEY2);
+      if (typeof rec.tabId === "number") {
+        const tab = await chrome.tabs.get(rec.tabId).catch(() => null);
+        if (tab && isCostcoUrl(tab.url)) await chrome.tabs.remove(rec.tabId).catch(() => {
+        });
+      }
+      return typeof rec.commandId === "number" ? rec.commandId : null;
+    } catch {
+      return null;
+    } finally {
+      sweeping = false;
+    }
+  }
+  async function openTab() {
+    const tab = await chrome.tabs.create({ url: ORDERS_URL, active: false });
+    if (tab.id == null) throw new Error("could not open a tab");
+    await rememberRunTab2(tab.id);
+    return tab.id;
+  }
+  function closeTab(tabId) {
+    if (tabId != null) chrome.tabs.remove(tabId).catch(() => {
+    });
+  }
+  async function inPage(tabId, func, args = []) {
+    try {
+      const r = await chrome.scripting.executeScript({ target: { tabId }, world: MAIN, func, args });
+      return r[0]?.result ?? null;
+    } catch {
+      return null;
+    }
+  }
+  async function look(tabId) {
+    let url = "";
+    try {
+      url = (await chrome.tabs.get(tabId)).url ?? "";
+    } catch {
+    }
+    const state = await inPage(tabId, () => {
+      const w = window;
+      return {
+        hasAuth: !!w.__costcoAuth,
+        orderPages: (w.__costcoAllOrders ?? []).length,
+        listSeen: !!w.__costcoListSeen
+      };
+    });
+    return { url, hasAuth: !!state?.hasAuth, orderPages: state?.orderPages ?? 0, listSeen: !!state?.listSeen };
+  }
+  async function waitReady(tabId, timeoutMs = READY_WAIT_MS) {
+    const end = Date.now() + timeoutMs;
+    while (Date.now() < end) {
+      const verdict = judgeTab(await look(tabId));
+      if (verdict !== "wait") return verdict;
+      await sleep(POLL_MS);
+    }
+    const last = await look(tabId);
+    return judgeTab(last) === "ready" ? "ready" : judgeDeadline(last);
+  }
+  function noteCostcoMessage(tabId, message) {
+    if (tabId == null) return;
+    const settle = waiting.get(tabId);
+    if (!settle) return;
+    if (message.type === "SYNC_DONE") settle({ kind: "done", result: message.result ?? {} });
+    else if (message.type === "SYNC_ERROR") settle({ kind: "error", message: String(message.error ?? "run failed") });
+  }
+  function expectReport(tabId, timeoutMs) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => finish({ kind: "error", message: "Costco sync timed out" }), timeoutMs);
+      function finish(o) {
+        clearTimeout(timer);
+        waiting.delete(tabId);
+        resolve(o);
+      }
+      waiting.set(tabId, finish);
+    });
+  }
+  function runCostcoSync() {
+    return keepAwake2(syncOnce);
+  }
+  async function syncOnce() {
+    let tabId;
+    try {
+      tabId = await openTab();
+      const ready = await waitReady(tabId);
+      if (ready === "timeout") return { kind: "timeout", message: COSTCO_TIMEOUT_MESSAGE };
+      if (ready !== "ready") return { kind: "error", message: COSTCO_SIGN_IN_MESSAGE };
+      const report = expectReport(tabId, SYNC_TIMEOUT_MS);
+      const alive = await chrome.tabs.sendMessage(tabId, { type: "PING" }).catch(() => null);
+      if (!alive) await chrome.scripting.executeScript({ target: { tabId }, files: ["content/costco.js"] });
+      await chrome.tabs.sendMessage(tabId, { type: "START_SYNC", platform: "Costco" });
+      return await report;
+    } catch (e) {
+      return { kind: "error", message: String(e).slice(0, 200) };
+    } finally {
+      if (tabId != null) waiting.delete(tabId);
+      closeTab(tabId);
+    }
+  }
+  function readCostcoOrders(orderNumbers) {
+    return keepAwake2(() => readOnce(orderNumbers));
+  }
+  async function readOnce(orderNumbers) {
+    let tabId;
+    try {
+      tabId = await openTab();
+      const ready = await waitReady(tabId);
+      if (ready === "timeout") return { kind: "error", message: COSTCO_TIMEOUT_MESSAGE };
+      if (ready !== "ready") return { kind: "error", message: COSTCO_SIGN_IN_MESSAGE };
+      const appId = await inPage(tabId, () => {
+        const m = /^#\/app\/([^/]+)\//.exec(location.hash || "");
+        return m ? m[1] : null;
+      }) || COSTCO_APP_ID;
+      const deadline = Date.now() + ORDERS_TIMEOUT_MS;
+      const rows = [];
+      let timedOut = 0;
+      let skipped = 0;
+      let deferred = 0;
+      for (let i = 0; i < orderNumbers.length; i++) {
+        if (Date.now() >= deadline) {
+          deferred = orderNumbers.length - i;
+          break;
+        }
+        if (i > 0) await sleep(DETAIL_DELAY_MS);
+        const n = orderNumbers[i];
+        await inPage(tabId, ((h) => {
+          location.hash = h;
+        }), [`#/app/${appId}/orderdetails/${n}`]);
+        const found = await waitForDetails(tabId, n);
+        if (found === "signed-out") return { kind: "error", message: COSTCO_SIGN_IN_MESSAGE };
+        if (!found) {
+          timedOut++;
+          continue;
+        }
+        const row = mapOrderDetails(found);
+        if (row) rows.push(row);
+        else skipped++;
+      }
+      if (!rows.length && timedOut) return { kind: "error", message: noDetailsMessage(timedOut, skipped, deferred) };
+      return { kind: "rows", rows, timedOut, skipped, deferred };
+    } catch (e) {
+      return { kind: "error", message: String(e).slice(0, 200) };
+    } finally {
+      closeTab(tabId);
+    }
+  }
+  async function waitForDetails(tabId, orderNumber) {
+    const end = Date.now() + DETAIL_WAIT_MS;
+    while (Date.now() < end) {
+      const o = await inPage(tabId, ((k) => (window.__costcoOrderDetails ?? {})[k] ?? null), [orderNumber]);
+      if (o) return o;
+      if (judgeTab(await look(tabId)) === "signed-out") return "signed-out";
+      await sleep(POLL_MS);
+    }
+    return null;
+  }
+  var ORDERS_URL, READY_WAIT_MS, SYNC_TIMEOUT_MS, DETAIL_WAIT_MS, ORDERS_TIMEOUT_MS, DETAIL_DELAY_MS, POLL_MS, sleep, MAIN, active, sweeping, currentCommandId, RUN_TAB_KEY2, KEEPALIVE_MS2, store2, waiting;
+  var init_costcoRun = __esm({
+    "src/background/costcoRun.ts"() {
+      "use strict";
+      init_costcoCommand();
+      ORDERS_URL = "https://www.costco.com/myaccount/";
+      READY_WAIT_MS = 45e3;
+      SYNC_TIMEOUT_MS = 4 * 6e4;
+      DETAIL_WAIT_MS = 2e4;
+      ORDERS_TIMEOUT_MS = 5 * 6e4;
+      DETAIL_DELAY_MS = 500;
+      POLL_MS = 500;
+      sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      MAIN = "MAIN";
+      active = false;
+      sweeping = true;
+      currentCommandId = null;
+      RUN_TAB_KEY2 = "costcoRunTab";
+      KEEPALIVE_MS2 = 2e4;
+      store2 = () => chrome.storage.local;
+      waiting = /* @__PURE__ */ new Map();
+      chrome.tabs.onRemoved.addListener((tabId) => {
+        waiting.get(tabId)?.({ kind: "error", message: "tab closed before scan finished" });
+      });
+    }
+  });
+
   // src/background/index.ts
   var require_background = __commonJS({
     "src/background/index.ts"() {
@@ -866,6 +1193,8 @@
       init_trackCommand();
       init_visitCommand();
       init_browserTarget();
+      init_costcoCommand();
+      init_costcoRun();
       var ICON_PATHS_CHROME = { 16: "icons/icon16.png", 32: "icons/icon32.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
       var ICON_PATH_FIREFOX = "icons/icon.svg";
       var _browser = globalThis.browser;
@@ -1037,6 +1366,7 @@
         }
         if (message.type === "SYNC_DONE" || message.type === "SYNC_ERROR") {
           const tabId = sender.tab?.id;
+          noteCostcoMessage(tabId, message);
           if (tabId != null && openedScrapeTabs.has(tabId)) {
             openedScrapeTabs.delete(tabId);
             setTimeout(() => {
@@ -1589,6 +1919,29 @@
             }
             continue;
           }
+          if (cmd.type === "SYNC_COSTCO" || cmd.type === "SYNC_COSTCO_ORDER") {
+            if (takenCostcoIds.has(cmd.id)) continue;
+            if (!claimCostcoRun(cmd.id)) continue;
+            takenCostcoIds.add(cmd.id);
+            try {
+              const orderPlan = cmd.type === "SYNC_COSTCO_ORDER" ? orderCommandPlan(cmd.payload, userId) : null;
+              await patchCommand(base, cmd.id, "running", headers);
+              if (orderPlan?.action === "fail") {
+                await patchCommand(base, cmd.id, "failed", headers, { error: orderPlan.error });
+                continue;
+              }
+              let report;
+              try {
+                report = orderPlan?.action === "run" ? await runCostcoOrderCommand(trackerUrl, apiKey ?? "", userId ?? "", orderPlan.orderNumbers) : costcoReport(await runCostcoSync());
+              } catch (e) {
+                report = costcoReport({ kind: "error", message: String(e) });
+              }
+              await patchCommand(base, cmd.id, report.status, headers, report.result);
+            } finally {
+              releaseCostcoRun();
+            }
+            continue;
+          }
           await patchCommand(base, cmd.id, "running", headers);
           try {
             let result;
@@ -1606,7 +1959,6 @@
               }
               result = out;
             } else if (cmd.type === "SYNC_WALMART") result = await runSyncCommand("Walmart");
-            else if (cmd.type === "SYNC_COSTCO") result = await runSyncCommand("Costco");
             else if (cmd.type === "SYNC_BIGSKY") result = await runSyncCommand("BigSkyBuyers");
             else if (cmd.type === "SCRAPE_CBM") result = await runScrapeCbm(base, headers, cmd.payload);
             await patchCommand(base, cmd.id, "done", headers, result);
@@ -1615,6 +1967,7 @@
           }
         }
       }
+      var takenCostcoIds = /* @__PURE__ */ new Set();
       async function patchCommand(base, id, status, headers, result) {
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
@@ -1627,6 +1980,18 @@
           } catch {
           }
           if (attempt < 2) await new Promise((r) => setTimeout(r, 2e3 * (attempt + 1)));
+        }
+      }
+      async function runCostcoOrderCommand(trackerUrl, apiKey, userId, orderNumbers) {
+        const read = await readCostcoOrders(orderNumbers);
+        if (read.kind === "error") return costcoReport(read);
+        const counts = { platform: "Costco", requested: orderNumbers.length, scraped: read.rows.length, timedOut: read.timedOut, skipped: read.skipped, deferred: read.deferred };
+        if (!read.rows.length) return costcoReport({ kind: "done", result: counts });
+        try {
+          const res = await handlePushOrders(trackerUrl, apiKey, userId, read.rows);
+          return costcoReport({ kind: "done", result: { ...counts, ...res && typeof res === "object" ? res : {} } });
+        } catch (e) {
+          return costcoReport({ kind: "error", message: String(e).slice(0, 200) });
         }
       }
       async function runSyncCommand(platform) {
@@ -1758,6 +2123,7 @@
             // here silently dropped it, which is why card auto-assign never fired
             // even when last4 was visible in extension logs.
             ...o.paymentLast4 ? { paymentLast4: o.paymentLast4 } : {},
+            ...o.merchandiseSubtotal != null ? { merchandiseSubtotal: o.merchandiseSubtotal } : {},
             // Scraped total "Earns X% back[, extra Y%]" rate — disambiguates
             // last4 matches against multiple saved cards sharing one physical
             // card at different bonus-rate tiers (e.g. Amazon Store Card).
@@ -1780,6 +2146,18 @@
         return res.json();
       }
       closeOrphanRunTab();
+      closeOrphanCostcoTab().then(async (commandId) => {
+        if (commandId == null) return;
+        const { trackerUrl, apiKey, extensionSecret, userId } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
+        if (!trackerUrl) return;
+        const headers = {};
+        if (apiKey) headers["X-API-Key"] = apiKey;
+        if (extensionSecret) headers["X-Extension-Secret"] = extensionSecret;
+        if (userId) headers["X-Extension-User-Id"] = userId;
+        headers["X-Extension-Browser"] = isFirefox ? "firefox" : "chrome";
+        await patchCommand(upgradeUrl2(trackerUrl), commandId, "failed", headers, { error: "browser restarted during the sync" });
+      }).catch(() => {
+      });
     }
   });
   require_background();

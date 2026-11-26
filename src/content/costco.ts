@@ -1,6 +1,7 @@
 import { getSettings, setLastSync } from '../lib/storage';
 import { pushOrders } from '../lib/api';
 import type { ScrapedOrder, SyncMessage } from '../lib/types';
+import { COSTCO_SIGN_IN_MESSAGE, isSignInUrl } from '../lib/costcoCommand';
 
 const GRAPHQL_URL = 'https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql';
 const PAGE_SIZE = 16;
@@ -97,6 +98,19 @@ async function getAuth(): Promise<{ token: string; clientId: string; warehouseNu
   } catch (e) {
     console.error('[CST] getAuth failed', e);
     return null;
+  }
+}
+
+const AUTH_WAIT_MS = 20_000;
+
+async function waitForAuth(): Promise<{ token: string; clientId: string; warehouseNumber: string } | null> {
+  const start = Date.now();
+  for (;;) {
+    if (isSignInUrl(location.href)) return null;
+    const auth = await getAuth();
+    if (auth) return auth;
+    if (Date.now() - start >= AUTH_WAIT_MS) return null;
+    await new Promise(r => setTimeout(r, 1000));
   }
 }
 
@@ -268,9 +282,11 @@ async function runSync() {
   sendMessage({ type: 'SYNC_STARTED', platform: 'Costco' });
   sendMessage({ type: 'SYNC_PROGRESS', platform: 'Costco', scraped: 0, message: 'Getting auth…' });
 
-  const auth = await getAuth();
+  // Costco's own app makes its first authenticated call a few seconds after
+  // the page loads, so wait for it. No token by then means nobody is signed in.
+  const auth = await waitForAuth();
   if (!auth) {
-    sendMessage({ type: 'SYNC_ERROR', platform: 'Costco', error: 'No auth token — hard-refresh the Costco orders page, wait for orders to load, then sync.' });
+    sendMessage({ type: 'SYNC_ERROR', platform: 'Costco', error: COSTCO_SIGN_IN_MESSAGE });
     setBadge('!', '#ef4444');
     syncing = false;
     return;

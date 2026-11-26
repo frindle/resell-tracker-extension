@@ -41,6 +41,35 @@
             window.__costcoAuth = { token: auth.slice(7), clientId, allHeaders: { ...headers } };
           }
         }
+        function captureOrderDetails(data) {
+          try {
+            const od = data?.data?.getOrderDetails;
+            if (!od) return;
+            const w = window;
+            const byNumber = w.__costcoOrderDetails ?? {};
+            for (const o of Array.isArray(od) ? od : [od]) {
+              const key = String(o?.orderNumber ?? "").replace(/\D/g, "");
+              if (key) byNumber[key] = o;
+            }
+            w.__costcoOrderDetails = byNumber;
+          } catch {
+          }
+        }
+        function captureOrderList(data) {
+          try {
+            const pages = data?.data?.getOnlineOrders;
+            if (pages == null) return;
+            const w = window;
+            w.__costcoListSeen = true;
+            if (Array.isArray(pages)) {
+              const existing = w.__costcoAllOrders ?? [];
+              for (const page of pages) existing.push(page);
+              w.__costcoAllOrders = existing;
+              console.log("[CST-INT] accumulated orders, total pages:", existing.length);
+            }
+          } catch {
+          }
+        }
         const origFetch = window.__origFetch;
         window.fetch = async function(input, init) {
           const url = typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
@@ -50,6 +79,8 @@
             console.log("[CST-INT] response \u2190", url, res.status, res.ok ? "OK" : "FAIL");
             if (res.ok && url.includes("order/v1/orders/graphql")) {
               res.clone().json().then((data) => {
+                captureOrderDetails(data);
+                captureOrderList(data);
                 const w = window;
                 const rc = data?.data?.receiptsWithCounts;
                 if (rc) {
@@ -106,13 +137,8 @@
                 try {
                   const data = JSON.parse(this.responseText);
                   const w = window;
-                  const pages = data?.data?.getOnlineOrders;
-                  if (Array.isArray(pages)) {
-                    const existing = w.__costcoAllOrders ?? [];
-                    for (const page of pages) existing.push(page);
-                    w.__costcoAllOrders = existing;
-                    console.log("[CST-INT] accumulated orders, total pages:", existing.length);
-                  }
+                  captureOrderDetails(data);
+                  captureOrderList(data);
                   const rc = data?.data?.receiptsWithCounts;
                   if (rc) {
                     const receipts = rc.receipts ?? [];
