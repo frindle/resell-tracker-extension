@@ -51,6 +51,12 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.3.8
+
+- **Costco sync runs in this browser.** The tracker queues a Costco sync (the order list, and details for single orders) and the extension runs it in a background tab on costco.com, using the page's own requests. The tab is always closed afterwards and nothing steals focus.
+- You must be signed in to costco.com in this browser. When Costco asks for a sign-in the run says so and the tracker slows its automatic syncs to once a day until a run works again. A page that is only slow is reported as slow, not as signed out, and an account with no orders counts as a normal run.
+- One Costco run at a time; a run the browser cut short (worker stopped or browser restarted) has its tab closed and is reported as failed at the next start.
+
 ### 1.3.7
 
 - **Amazon pages in a minimized window are read again.** A hidden page's timers are slowed by the browser, so the page could report itself after the run had already given up on it (every email-triggered visit timed out at 30 seconds). During a run the background worker now asks the page directly every couple of seconds. After 12 seconds a loaded page is read even if it is still changing, and after 22 seconds a page that never finished loading is read as a last resort. Nothing extra is requested from Amazon.

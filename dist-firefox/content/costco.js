@@ -192,12 +192,26 @@
     }
   });
 
+  // src/lib/costcoCommand.ts
+  function isSignInUrl(url) {
+    return /signin\.costco\.com|\/logon|LogonForm|\/login/i.test(String(url ?? ""));
+  }
+  var import_browser_polyfill_min3, COSTCO_SIGN_IN_MESSAGE;
+  var init_costcoCommand = __esm({
+    "src/lib/costcoCommand.ts"() {
+      "use strict";
+      import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min(), 1);
+      COSTCO_SIGN_IN_MESSAGE = "Costco sign-in needed - sign in to costco.com in this browser";
+    }
+  });
+
   // src/content/costco.ts
   var require_costco = __commonJS({
     "src/content/costco.ts"() {
-      var import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min());
+      var import_browser_polyfill_min4 = __toESM(require_browser_polyfill_min());
       init_storage();
       init_api();
+      init_costcoCommand();
       var PAGE_SIZE = 16;
       var SKIP_STATUSES = /* @__PURE__ */ new Set(["cancelled", "canceled"]);
       var DIGITAL_CARRIERS = /* @__PURE__ */ new Set(["electronic delivery service", "email delivery", "email"]);
@@ -230,6 +244,17 @@
         } catch (e) {
           console.error("[CST] getAuth failed", e);
           return null;
+        }
+      }
+      var AUTH_WAIT_MS = 2e4;
+      async function waitForAuth() {
+        const start = Date.now();
+        for (; ; ) {
+          if (isSignInUrl(location.href)) return null;
+          const auth = await getAuth();
+          if (auth) return auth;
+          if (Date.now() - start >= AUTH_WAIT_MS) return null;
+          await new Promise((r) => setTimeout(r, 1e3));
         }
       }
       function getWarehouseNumber() {
@@ -345,9 +370,9 @@
         setBadge("\u2026");
         sendMessage({ type: "SYNC_STARTED", platform: "Costco" });
         sendMessage({ type: "SYNC_PROGRESS", platform: "Costco", scraped: 0, message: "Getting auth\u2026" });
-        const auth = await getAuth();
+        const auth = await waitForAuth();
         if (!auth) {
-          sendMessage({ type: "SYNC_ERROR", platform: "Costco", error: "No auth token \u2014 hard-refresh the Costco orders page, wait for orders to load, then sync." });
+          sendMessage({ type: "SYNC_ERROR", platform: "Costco", error: COSTCO_SIGN_IN_MESSAGE });
           setBadge("!", "#ef4444");
           syncing = false;
           return;

@@ -5,6 +5,8 @@ import { startAmazonRun, startTrackingRun, startVisitRun, closeOrphanRunTab, not
 import { trackCommandPlan } from '../lib/trackCommand';
 import { visitCommandPlan } from '../lib/visitCommand';
 import { extensionBrowser } from '../lib/browserTarget';
+import { orderCommandPlan, costcoReport, type CommandReport } from '../lib/costcoCommand';
+import { runCostcoSync, readCostcoOrders, noteCostcoMessage, claimCostcoRun, releaseCostcoRun, closeOrphanCostcoTab } from './costcoRun';
 
 const ICON_PATHS_CHROME = { 16: 'icons/icon16.png', 32: 'icons/icon32.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' };
 const ICON_PATH_FIREFOX = 'icons/icon.svg';
@@ -211,6 +213,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // user can see the result toast in the tab before it disappears.
   if (message.type === 'SYNC_DONE' || message.type === 'SYNC_ERROR') {
     const tabId = sender.tab?.id;
+    // A tracker-commanded Costco run is waiting on this report (and closes its own tab).
+    noteCostcoMessage(tabId, message);
     if (tabId != null && openedScrapeTabs.has(tabId)) {
       openedScrapeTabs.delete(tabId);
       setTimeout(() => { chrome.tabs.remove(tabId).catch(() => {}); }, 2000);
@@ -821,6 +825,33 @@ async function pollAndExecuteCommands() {
       }
       continue;
     }
+    if (cmd.type === 'SYNC_COSTCO' || cmd.type === 'SYNC_COSTCO_ORDER') {
+      // Runs with nobody at the browser, in a background tab of its own that
+      // is always closed. Left pending while another Costco run is going.
+      // Claimed before the first await so a second poll holding the same row
+      // cannot start it too; released on every way out.
+      // A stale poll can hand over a command this worker already ran; skip those.
+      if (takenCostcoIds.has(cmd.id)) continue;
+      if (!claimCostcoRun(cmd.id)) continue;
+      takenCostcoIds.add(cmd.id);
+      try {
+        const orderPlan = cmd.type === 'SYNC_COSTCO_ORDER' ? orderCommandPlan(cmd.payload, userId) : null;
+        await patchCommand(base, cmd.id, 'running', headers);
+        if (orderPlan?.action === 'fail') { await patchCommand(base, cmd.id, 'failed', headers, { error: orderPlan.error }); continue; }
+        let report: CommandReport;
+        try {
+          report = orderPlan?.action === 'run'
+            ? await runCostcoOrderCommand(trackerUrl, apiKey ?? '', userId ?? '', orderPlan.orderNumbers)
+            : costcoReport(await runCostcoSync());
+        } catch (e) {
+          report = costcoReport({ kind: 'error', message: String(e) });
+        }
+        await patchCommand(base, cmd.id, report.status, headers, report.result);
+      } finally {
+        releaseCostcoRun();
+      }
+      continue;
+    }
     await patchCommand(base, cmd.id, 'running', headers);
     try {
       let result: unknown;
@@ -835,7 +866,6 @@ async function pollAndExecuteCommands() {
         if (out.status === 'blocked') { await patchCommand(base, cmd.id, 'failed', headers, { blocked: true, error: 'sign-in, CAPTCHA or block page', text: out.text }); continue; }
         result = out;
       } else if (cmd.type === 'SYNC_WALMART') result = await runSyncCommand('Walmart');
-      else if (cmd.type === 'SYNC_COSTCO') result = await runSyncCommand('Costco');
       else if (cmd.type === 'SYNC_BIGSKY') result = await runSyncCommand('BigSkyBuyers');
       else if (cmd.type === 'SCRAPE_CBM') result = await runScrapeCbm(base, headers, cmd.payload);
       await patchCommand(base, cmd.id, 'done', headers, result);
@@ -844,6 +874,9 @@ async function pollAndExecuteCommands() {
     }
   }
 }
+
+// Costco command ids taken in this worker's lifetime.
+const takenCostcoIds = new Set<number>();
 
 async function patchCommand(base: string, id: number, status: string, headers: Record<string, string>, result?: unknown) {
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -856,6 +889,20 @@ async function patchCommand(base: string, id: number, status: string, headers: R
       if (res.ok) return;
     } catch { /* retry */ }
     if (attempt < 2) await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+  }
+}
+
+// SYNC_COSTCO_ORDER: read the named orders' details pages and post the rows to the tracker.
+async function runCostcoOrderCommand(trackerUrl: string, apiKey: string, userId: string, orderNumbers: string[]): Promise<CommandReport> {
+  const read = await readCostcoOrders(orderNumbers);
+  if (read.kind === 'error') return costcoReport(read);
+  const counts = { platform: 'Costco', requested: orderNumbers.length, scraped: read.rows.length, timedOut: read.timedOut, skipped: read.skipped, deferred: read.deferred };
+  if (!read.rows.length) return costcoReport({ kind: 'done', result: counts });
+  try {
+    const res = await handlePushOrders(trackerUrl, apiKey, userId, read.rows) as Record<string, unknown> | null;
+    return costcoReport({ kind: 'done', result: { ...counts, ...(res && typeof res === 'object' ? res : {}) } });
+  } catch (e) {
+    return costcoReport({ kind: 'error', message: String(e).slice(0, 200) });
   }
 }
 
@@ -1021,6 +1068,7 @@ async function handlePushOrders(
       // here silently dropped it, which is why card auto-assign never fired
       // even when last4 was visible in extension logs.
       ...(o.paymentLast4 ? { paymentLast4: o.paymentLast4 } : {}),
+      ...(o.merchandiseSubtotal != null ? { merchandiseSubtotal: o.merchandiseSubtotal } : {}),
       // Scraped total "Earns X% back[, extra Y%]" rate — disambiguates
       // last4 matches against multiple saved cards sharing one physical
       // card at different bonus-rate tiers (e.g. Amazon Store Card).
@@ -1047,3 +1095,15 @@ async function handlePushOrders(
 
 // A run the browser cut short leaves its tab behind; close it on worker start.
 closeOrphanRunTab();
+// Same for a Costco run: close its tab and tell the tracker the command did not finish.
+closeOrphanCostcoTab().then(async commandId => {
+  if (commandId == null) return;
+  const { trackerUrl, apiKey, extensionSecret, userId } = await import('../lib/storage').then(m => m.getSettings());
+  if (!trackerUrl) return;
+  const headers: Record<string, string> = {};
+  if (apiKey) headers['X-API-Key'] = apiKey;
+  if (extensionSecret) headers['X-Extension-Secret'] = extensionSecret;
+  if (userId) headers['X-Extension-User-Id'] = userId;
+  headers['X-Extension-Browser'] = isFirefox ? 'firefox' : 'chrome';
+  await patchCommand(upgradeUrl(trackerUrl), commandId, 'failed', headers, { error: 'browser restarted during the sync' });
+}).catch(() => {});

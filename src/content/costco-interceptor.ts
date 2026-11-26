@@ -36,6 +36,42 @@ console.log('[CST-INT] interceptor script executing');
     }
   }
 
+  // The order details page's own response (SYNC_COSTCO_ORDER reads it), keyed
+  // by order number digits. A query we send ourselves gets a 401 from Costco's
+  // bot checks, so only the page's own response is used.
+  function captureOrderDetails(data: unknown) {
+    try {
+      const od = ((data as Record<string, unknown>)?.data as Record<string, unknown> | undefined)?.getOrderDetails;
+      if (!od) return;
+      const w = window as unknown as Record<string, unknown>;
+      const byNumber = (w.__costcoOrderDetails as Record<string, unknown>) ?? {};
+      for (const o of Array.isArray(od) ? od : [od]) {
+        const key = String((o as Record<string, unknown>)?.orderNumber ?? '').replace(/\D/g, '');
+        if (key) byNumber[key] = o;
+      }
+      w.__costcoOrderDetails = byNumber;
+    } catch { /* never break the page */ }
+  }
+
+  // The page's own order-list response. `__costcoListSeen` is set whenever the
+  // response arrives, even with an empty list, so the run can tell a signed-in
+  // account with no orders from a page that never loaded. Used by both the
+  // fetch and the XHR path.
+  function captureOrderList(data: unknown) {
+    try {
+      const pages = ((data as Record<string, unknown>)?.data as Record<string, unknown> | undefined)?.getOnlineOrders;
+      if (pages == null) return;
+      const w = window as unknown as Record<string, unknown>;
+      w.__costcoListSeen = true;
+      if (Array.isArray(pages)) {
+        const existing = (w.__costcoAllOrders as unknown[]) ?? [];
+        for (const page of pages) existing.push(page);
+        w.__costcoAllOrders = existing;
+        console.log('[CST-INT] accumulated orders, total pages:', existing.length);
+      }
+    } catch { /* never break the page */ }
+  }
+
   // Wrap fetch
   const origFetch = (window as unknown as Record<string, unknown>).__origFetch as typeof fetch;
   window.fetch = async function (input, init) {
@@ -46,6 +82,8 @@ console.log('[CST-INT] interceptor script executing');
       console.log('[CST-INT] response ←', url, res.status, res.ok ? 'OK' : 'FAIL');
       if (res.ok && url.includes('order/v1/orders/graphql')) {
         res.clone().json().then((data: Record<string, unknown>) => {
+          captureOrderDetails(data);
+          captureOrderList(data);
           const w = window as unknown as Record<string, unknown>;
           const rc = (data?.data as Record<string, unknown>)?.receiptsWithCounts as { receipts?: Record<string, unknown>[] } | undefined;
           if (rc) {
@@ -102,14 +140,9 @@ console.log('[CST-INT] interceptor script executing');
           try {
             const data = JSON.parse(this.responseText);
             const w = window as unknown as Record<string, unknown>;
+            captureOrderDetails(data);
 
-            const pages = data?.data?.getOnlineOrders;
-            if (Array.isArray(pages)) {
-              const existing = (w.__costcoAllOrders as unknown[]) ?? [];
-              for (const page of pages) existing.push(page);
-              w.__costcoAllOrders = existing;
-              console.log('[CST-INT] accumulated orders, total pages:', existing.length);
-            }
+            captureOrderList(data);
 
             const rc = data?.data?.receiptsWithCounts;
             if (rc) {
