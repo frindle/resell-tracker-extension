@@ -2,6 +2,15 @@ import { getSettings, saveSettings } from '../lib/storage';
 import { fetchUsers } from '../lib/api';
 import { grantTrackerAccess, ensureTrackerScriptRegistered } from '../lib/tracker-script';
 import type { TrackerUser } from '../lib/types';
+import { describeScrapeStatus, SCRAPE_STATUS_KEY } from '../lib/scrapeConfig';
+
+async function showScrapeConfig() {
+  const el = document.getElementById('scrapeConfigLabel');
+  if (!el) return;
+  const got = await chrome.storage.local.get(SCRAPE_STATUS_KEY).catch(() => ({} as Record<string, unknown>));
+  el.textContent = describeScrapeStatus(got[SCRAPE_STATUS_KEY] as Parameters<typeof describeScrapeStatus>[0]);
+}
+showScrapeConfig();
 
 let users: TrackerUser[] = [];
 

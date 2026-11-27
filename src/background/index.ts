@@ -10,6 +10,7 @@ import { visitCommandPlan } from '../lib/visitCommand';
 import { extensionBrowser } from '../lib/browserTarget';
 import { orderCommandPlan, costcoReport, type CommandReport } from '../lib/costcoCommand';
 import { runCostcoSync, readCostcoOrders, noteCostcoMessage, claimCostcoRun, releaseCostcoRun, closeOrphanCostcoTab } from './costcoRun';
+import { initScrapeConfig, loadScrapeConfig, scrapeConfigIsStale } from '../lib/scrapeConfig';
 
 const ICON_PATHS_CHROME = { 16: 'icons/icon16.png', 32: 'icons/icon32.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' };
 const ICON_PATH_FIREFOX = 'icons/icon.svg';
@@ -41,20 +42,44 @@ function reregisterTrackerScript() {
 // the background wakes (module load) as well as on the tracker-poll alarm.
 flushQueue().catch(() => { /* tracker unreachable: stays queued */ });
 
+// Remote scrape config (selectors, labels, regex sources: data only). Load the
+// cached copy first so getScrape() is right for runs started by this wake,
+// then ask the tracker for a newer one. Never throws; bundled defaults apply
+// when the tracker is unreachable or sends something invalid.
+async function refreshScrapeConfig(): Promise<void> {
+  await initScrapeConfig();
+  try {
+    const { trackerUrl, apiKey, extensionSecret, userId } = await import('../lib/storage').then(m => m.getSettings());
+    if (!trackerUrl) { await loadScrapeConfig(null); return; }
+    const headers: Record<string, string> = {};
+    if (apiKey) headers['X-API-Key'] = apiKey;
+    if (extensionSecret) headers['X-Extension-Secret'] = extensionSecret;
+    if (userId) headers['X-Extension-User-Id'] = userId;
+    headers['X-Extension-Browser'] = isFirefox ? 'firefox' : 'chrome';
+    await loadScrapeConfig({ base: upgradeUrl(trackerUrl), headers });
+  } catch { /* keep whatever is in effect */ }
+}
+initScrapeConfig().then(() => refreshScrapeConfig()).catch(() => {});
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log('[Reselling Tracker] Extension installed.');
   setToolbarIcon();
+  chrome.alarms.create('scrapeConfig', { delayInMinutes: 1, periodInMinutes: 360 });
+  refreshScrapeConfig().catch(() => {});
   chrome.alarms.create('pollCommands', { when: Date.now() + 2000, periodInMinutes: 1 });
   pollAndExecuteCommands().catch(console.error);
   reregisterTrackerScript();
 });
 chrome.runtime.onStartup.addListener(() => {
   setToolbarIcon();
+  chrome.alarms.create('scrapeConfig', { delayInMinutes: 1, periodInMinutes: 360 });
+  refreshScrapeConfig().catch(() => {});
   chrome.alarms.create('pollCommands', { when: Date.now() + 2000, periodInMinutes: 1 });
   pollAndExecuteCommands().catch(console.error);
   reregisterTrackerScript();
 });
 chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === 'scrapeConfig') refreshScrapeConfig().catch(() => {});
   if (alarm.name === 'pollCommands') {
     pollAndExecuteCommands().catch(console.error);
     flushQueue().catch(console.error); // retries queued captures against the tracker only
@@ -783,6 +808,9 @@ async function pollAndExecuteCommands() {
   try {
     const res = await fetch(`${base}/api/extension/commands`, { headers });
     if (!res.ok) return;
+    // The tracker advertises its scrape-config version on every poll; fetch
+    // the config only when ours is older.
+    if (scrapeConfigIsStale(res.headers.get('X-Scrape-Config-Version'))) refreshScrapeConfig().catch(() => {});
     commands = await res.json() as TrackerCommand[];
   } catch { return; }
 

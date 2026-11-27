@@ -1,6 +1,7 @@
 import { getSettings, setLastSync } from '../lib/storage';
 import { pushOrders } from '../lib/api';
 import type { ScrapedOrder, SyncMessage } from '../lib/types';
+import { getScrape, initScrapeConfig } from '../lib/scrapeConfig';
 
 console.log('[WM] content script loaded', location.href);
 
@@ -31,10 +32,13 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
   const orders: ScrapedOrder[] = [];
   let hasOlder = false;
   const seen = new Set<string>();
+  // Selectors, labels and regex sources come from the scrape config.
+  const S = getScrape('walmart');
+  const rx = S.regex;
 
   // __NEXT_DATA__ on walmart.com is a static shell — orders are client-rendered.
   // Read the live DOM directly.
-  const blocks = Array.from(document.querySelectorAll('[data-testid*="orderGroup"], [data-testid*="order-card"], [data-testid*="orderCard"]'));
+  const blocks = Array.from(document.querySelectorAll(S.selectors.orderBlocks));
   console.log('[WM] DOM blocks found:', blocks.length, 'url:', location.href);
   blocks.slice(0, 3).forEach((b, i) => console.log(`[WM] block[${i}] testid:`, b.getAttribute('data-testid'), 'text:', (b.textContent ?? '').replace(/\s+/g, ' ').slice(0, 300)));
 
@@ -42,25 +46,24 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
   // "Canceled May 22", "Canceled · Refund issued", etc.) and also catch the
   // Walmart explainer banner that appears when the order block itself doesn't
   // contain the word.
-  const isCancelledOrReturned = (text: string) =>
-    /(?:\b(?:cancell?ed|cancellation|returned|refunded)\b|we had to cancel|we['’]ve canceled|cancel these items|won['’]t be charged|released the temporary hold)/i.test(text);
+  const isCancelledOrReturned = (text: string) => rx('cancelledOrReturned', 'i').test(text);
 
   for (const block of blocks) {
     const blockText = (block.textContent ?? '').replace(/\s+/g, ' ');
 
     // Order number — from id="caption-XXXXXXXXX..." or text "Order # XXXXXXXXX"
     let orderNumber = '';
-    const captionEl = block.querySelector('[id^="caption-"]');
+    const captionEl = block.querySelector(S.selectors.orderCaption);
     if (captionEl) {
-      const idMatch = captionEl.id.match(/caption-(\d+)/);
+      const idMatch = captionEl.id.match(rx('captionOrderNumber'));
       if (idMatch) orderNumber = idMatch[1];
     }
     if (!orderNumber) {
-      const m = blockText.match(/Order\s*#?\s*(\d{10,})/i);
+      const m = blockText.match(rx('orderNumberLabeled', 'i'));
       if (m) orderNumber = m[1];
     }
     if (!orderNumber) {
-      const m = blockText.match(/\b(\d{13,20})\b/);
+      const m = blockText.match(rx('orderNumberBare'));
       if (m) orderNumber = m[1];
     }
     if (!orderNumber || seen.has(orderNumber)) continue;
@@ -72,9 +75,9 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
 
     let orderDate: Date;
     const dateMatch =
-      blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ??
-      blockText.match(/\b((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ??
-      blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})(?!\d)/i);
+      blockText.match(rx('dateLabeledFull', 'i')) ??
+      blockText.match(rx('dateFull', 'i')) ??
+      blockText.match(rx('dateLabeledNoYear', 'i'));
 
     if (dateMatch) {
       // Append current year if missing; if result is more than a day in the future, use prior year
@@ -96,8 +99,8 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
       // Walmart omits dates for very recently placed orders (shows progress steps instead).
       console.log('[WM] no date found for order', orderNumber, '— will fetch detail for real date');
       if (isCancelledOrReturned(blockText)) continue;
-      const totalMatch2 = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
-      const itemEl2 = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
+      const totalMatch2 = blockText.match(rx('orderTotal', 'i'));
+      const itemEl2 = block.querySelector(S.selectors.itemFallback);
       orders.push({
         platform: 'Walmart',
         orderNumber,
@@ -107,7 +110,7 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
         shippingCost: 0,
         shippingAddress: '',
         trackingNumbers: [],
-        sourceUrl: `https://www.walmart.com/orders/${orderNumber}`,
+        sourceUrl: S.urls.orderDetail.replace('{orderNumber}', () => orderNumber),
       });
       continue;
     }
@@ -121,13 +124,13 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
 
     // Skip store-pickup orders — they don't go to a group. Walmart shows
     // "Pickup" / "Pickup at" / "Curbside" / "Free store pickup".
-    if (/\b(?:Free\s+store\s+pickup|Curbside\s+pickup|Pickup\s+at|Ready\s+for\s+pickup|Store\s+Pickup|Pickup\s+order)\b/i.test(blockText)) {
+    if (rx('storePickup', 'i').test(blockText)) {
       console.log('[WM] skipping store-pickup order:', orderNumber);
       continue;
     }
 
     // Total — "Total $XX.XX"
-    const totalMatch = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
+    const totalMatch = blockText.match(rx('orderTotal', 'i'));
     const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
 
     // Item description — prefer the explicit productName test-id (the actual
@@ -135,18 +138,18 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
     // product link or item element. The text is then sanity-checked to
     // reject generic page chrome like "Walmart.com" that occasionally
     // leaked through the more permissive selectors.
-    const productNameEl = block.querySelector('[data-testid="productName"]');
-    const fallbackItemEl = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
+    const productNameEl = block.querySelector(S.selectors.productName);
+    const fallbackItemEl = block.querySelector(S.selectors.itemFallback);
     let itemDescription = (productNameEl?.textContent ?? fallbackItemEl?.textContent ?? '').trim().slice(0, 120);
     // Reject obvious site-chrome / generic strings — these aren't real products.
-    if (/^(Walmart\.com|Walmart|Loading|—|—\s*—)$/i.test(itemDescription)) {
+    if (rx('genericTitle', 'i').test(itemDescription)) {
       console.log('[WM] rejecting generic item description, treating as empty:', itemDescription);
       itemDescription = '';
     }
 
     // Capture payment method last 4 if present in the order card for
     // card auto-assignment on the tracker side.
-    const last4Match = blockText.match(/(?:ending\s+(?:in)?|\*{2,}|\.{2,})\s*(\d{4})\b/i);
+    const last4Match = blockText.match(rx('cardLast4', 'i'));
     const paymentLast4 = last4Match?.[1];
 
     console.log('[WM] adding order', orderNumber, 'date:', orderDate.toISOString().split('T')[0], 'paymentLast4:', paymentLast4 ?? '(none)', 'blockText snippet:', blockText.slice(0, 240));
@@ -159,7 +162,7 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
       shippingCost: 0,
       shippingAddress: '',
       trackingNumbers: [],
-      sourceUrl: `https://www.walmart.com/orders/${orderNumber}`,
+      sourceUrl: S.urls.orderDetail.replace('{orderNumber}', () => orderNumber),
       paymentLast4,
     });
   }
@@ -169,16 +172,15 @@ function scrapeCurrentPage(sinceDate: Date): { orders: ScrapedOrder[]; hasOlder:
 }
 
 function getNextPageUrl(): string | null {
-  const nextEl = document.querySelector(
-    '[aria-label="Next page"]:not([disabled]) a, [data-automation-id*="next-page"]:not([disabled]) a, [aria-label="Next page"]:not([disabled])'
-  ) as HTMLAnchorElement | null;
+  const sel = getScrape('walmart').selectors;
+  const nextEl = document.querySelector(sel.nextPageLink) as HTMLAnchorElement | null;
   if (nextEl?.href) return nextEl.href;
 
   // Walmart pagination: ?page=N in URL
   const url = new URL(location.href);
   const currentPage = parseInt(url.searchParams.get('page') ?? '1');
   // Check if there's a next-page button (even if it's not an <a>)
-  const nextBtn = document.querySelector('[aria-label="Next page"]:not([disabled]), [data-automation-id*="next-page"]:not([disabled])');
+  const nextBtn = document.querySelector(sel.nextPageButton);
   if (nextBtn) {
     url.searchParams.set('page', String(currentPage + 1));
     return url.toString();
@@ -191,9 +193,11 @@ function getNextPageUrl(): string | null {
 // ---------------------------------------------------------------------------
 
 async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<{ address: string; tracking: string[]; orderDate: string | null; cost: number | null; itemDescription: string | null; hadInternalTracking: boolean; paymentLast4?: string; deliveryPhotoUrl?: string; deliveryPhotoBase64?: string; deliveryPhotoMime?: string }> {
+  const S = getScrape('walmart');
+  const rx = S.regex;
   try {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 5000);
+    const timer = setTimeout(() => ctrl.abort(), S.timeoutsMs.detailFetchMs);
     const res = await fetch(orderUrl, { credentials: 'include', signal: ctrl.signal });
     clearTimeout(timer);
     console.log('[WM] detail fetch status:', orderNumber, res.status, res.url);
@@ -206,7 +210,7 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
     //   groups:  order[groups_XXXX][0].items[0].productInfo.name
     //   address: order[groups_XXXX][0].deliveryAddress.address.addressString
     let address = '';
-    const nextDataEl = doc.querySelector('#__NEXT_DATA__');
+    const nextDataEl = doc.querySelector(S.selectors.nextData);
     let ndOrder: Record<string, unknown> | null = null;
     if (nextDataEl?.textContent) {
       try {
@@ -214,7 +218,7 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
         ndOrder = (nd?.props?.pageProps?.initialData?.data?.order as Record<string, unknown>) ?? null;
         if (ndOrder) {
           // Find the versioned groups key (e.g. groups_2101)
-          const groupsKey = Object.keys(ndOrder).find(k => k.startsWith('groups_'));
+          const groupsKey = Object.keys(ndOrder).find(k => k.startsWith(S.labels.groupsKeyPrefix));
           const firstGroup = groupsKey ? (ndOrder[groupsKey] as unknown[])?.[0] as Record<string, unknown> : null;
           // Address
           const addrStr = (firstGroup?.deliveryAddress as Record<string, unknown>)?.address as Record<string, unknown>;
@@ -224,15 +228,15 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
     }
     if (!address) {
       // DOM fallback for address
-      const addrEl = doc.querySelector('[data-automation-id*="shipping-address"], [class*="shipping-address"], [class*="shippingAddress"]');
+      const addrEl = doc.querySelector(S.selectors.detailAddress);
       address = (addrEl?.textContent ?? '').replace(/\s+/g, ' ').trim();
     }
 
     const numbers = new Set<string>();
     const trackPatterns: Array<[string, RegExp]> = [
-      ['trackingNumber-field', /trackingNumber["\s:]+["']?([A-Z0-9]{10,25})/g],
-      ['ups-1Z',              /\b(1Z[A-Z0-9]{16})\b/g],
-      ['digits-20-22',        /\b([0-9]{20,22})\b/g],
+      ['trackingNumber-field', rx('trackingField', 'g')],
+      ['ups-1Z',              rx('trackingUps', 'g')],
+      ['digits-20-22',        rx('trackingDigits', 'g')],
     ];
     const numberOrigins = new Map<string, string>();
     for (const [name, pat] of trackPatterns) {
@@ -259,7 +263,7 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
     // Also drop the order number itself if it leaked into the tracking list.
     // Track whether at least one internal-ID was dropped so the caller can
     // decide whether to fall back to the order number as the tracking value.
-    const isWalmartInternal = (n: string) => /^555\d{15,}$/.test(n);
+    const isWalmartInternal = (n: string) => rx('internalTracking').test(n);
     let hadInternalTracking = false;
     for (const n of [...numbers]) {
       if (isWalmartInternal(n)) {
@@ -278,7 +282,8 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
     let itemDescription: string | null = null;
 
     // Scan raw HTML for JSON data embedded in script tags (Walmart embeds order data this way)
-    const scriptMatches = html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g);
+    const scriptMatches = html.matchAll(rx('scriptBlock', 'g'));
+    const jsonDatePats = () => [rx('jsonOrderDate'), rx('jsonPlacedDate'), rx('jsonOrderPlacedDate'), rx('jsonCreatedDate')];
     for (const sm of scriptMatches) {
       const s = sm[1];
       if (!s.includes('orderDate') && !s.includes('placedDate') && !s.includes('totalAmount') && !s.includes('financeTotal')) continue;
@@ -286,19 +291,19 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
         const parsed = JSON.parse(s);
         const str = JSON.stringify(parsed);
         if (!orderDate) {
-          for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
+          for (const pat of jsonDatePats()) {
             const m = str.match(pat); if (m) { orderDate = m[1]; break; } // full ISO incl. time
           }
         }
         if (cost == null) {
-          const m = str.match(/"(?:totalAmount|financeTotal|orderTotal|grandTotal|chargeTotal|estimatedTotal|totalCharges|orderTotalAmount|total)"\s*:\s*([\d.]+)/);
+          const m = str.match(rx('jsonCost'));
           if (m) cost = parseFloat(m[1]);
         }
         if (!itemDescription) {
           // Drop bare "name" key — too permissive, often matches brand/seller/category.
           // productInfo.name is reached via the ndOrder direct path below.
-          const m = str.match(/"(?:productName|itemDescription)"\s*:\s*"([^"]{5,120})"/);
-          if (m && !/^(Walmart\.com|Walmart|Loading)$/i.test(m[1])) itemDescription = m[1];
+          const m = str.match(rx('jsonProductName'));
+          if (m && !rx('genericTitleJson', 'i').test(m[1])) itemDescription = m[1];
         }
       } catch { /* not JSON */ }
     }
@@ -312,7 +317,7 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
       }
       // Item: first group → first item → productInfo.name
       if (!itemDescription) {
-        const groupsKey = Object.keys(ndOrder).find(k => k.startsWith('groups_'));
+        const groupsKey = Object.keys(ndOrder).find(k => k.startsWith(S.labels.groupsKeyPrefix));
         const firstGroup = groupsKey ? (ndOrder[groupsKey] as unknown[])?.[0] as Record<string, unknown> : null;
         const firstItem = (firstGroup?.items as unknown[])?.[0] as Record<string, unknown>;
         const name = (firstItem?.productInfo as Record<string, unknown>)?.name as string | undefined;
@@ -321,32 +326,32 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
       // Date
       if (!orderDate) {
         const str = JSON.stringify(ndOrder);
-        for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
+        for (const pat of jsonDatePats()) {
           const m = str.match(pat); if (m) { orderDate = m[1]; break; } // full ISO incl. time
         }
       }
     }
     // Raw HTML regex fallback for cost — matches "Total $XX.XX" or "Order total $XX.XX"
     if (cost == null) {
-      const m = html.match(/(?:order\s+)?total[^$\d]{0,30}\$\s*([\d,]+\.?\d*)/i);
+      const m = html.match(rx('htmlTotal', 'i'));
       if (m) cost = parseMoney(m[1]);
     }
     if (!orderDate) {
-      const m = html.match(/[Pp]laced[^<]{0,80}?(\d{4}-\d{2}-\d{2})/);
+      const m = html.match(rx('htmlPlaced'));
       if (m) orderDate = m[1];
     }
 
     // HTML DOM fallback for cost / item
     if (cost == null) {
-      const totalEl = doc.querySelector('[data-automation-id*="order-total"], [class*="orderTotal"], [class*="order-total"]');
+      const totalEl = doc.querySelector(S.selectors.detailTotal);
       if (totalEl) cost = parseMoney(totalEl.textContent ?? '');
     }
     if (!itemDescription) {
-      const itemEl = doc.querySelector('[data-automation-id*="product-title"], [class*="product-title"], h2[class*="item"]');
+      const itemEl = doc.querySelector(S.selectors.detailItem);
       if (itemEl) itemDescription = (itemEl.textContent ?? '').trim().slice(0, 120) || null;
     }
     // Final sanity check — reject generic page chrome even when it leaks through.
-    if (itemDescription && /^(Walmart\.com|Walmart|Loading|—|—\s*—)$/i.test(itemDescription.trim())) {
+    if (itemDescription && rx('genericTitle', 'i').test(itemDescription.trim())) {
       console.log('[WM] rejecting generic detail item description:', itemDescription);
       itemDescription = null;
     }
@@ -358,12 +363,12 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
     let paymentLast4: string | undefined;
     let last4Source = 'none';
     const jsonFieldPats: Array<[string, RegExp]> = [
-      ['lastFour',  /"lastFour"\s*:\s*"?(\d{4})"?/],
-      ['lastFourDigits', /"lastFourDigits"\s*:\s*"?(\d{4})"?/],
-      ['cardLast4', /"cardLast4"\s*:\s*"?(\d{4})"?/],
-      ['last4',     /"last4"\s*:\s*"?(\d{4})"?/],
-      ['cardNumberLast4', /"cardNumberLast4"\s*:\s*"?(\d{4})"?/],
-      ['accountNumberLast4', /"accountNumberLast4"\s*:\s*"?(\d{4})"?/],
+      ['lastFour',  rx('jsonLastFour')],
+      ['lastFourDigits', rx('jsonLastFourDigits')],
+      ['cardLast4', rx('jsonCardLast4')],
+      ['last4',     rx('jsonLast4')],
+      ['cardNumberLast4', rx('jsonCardNumberLast4')],
+      ['accountNumberLast4', rx('jsonAccountNumberLast4')],
     ];
     for (const [name, pat] of jsonFieldPats) {
       const m = html.match(pat);
@@ -374,12 +379,12 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
       // earlier "any non-alnum run + 4 digits" pattern was matching years.
       // Order matters: try the most specific first.
       const textPats: Array<[string, RegExp]> = [
-        ['ending-in',    /\bending\s+in\s+(\d{4})\b/i],
-        ['ending',       /\bending\s+(\d{4})\b/i],
-        ['asterisks',    /\*{2,}\s*(\d{4})\b/],
-        ['xs',           /\bx{4,}\s*(\d{4})\b/i],
-        ['bullets',      /[•·․⋅●]{2,}\s*(\d{4})\b/],
-        ['html-bullet',  /(?:&bull;|&middot;|&#x2022;|&#8226;){2,}\s*(\d{4})\b/i],
+        ['ending-in',    rx('textEndingIn', 'i')],
+        ['ending',       rx('textEnding', 'i')],
+        ['asterisks',    rx('textAsterisks')],
+        ['xs',           rx('textXs', 'i')],
+        ['bullets',      rx('textBullets')],
+        ['html-bullet',  rx('textHtmlBullet', 'i')],
       ];
       for (const [name, pat] of textPats) {
         const m = html.match(pat);
@@ -394,9 +399,9 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
     let deliveryPhotoUrl: string | undefined;
     let deliveryPhotoBase64: string | undefined;
     let deliveryPhotoMime: string | undefined;
-    const photoImg = doc.querySelector<HTMLImageElement>('img[alt="Proof of delivery location"], img[src*="/delivery-photo/"]');
+    const photoImg = doc.querySelector<HTMLImageElement>(S.selectors.deliveryPhoto);
     const photoSrc = photoImg?.getAttribute('src') || '';
-    if (photoSrc && /^https?:\/\//i.test(photoSrc)) {
+    if (photoSrc && rx('httpUrl', 'i').test(photoSrc)) {
       deliveryPhotoUrl = photoSrc;
       // Walmart's photo proxy (receipts-query.edge.walmart.com) requires the
       // user's session cookies; server-side fetch 401s. Have the background
@@ -430,35 +435,35 @@ async function fetchOrderDetail(orderNumber: string, orderUrl: string): Promise<
 let syncing = false;
 
 function getFirstBlockFingerprint(): string {
-  const block = document.querySelector('[data-testid*="orderGroup"], [data-testid*="order-card"], [data-testid*="orderCard"]');
+  const sel = getScrape('walmart').selectors;
+  const block = document.querySelector(sel.orderBlocks);
   if (!block) return '';
   // Use caption element id (contains actual order number) as the stable fingerprint
-  const caption = block.querySelector('[id^="caption-"]');
+  const caption = block.querySelector(sel.orderCaption);
   if (caption?.id) return caption.id;
   // Fall back to a slice of text content (order numbers, dates, amounts — changes per page)
   return (block.textContent ?? '').replace(/\s+/g, ' ').slice(0, 80);
 }
 
-function waitForOrdersToLoad(previousFingerprint = '', timeoutMs = 12000): Promise<void> {
+function waitForOrdersToLoad(previousFingerprint = '', timeoutMs = getScrape('walmart').timeoutsMs.pageLoadMs): Promise<void> {
   return new Promise(resolve => {
     const start = Date.now();
+    const T = getScrape('walmart');
     function check() {
-      const blocks = document.querySelectorAll('[data-testid*="orderGroup"], [data-testid*="order-card"], [data-testid*="orderCard"]');
+      const blocks = document.querySelectorAll(T.selectors.orderBlocks);
       if (blocks.length > 0 && (blocks[0].textContent ?? '').length > 100) {
         const fp = getFirstBlockFingerprint();
         if (!previousFingerprint || fp !== previousFingerprint) { resolve(); return; }
       }
       if (Date.now() - start > timeoutMs) { resolve(); return; }
-      setTimeout(check, 400);
+      setTimeout(check, T.timeoutsMs.loadPollMs);
     }
     check();
   });
 }
 
 function clickNextPage(): boolean {
-  const btn = document.querySelector(
-    '[aria-label="Next page"]:not([disabled]), [data-automation-id*="next-page"]:not([disabled]), button[aria-label*="next" i]:not([disabled])'
-  ) as HTMLElement | null;
+  const btn = document.querySelector(getScrape('walmart').selectors.nextClick) as HTMLElement | null;
   if (btn) { btn.click(); return true; }
   return false;
 }
@@ -468,6 +473,8 @@ async function startSync() {
   if (syncing) return;
   syncing = true;
 
+  await initScrapeConfig();
+  const W = getScrape('walmart');
   const settings = await getSettings();
   if (!settings.trackerUrl || !settings.userId) {
     sendMessage({ type: 'SYNC_ERROR', platform: 'Walmart', error: 'Tracker URL or user not configured — open Settings.' });
@@ -485,17 +492,17 @@ async function startSync() {
   sendMessage({ type: 'SYNC_STARTED', platform: 'Walmart' });
 
   // Always start from page 1 — if not on /orders or at page > 1, navigate there and resume via sessionStorage
-  const isOrdersPage = location.pathname.includes('/orders') || location.pathname.includes('/account/mypurchases');
+  const isOrdersPage = location.pathname.includes(W.urls.ordersPath) || location.pathname.includes(W.urls.purchasesPath);
   const currentPage = new URL(location.href).searchParams.get('page');
   if (!isOrdersPage || (currentPage && parseInt(currentPage) > 1)) {
     sessionStorage.setItem('__resell_wm_sync__', '1');
-    window.location.href = 'https://www.walmart.com/orders';
+    window.location.href = W.urls.orders;
     syncing = false;
     return;
   }
 
   try {
-    await waitForOrdersToLoad('', 15000);
+    await waitForOrdersToLoad('', W.timeoutsMs.firstLoadMs);
 
     const allOrders: ScrapedOrder[] = [];
     const seen = new Set<string>();
@@ -609,7 +616,7 @@ async function startSync() {
 if (sessionStorage.getItem('__resell_wm_sync__')) {
   sessionStorage.removeItem('__resell_wm_sync__');
   // Wait for Walmart's React to hydrate before scraping
-  setTimeout(() => startSync(), 2000);
+  initScrapeConfig().then(() => setTimeout(() => startSync(), getScrape('walmart').timeoutsMs.resumeDelayMs));
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

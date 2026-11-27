@@ -1,6 +1,14 @@
 // Runs in MAIN world at document_start — wraps fetch AND XHR to capture the
 // token Costco's own app uses for ecom-api calls, then stores it for our sync.
+import { getScrape } from '../lib/scrapeConfig';
+
 console.log('[CST-INT] interceptor script executing');
+
+// MAIN world: no chrome.* here, so the URL patterns are the bundled defaults
+// (src/lib/scrapeConfig.default.json); a remote change to them needs the
+// isolated-world bridge (like api-spy-bridge.ts) that hands the cached values over.
+const API_HOST = getScrape('costco').urls.apiHost;
+const GRAPHQL_PATH = getScrape('costco').urls.graphqlPath;
 
 (function () {
   // Save pristine fetch before any page scripts wrap it
@@ -25,7 +33,7 @@ console.log('[CST-INT] interceptor script executing');
   }
 
   function tryCapture(url: string, headers: Record<string, string>) {
-    if (!url.includes('ecom-api.costco.com')) return;
+    if (!url.includes(API_HOST)) return;
     const auth = headers['costco-x-authorization'] ?? headers['authorization'] ?? '';
     const clientId = headers['costco-x-wcs-clientid'] ?? '';
     console.log('[CST-INT] ecom-api →', url);
@@ -78,9 +86,9 @@ console.log('[CST-INT] interceptor script executing');
     const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
     tryCapture(url, headersToPlain(init?.headers));
     const res = await origFetch(input, init);
-    if (url.includes('ecom-api.costco.com')) {
+    if (url.includes(API_HOST)) {
       console.log('[CST-INT] response ←', url, res.status, res.ok ? 'OK' : 'FAIL');
-      if (res.ok && url.includes('order/v1/orders/graphql')) {
+      if (res.ok && url.includes(GRAPHQL_PATH)) {
         res.clone().json().then((data: Record<string, unknown>) => {
           captureOrderDetails(data);
           captureOrderList(data);
@@ -133,10 +141,10 @@ console.log('[CST-INT] interceptor script executing');
   XMLHttpRequest.prototype.send = function (body?: Document | XMLHttpRequestBodyInit | null) {
     const self = this as unknown as Record<string, unknown>;
     const url = (self.__xhrUrl as string) ?? '';
-    if (url.includes('ecom-api.costco.com')) {
+    if (url.includes(API_HOST)) {
       this.addEventListener('load', function () {
         console.log('[CST-INT] XHR response ←', url, this.status, this.status < 400 ? 'OK' : 'FAIL');
-        if (this.status < 400 && url.includes('order/v1/orders/graphql')) {
+        if (this.status < 400 && url.includes(GRAPHQL_PATH)) {
           try {
             const data = JSON.parse(this.responseText);
             const w = window as unknown as Record<string, unknown>;

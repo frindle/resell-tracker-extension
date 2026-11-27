@@ -2,8 +2,8 @@ import { getSettings, setLastSync } from '../lib/storage';
 import { pushOrders } from '../lib/api';
 import type { ScrapedOrder, SyncMessage } from '../lib/types';
 import { COSTCO_SIGN_IN_MESSAGE, isSignInUrl } from '../lib/costcoCommand';
+import { getScrape, initScrapeConfig } from '../lib/scrapeConfig';
 
-const GRAPHQL_URL = 'https://ecom-api.costco.com/ebusiness/order/v1/orders/graphql';
 const PAGE_SIZE = 16;
 const SKIP_STATUSES = new Set(['cancelled', 'canceled']);
 const DIGITAL_CARRIERS = new Set(['electronic delivery service', 'email delivery', 'email']);
@@ -28,10 +28,11 @@ function formatDate(d: Date): string {
 }
 
 function getMsalRefreshToken(): string {
+  const L = getScrape('costco').labels;
   for (const storage of [sessionStorage, localStorage]) {
     for (const key of Object.keys(storage)) {
-      if (!key.toLowerCase().includes('refreshtoken')) continue;
-      if (!key.includes('a3a5186b')) continue;
+      if (!key.toLowerCase().includes(L.refreshTokenKey)) continue;
+      if (!key.includes(L.msalKeyMarker)) continue;
       try {
         const item = JSON.parse(storage.getItem(key) ?? '{}');
         if (item.secret) return item.secret;
@@ -42,9 +43,10 @@ function getMsalRefreshToken(): string {
 }
 
 function dumpMsalAccessTokens() {
+  const L = getScrape('costco').labels;
   for (const storage of [sessionStorage, localStorage]) {
     for (const key of Object.keys(storage)) {
-      if (!key.toLowerCase().includes('accesstoken')) continue;
+      if (!key.toLowerCase().includes(L.accessTokenKey)) continue;
       try {
         const item = JSON.parse(storage.getItem(key) ?? '{}');
         console.log('[CST] msal accesstoken key:', key);
@@ -60,16 +62,17 @@ async function getMsalToken(): Promise<string> {
 
   console.log('[CST] exchanging refresh token for fresh id_token…');
   try {
+    const S = getScrape('costco');
     const res = await fetch(
-      'https://signin.costco.com/e0714dd4-784d-46d6-a278-3e29553483eb/B2C_1A_SSO_WCS_signup_signin_209/oauth2/v2.0/token',
+      S.urls.tokenRefresh,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           grant_type: 'refresh_token',
           refresh_token: refreshToken,
-          client_id: 'a3a5186b-7c89-4b4c-93a8-dd604e930757',
-          scope: 'openid profile offline_access',
+          client_id: S.labels.msalClientId,
+          scope: S.labels.msalScope,
         }).toString(),
       },
     );
@@ -101,30 +104,30 @@ async function getAuth(): Promise<{ token: string; clientId: string; warehouseNu
   }
 }
 
-const AUTH_WAIT_MS = 20_000;
-
 async function waitForAuth(): Promise<{ token: string; clientId: string; warehouseNumber: string } | null> {
+  const T = getScrape('costco').timeoutsMs;
   const start = Date.now();
   for (;;) {
     if (isSignInUrl(location.href)) return null;
     const auth = await getAuth();
     if (auth) return auth;
-    if (Date.now() - start >= AUTH_WAIT_MS) return null;
-    await new Promise(r => setTimeout(r, 1000));
+    if (Date.now() - start >= T.authWaitMs) return null;
+    await new Promise(r => setTimeout(r, T.authPollMs));
   }
 }
 
 function getWarehouseNumber(): string {
+  const S = getScrape('costco');
   // Try cookies
   for (const cookie of document.cookie.split(';')) {
     const [k, v] = cookie.trim().split('=');
-    if (/store|warehouse|wh/i.test(k) && v && /^\d{3,4}$/.test(v.trim())) return v.trim();
+    if (S.regex('warehouseKey', 'i').test(k) && v && S.regex('warehouseValue').test(v.trim())) return v.trim();
   }
   // Try localStorage
   for (const key of Object.keys(localStorage)) {
-    if (/store|warehouse|wh/i.test(key)) {
+    if (S.regex('warehouseKey', 'i').test(key)) {
       const v = localStorage.getItem(key) ?? '';
-      if (/^\d{3,4}$/.test(v.trim())) return v.trim();
+      if (S.regex('warehouseValue').test(v.trim())) return v.trim();
     }
   }
   return '';
@@ -245,7 +248,7 @@ function mapOrder(o: BcOrder): ScrapedOrder | null {
     shippingCost: 0,
     shippingAddress: '',
     trackingNumbers: tracking,
-    sourceUrl: `https://www.costco.com/myaccount/#/app/4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf/orderdetails/${o.orderNumber}`,
+    sourceUrl: getScrape('costco').urls.orderDetail.replace('{orderNumber}', () => o.orderNumber),
   };
 }
 
@@ -270,6 +273,7 @@ async function runSync() {
   if (syncing) return;
   syncing = true;
 
+  await initScrapeConfig();
   const settings = await getSettings();
   if (!settings.trackerUrl || !settings.userId) {
     sendMessage({ type: 'SYNC_ERROR', platform: 'Costco', error: 'Tracker URL or user not configured — open Settings.' });
@@ -326,7 +330,7 @@ async function runSync() {
     let total = Infinity;
     let fetchFailed = false;
     while ((pageNumber - 1) * PAGE_SIZE < total) {
-      if (pageNumber > 1) await new Promise(r => setTimeout(r, 600));
+      if (pageNumber > 1) await new Promise(r => setTimeout(r, getScrape('costco').timeoutsMs.pageDelayMs));
       const page = await fetchPage(auth, startDate, endDate, pageNumber);
       if (!page) { fetchFailed = true; break; }
       total = page.total;
