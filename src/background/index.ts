@@ -15,6 +15,7 @@ import { loadRemotePlans } from '../lib/planRemote';
 import { initScrapeConfig, loadScrapeConfig, scrapeConfigIsStale } from '../lib/scrapeConfig';
 import { localPairingStore, stepPairing } from '../lib/pairing';
 import { savePaired } from '../lib/storage';
+import { syncGroupLinkScripts } from '../lib/groupLinkScripts';
 
 const ICON_PATHS_CHROME = { 16: 'icons/icon16.png', 32: 'icons/icon32.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' };
 const ICON_PATH_FIREFOX = 'icons/icon.svg';
@@ -74,6 +75,7 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create('pollCommands', { when: Date.now() + 2000, periodInMinutes: 1 });
   pollAndExecuteCommands().catch(console.error);
   reregisterTrackerScript();
+  syncGroupLinkScripts().catch(() => {});
 });
 chrome.runtime.onStartup.addListener(() => {
   setToolbarIcon();
@@ -82,6 +84,7 @@ chrome.runtime.onStartup.addListener(() => {
   chrome.alarms.create('pollCommands', { when: Date.now() + 2000, periodInMinutes: 1 });
   pollAndExecuteCommands().catch(console.error);
   reregisterTrackerScript();
+  syncGroupLinkScripts().catch(() => {});
 });
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === 'scrapeConfig') refreshScrapeConfig().catch(() => {});
@@ -230,6 +233,17 @@ chrome.tabs.onRemoved.addListener(tabId => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // A buying-group deal link was clicked; open its destination (the tracker's /go page, or a scrubbed link).
+  if (message.type === 'OPEN_GROUP_LINK') {
+    try {
+      const u = new URL(String(message.url));
+      if (sender.tab && (u.protocol === 'https:' || u.protocol === 'http:')) {
+        chrome.tabs.create({ url: u.toString(), active: !message.background, openerTabId: sender.tab.id, index: sender.tab.index + 1 });
+      }
+    } catch { /* ignore a bad url */ }
+    return;
+  }
+
   if (message.type === 'PING') {
     sendResponse({ ok: true });
     return;

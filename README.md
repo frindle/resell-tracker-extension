@@ -51,6 +51,10 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.5.1
+
+- **Buying-group links go through the portal page.** Clicking an outbound retailer link on BFMR, BuyingGroup or Big Sky opens your tracker's `/go` page (portal rates, scrubbed link) instead of the group's tagged link; middle-click and ctrl/cmd-click open a background tab. Off by default: switch each site on in Settings, which asks for that site's permission (no new required permission). Cash Out Kings is a separate toggle and only redirects clicks, reading nothing from the page. With no tracker paired, a locally cleaned link opens instead (tracking params stripped, redirector destinations unwrapped, no network).
+
 ### 1.5.0
 
 - **Step plans (phase 1).** A bundled `costcoEgift` plan (data: steps, selectors, labels) and an interpreter that runs it, with a validator, a host allowlist, a click denylist and caps on steps, loops, time and tabs. Opt in per command with `runner: "plan"` in the `SCRAPE_EGIFT` payload; the built-in runner stays the default and the fallback. `dryRun: true` (plan runner only) skips typing, saving and photos and reports the step trace. The report says `runner: "plan v1"` and carries a trace of step ids and timings, never values. See `docs/step-plans.md`.

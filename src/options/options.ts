@@ -5,6 +5,8 @@ import type { TrackerUser } from '../lib/types';
 import { describeScrapeStatus, SCRAPE_STATUS_KEY } from '../lib/scrapeConfig';
 import { describePlanStatus, PLAN_STATUS_KEY } from '../lib/planRemote';
 import { approvalUrl, beginPairing, checkSecret, localPairingStore, PAIRING_POLL_MS, stepPairing, trackerBase } from '../lib/pairing';
+import { GROUP_LINKS_KEY, GROUP_SITES, originsForGroup, type GroupLinkSettings } from '../lib/groupLinks';
+import { syncGroupLinkScripts } from '../lib/groupLinkScripts';
 import { extensionBrowser } from '../lib/browserTarget';
 
 async function showScrapeConfig() {
@@ -105,7 +107,42 @@ async function loadUsers(trackerUrl: string) {
   }
 }
 
+async function initGroupLinks() {
+  const box = document.getElementById('groupLinks')!;
+  const status = document.getElementById('groupLinksStatus')!;
+  const got = await chrome.storage.sync.get(GROUP_LINKS_KEY).catch(() => ({} as Record<string, unknown>));
+  const current = (got[GROUP_LINKS_KEY] ?? {}) as GroupLinkSettings;
+  for (const site of GROUP_SITES) {
+    const label = document.createElement('label');
+    label.style.cssText = 'display:flex;flex-direction:row;gap:8px;align-items:center;margin:4px 0';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = current[site.key] === true;
+    label.append(cb, document.createTextNode(` ${site.label}${site.note ? ' — ' + site.note : ''}`));
+    cb.addEventListener('change', () => {
+      const on = cb.checked;
+      // permissions.request must be the first call in the handler (Brave drops the gesture after an await).
+      const granting = on ? chrome.permissions.request({ origins: originsForGroup(site) }).catch(() => false) : Promise.resolve(true);
+      (async () => {
+        if (on && !(await granting)) {
+          cb.checked = false;
+          status.textContent = `${site.label}: permission not granted.`;
+          status.className = 'status fail';
+          return;
+        }
+        current[site.key] = on;
+        await chrome.storage.sync.set({ [GROUP_LINKS_KEY]: current });
+        await syncGroupLinkScripts();
+        status.textContent = `${site.label} ${on ? 'on' : 'off'}. Reload open ${site.label} tabs.`;
+        status.className = 'status ok';
+      })();
+    });
+    box.append(label);
+  }
+}
+
 async function init() {
+  initGroupLinks().catch(() => {});
   const settings = await getSettings();
 
   (document.getElementById('trackerUrl') as HTMLInputElement).value = settings.trackerUrl;
