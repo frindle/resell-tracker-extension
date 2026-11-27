@@ -9,10 +9,11 @@
 // (site "costcoEgift"), so a page change ships as a tracker deploy, not an extension release.
 
 import {
-  EGIFT_HOSTS, MAX_CARDS, egiftErrorCode, egiftPostBody, egiftReport, isAllowedEgiftLink, parseEgiftInfo, readCard,
-  type EgiftCard, type EgiftFailure, type EgiftOpened, type EgiftReport, type EgiftStep,
+  EGIFT_HOSTS, MAX_CARDS, egiftErrorCode, egiftPostBody, egiftReport, isAllowedEgiftLink, parseEgiftInfo, readCard, titleFor,
+  type EgiftCard, type EgiftCounts, type EgiftFailure, type EgiftOpened, type EgiftReport, type EgiftStep,
 } from '../lib/egiftCommand';
 import { clickNext, clickOpen, enterEmail, keepInTab, pageText, settings, type PageCfg, type Settings } from '../lib/egiftPage';
+import { cardCamera } from './egiftShot';
 
 const KEEPALIVE_MS = 20_000;
 
@@ -90,6 +91,8 @@ export async function runEgiftOrder(base: string, headers: Record<string, string
   let saved = 0;
   let failure: EgiftFailure | null = null;
   let opened: EgiftOpened | undefined;
+  let camera: ReturnType<typeof cardCamera> | null = null;
+  const counts: Required<EgiftCounts> = { images: 0, named: 0, mismatched: 0 };
   let step: EgiftStep = 'info';
   const card = (s: PageState): EgiftCard | null => readCard(s, cfg.pats);
   try {
@@ -117,6 +120,8 @@ export async function runEgiftOrder(base: string, headers: Record<string, string
     const list = await waitFor(tabId, cfg, s => s.hasOpen || s.alert || !!card(s));
     if (!list.hit) return egiftReport(0, 0, timedOut(list.last, list.last?.hasEmail ? 'email-no-response' : 'page-timeout'));
     if (list.hit.alert && !list.hit.hasOpen && !card(list.hit)) return egiftReport(0, 0, 'email-rejected');
+    // Brand and value come from the redemption page's per-card titles; the print page does not name them.
+    const titles = list.hit.titles ?? [];
 
     // Access eGift opens the cards in a new tab; a script's click may have that tab blocked, so a
     // second click keeps it in this tab.
@@ -162,15 +167,21 @@ export async function runEgiftOrder(base: string, headers: Record<string, string
       if (c.total !== total) { failure = 'total-mismatch'; break; }
       cards++;
       lastCode = c.code;
+      const title = titleFor(titles, c.index, total, cfg.pats.amount);
+      if (title && c.value != null && c.value !== title.value) counts.mismatched++;
+      camera ??= cardCamera(cardTab);
+      const image = await camera.shoot(cfg.page.cardImage);
       let ok = false;
       try {
         const r = await doFetch(`${base}/api/extension/egift`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(egiftPostBody(orderId, c)),
+          method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(egiftPostBody(orderId, c, { title, image })),
         });
         ok = r.ok;
       } catch { ok = false; }
       if (!ok) { failure = 'save-failed'; break; }
       saved++;
+      if (image) counts.images++;
+      if (title) counts.named++;
       if (c.index >= total) { if (c.index !== total) failure = 'ended-early'; break; }
       step = 'next';
       await sleep(cfg.stepDelayMs);
@@ -179,11 +190,12 @@ export async function runEgiftOrder(base: string, headers: Record<string, string
       expected++;
     }
     if (!failure && cards >= MAX_CARDS && saved < total) failure = 'ended-early';
-    return egiftReport(cards, saved, failure, opened);
+    return egiftReport(cards, saved, failure, opened, counts);
   } catch (e) {
-    return egiftReport(cards, saved, egiftErrorCode(step, e), opened);
+    return egiftReport(cards, saved, egiftErrorCode(step, e), opened, counts);
   } finally {
     clearInterval(keep);
+    if (camera) await camera.close().catch(() => {});
     if (tabs) {
       tabs.stop();
       for (const id of await tabs.portal().catch(() => [])) await chrome.tabs.remove(id).catch(() => {});

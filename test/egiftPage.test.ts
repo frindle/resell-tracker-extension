@@ -3,8 +3,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
-import { pageText, enterEmail, clickOpen, clickNext, settings } from '../src/lib/egiftPage.ts';
-import { readCard } from '../src/lib/egiftCommand.ts';
+import { pageText, enterEmail, clickOpen, clickNext, cardRect, settings } from '../src/lib/egiftPage.ts';
+import { readCard, titleFor } from '../src/lib/egiftCommand.ts';
 
 const cfg = settings();
 
@@ -107,4 +107,21 @@ test('the bundled config carries every costcoEgift entry the run reads', () => {
   assert.ok(cfg.submit.emailInput.includes('#p2'));
   assert.ok(cfg.submit.submitButton.startsWith('#submitBtn'));
   assert.equal(cfg.newTabWaitMs, 10_000);
+});
+
+test('redemption page: one title per card, read for brand and value', () => {
+  page(REDEMPTION);
+  const s = pageText(cfg.page);
+  assert.deepEqual(s.titles, ['Brand $25', 'Brand $25']);
+  assert.deepEqual(titleFor(s.titles, 2, 2, cfg.pats.amount), { merchant: 'Brand', value: 25 });
+  page(PRINT(1, '1111 2222 3333 4444'));
+  assert.deepEqual(pageText(cfg.page).titles, []);
+});
+
+test('card photo: no card element, no clip (the photo falls back to the visible page)', () => {
+  page('<div>nothing here</div>');
+  assert.equal(cardRect(cfg.page.cardImage), null);
+  assert.equal(cardRect('::bad selector'), null);
+  assert.ok(cfg.page.cardImage.includes('#print-content-section'));
+  assert.ok(cfg.page.itemTitle.includes('.order-item-title'));
 });

@@ -115,26 +115,70 @@ export function readCard(page: CardPage, pats: CardPatterns = {}): EgiftCard | n
   };
 }
 
+/** Merchant and value from a card's title on the redemption page (one title per card, "Brand $25"). */
+export type CardTitle = { merchant: string; value: number };
+
+const TITLE_EDGE = /^[\s\-–—:|,.]+|[\s\-–—:|,.]+$/g;
+const TITLE_SUFFIX = /(?:^|\s)(?:e-?gifts?|gifts?|cards?|digital|codes?)$/i;
+const TITLE_PREFIX = /^(?:e-?gifts?|digital)(?:\s+(?:gift\s+)?cards?)?\b/i;
+
+/** The brand around the amount: the text before it, else the text after it, without "eGift"/"Gift Card" words. */
+function titleMerchant(part: string): string {
+  let s = part.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').replace(TITLE_EDGE, '');
+  for (let i = 0; i < 4 && TITLE_SUFFIX.test(s); i++) s = s.replace(TITLE_SUFFIX, '').replace(TITLE_EDGE, '');
+  s = s.replace(TITLE_PREFIX, '').replace(TITLE_EDGE, '');
+  return /[A-Za-z]/.test(s) ? s.slice(0, 80) : '';
+}
+
+/** Reads "Brand $25" (or "$25 Brand eGift"): null when either the brand or the amount is missing. */
+export function parseCardTitle(title: string, amount: RegExp = DEFAULT_PATTERNS.amount): CardTitle | null {
+  const t = (title ?? '').replace(/\s+/g, ' ').trim();
+  const re = new RegExp(amount.source, amount.flags.replace('g', ''));
+  const m = re.exec(t);
+  if (!m) return null;
+  const value = amountOf(m[0], re);
+  if (value == null) return null;
+  const merchant = titleMerchant(t.slice(0, m.index)) || titleMerchant(t.slice(m.index + m[0].length));
+  return merchant ? { merchant, value } : null;
+}
+
 /**
- * Body for POST /api/extension/egift: { orderId, cardNumber, pin?, merchant?, value? }.
- * The server (parseEgiftCard) keeps a card with no merchant and value, flagged for review, so
- * merchant is left out (the page does not name it reliably) and value only when it was read.
+ * The title for card `index` of `total`: by position when the page lists one per card, else the one
+ * title they all share (same brand and value). Null when neither holds, so the card goes to review.
  */
-export function egiftPostBody(orderId: number, card: EgiftCard): Record<string, unknown> {
+export function titleFor(titles: readonly string[], index: number, total: number, amount?: RegExp): CardTitle | null {
+  const parsed = titles.map(t => parseCardTitle(t, amount));
+  if (parsed.length === total) return parsed[index - 1] ?? null;
+  const first = parsed[0];
+  if (!first) return null;
+  return parsed.every(p => p && p.merchant.toLowerCase() === first.merchant.toLowerCase() && p.value === first.value) ? first : null;
+}
+
+/**
+ * Body for POST /api/extension/egift: { orderId, cardNumber, pin?, merchant?, value?, image? }.
+ * Merchant and value come from the card's redemption-page title; without a title the server
+ * (parseEgiftCard) keeps the card flagged for review. `image` is the card photo, base64 JPEG.
+ */
+export function egiftPostBody(orderId: number, card: EgiftCard, extra: { title?: CardTitle | null; image?: string | null } = {}): Record<string, unknown> {
   const body: Record<string, unknown> = { orderId, cardNumber: card.code };
   if (card.pin) body.pin = card.pin;
-  if (card.value != null) body.value = card.value;
+  if (extra.title) { body.merchant = extra.title.merchant; body.value = extra.title.value; }
+  else if (card.value != null) body.value = card.value;
+  if (extra.image) body.image = extra.image;
   return body;
 }
 
 /** How the card page was reached: the portal's new tab, the run's own tab, or the run's tab after a blocked new tab. */
 export type EgiftOpened = 'new-tab' | 'same-tab' | 'kept-in-tab';
 
-export type EgiftReport = { status: 'done' | 'failed'; result: { cards: number; saved: number; error?: string; opened?: EgiftOpened } };
+/** Per-run counts beside cards/saved: photos sent, cards sent with a merchant and value, title vs print-page amount disagreements. */
+export type EgiftCounts = { images?: number; named?: number; mismatched?: number };
+
+export type EgiftReport = { status: 'done' | 'failed'; result: { cards: number; saved: number; error?: string; opened?: EgiftOpened } & EgiftCounts };
 
 /** Counts only (plus how the card page opened, when it did). Done when every card found was saved. */
-export function egiftReport(cards: number, saved: number, failure: EgiftFailure | null, opened?: EgiftOpened): EgiftReport {
-  const via = opened ? { opened } : {};
+export function egiftReport(cards: number, saved: number, failure: EgiftFailure | null, opened?: EgiftOpened, counts: EgiftCounts = {}): EgiftReport {
+  const via = { ...(opened ? { opened } : {}), ...counts };
   if (!failure && cards > 0 && saved === cards) return { status: 'done', result: { cards, saved, ...via } };
   return { status: 'failed', result: { cards, saved, error: failure ?? 'no-cards', ...via } };
 }

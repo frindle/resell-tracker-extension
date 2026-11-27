@@ -51,6 +51,12 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.4.3
+
+- **eGift card photos.** Each card is photographed on the print page and saved to the order with its code (the photo is linked to that card). The photo is taken through Chrome's debugger, so the run's tab stays in the background; Chrome shows its "started debugging this browser" bar while the cards are read. New permission: `debugger`. A rerun adds a photo to a card saved without one.
+- **Brand and value from the card titles.** The redemption page names each card ("Brand $25"); the run now sends that brand and value with the card, so cards are no longer all held for review. A card whose title cannot be read is still saved and held for review.
+- **Result counts:** `images` (photos sent), `named` (cards sent with brand and value), `mismatched` (title value differs from an amount on the print page).
+
 ### 1.4.2
 
 - **eGift reads follow the mapped Costco portal.** The email goes into the portal's own field (`#p2`, a text box, which 1.4.1 did not recognise, so every run timed out on the first page) and "View Digital Code" is clicked. The cards are read on the print page Access eGift opens in a new tab; when the browser blocks that tab (a script's click has no user gesture), the run clicks again and keeps the page in its own tab. The code comes from the "Code:" cell and the position from the pager counter; Next is the pager's button. Every tab the run opened is closed, and no other tab is touched.

@@ -47,6 +47,8 @@ function buildManifest(target) {
   if (target === 'firefox') {
     // Firefox MV3 uses background scripts not service_worker
     base.background = { scripts: ['background.js'] };
+    // Firefox has no chrome.debugger (the eGift card photos); the run skips photos there.
+    base.permissions = base.permissions.filter(p => p !== 'debugger');
     base.browser_specific_settings = {
       gecko: {
         id: 'resell-tracker-sync@penndalton',

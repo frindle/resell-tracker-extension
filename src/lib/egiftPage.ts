@@ -26,6 +26,8 @@ export function settings() {
       pinLabel: s.labels.pinLabel || 'PIN:',
       botCheck: s.selectors.botCheck || '',
       botCheckText: s.patterns.botCheckText || '',
+      itemTitle: s.selectors.itemTitle || 'section.order-item .order-item-title',
+      cardImage: s.selectors.cardImage || '#print-content-section, #body-canvas',
     },
     submit: {
       emailInput,
@@ -88,7 +90,23 @@ export function pageText(c: PageCfg) {
     code: labelled(c.codeLabel),
     pin: labelled(c.pinLabel),
     counter: (q(c.counter)?.textContent ?? '').trim() || null,
+    // The redemption page's one title per card ("Brand $25"): brand and value, not secrets.
+    titles: qa(c.itemTitle).map(e => (e.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 200)).filter(Boolean).slice(0, 60),
   };
+}
+
+/**
+ * Where the card is on the print page, in page coordinates, for the photo; null when it is not
+ * found. `ready` is false while an image inside it is still loading.
+ */
+export function cardRect(selector: string): { x: number; y: number; width: number; height: number; ready: boolean } | null {
+  let el: Element | null = null;
+  try { el = selector ? document.querySelector(selector) : null; } catch { el = null; }
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  if (r.width < 20 || r.height < 20) return null;
+  const ready = Array.from(el.querySelectorAll('img')).every(i => i.complete);
+  return { x: Math.max(0, r.left + window.scrollX), y: Math.max(0, r.top + window.scrollY), width: Math.min(r.width, 4000), height: Math.min(r.height, 8000), ready };
 }
 
 export function enterEmail(email: string, c: SubmitCfg): boolean {
