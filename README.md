@@ -53,6 +53,7 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ### 1.5.1
 
+- **Step plans come from the tracker.** The extension fetches step plans from your tracker's `/api/extension/plans` and runs one only when its signature checks out against the public key built into the extension. A plan file that is unsigned, fails the check or is older than the one in use is ignored, and the last good plan (or the bundled one) keeps running. Scraper step changes now ship with a tracker update instead of a new extension release.
 - **Buying-group links go through the portal page.** Clicking an outbound retailer link on BFMR, BuyingGroup or Big Sky opens your tracker's `/go` page (portal rates, scrubbed link) instead of the group's tagged link; middle-click and ctrl/cmd-click open a background tab. Off by default: switch each site on in Settings, which asks for that site's permission (no new required permission). Cash Out Kings is a separate toggle and only redirects clicks, reading nothing from the page. With no tracker paired, a locally cleaned link opens instead (tracking params stripped, redirector destinations unwrapped, no network).
 
 ### 1.5.0
