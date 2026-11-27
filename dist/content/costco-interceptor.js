@@ -13,7 +13,7 @@
   var init_scrapeConfig_default = __esm({
     "src/lib/scrapeConfig.default.json"() {
       scrapeConfig_default_default = {
-        version: 1,
+        version: 2,
         sites: {
           amazon: {
             selectors: {
@@ -148,23 +148,32 @@
           costcoEgift: {
             selectors: {
               clickables: 'button, a, [role="button"], input[type="button"], input[type="submit"]',
-              emailInput: 'input[type="email"], input[name*="email" i], input[id*="email" i]',
-              alert: '[role="alert"]',
-              submitButton: 'button[type="submit"], input[type="submit"]',
-              buttons: "button"
+              emailInput: '#p2, input[type="email"], input[placeholder*="mail" i], input[name*="email" i], input[id*="email" i]',
+              alert: 'div.ui-message[role="alert"], [role="alert"]',
+              submitButton: '#submitBtn, button[type="submit"], input[type="submit"]',
+              buttons: "button",
+              nextButton: 'input[id$="wdt-nav-next"], button[id$="wdt-nav-next"]',
+              counter: "#wdt-page-counter",
+              labelCells: "td, th, div, p, li, span, label",
+              botCheck: 'iframe[src*="_Incapsula_Resource"], iframe[src*="captcha" i], iframe[title*="challenge" i]'
             },
             labels: {
               openLabel: "Access eGift",
-              nextLabel: "next"
+              nextLabel: "next",
+              codeLabel: "Code:",
+              pinLabel: "PIN:"
             },
             patterns: {
               nextButton: "^next\\b",
               alertText: "\\b(invalid|not match|incorrect|error)\\b",
               submitText: "submit|continue|next|view|access",
               code: "\\bCode:\\s*([A-Za-z0-9-]{4,64})",
+              codeValue: "^[A-Za-z0-9][A-Za-z0-9 -]{2,62}[A-Za-z0-9]$",
               pin: "\\bPIN:\\s*([A-Za-z0-9]{2,32})",
+              pinValue: "^[A-Za-z0-9]{2,32}$",
               sequence: "\\b(\\d{1,3})\\s+of\\s+(\\d{1,3})\\b",
-              amount: "\\$\\s?(\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})?|\\d+(?:\\.\\d{2})?)"
+              amount: "\\$\\s?(\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})?|\\d+(?:\\.\\d{2})?)",
+              botCheckText: "incapsula|incident id|additional security check|verify (?:that )?you are (?:a )?human|are you a robot|press (?:&|and) hold"
             },
             urls: {
               host: "www.memberedelivery.com"
@@ -172,7 +181,8 @@
             timeoutsMs: {
               pollMs: 1500,
               waitMs: 4e4,
-              stepDelayMs: 3e3
+              stepDelayMs: 3e3,
+              newTabWaitMs: 1e4
             }
           },
           bestbuyEgift: {

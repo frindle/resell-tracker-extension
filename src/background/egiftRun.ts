@@ -1,86 +1,76 @@
 // SCRAPE_EGIFT: opens an order's Costco eGift delivery link in a background tab, enters the delivery
-// email, reads each card and posts it to the tracker. The tab is always closed. Ported from the
-// sidecar's egiftFlow.js (same steps and stop reasons). Card numbers, PINs, the email and the link are
-// never logged or reported: the result is counts only.
+// email, reads each card and posts it to the tracker. Every tab it opened is closed. Card numbers,
+// PINs, the email and the link are never logged or reported: the result is counts only.
+//
+// The portal (mapped 2026-10-05): find-order form (email #p2, "View Digital Code" #submitBtn) ->
+// redemption page (one section per card, "Access eGift") -> print page, usually in a NEW tab, with a
+// pager ("N of M" #wdt-page-counter, Next input[id$=wdt-nav-next]) and the code in a cell labelled
+// "Code:". Selectors, labels, regexes and timeouts come from the tracker's scrape config
+// (site "costcoEgift"), so a page change ships as a tracker deploy, not an extension release.
 
 import {
-  MAX_CARDS, egiftErrorCode, egiftPostBody, egiftReport, isAllowedEgiftLink, parseCardText, parseEgiftInfo,
-  type EgiftCard, type EgiftFailure, type EgiftReport, type EgiftStep,
+  EGIFT_HOSTS, MAX_CARDS, egiftErrorCode, egiftPostBody, egiftReport, isAllowedEgiftLink, parseEgiftInfo, readCard,
+  type EgiftCard, type EgiftFailure, type EgiftOpened, type EgiftReport, type EgiftStep,
 } from '../lib/egiftCommand';
+import { clickNext, clickOpen, enterEmail, keepInTab, pageText, settings, type PageCfg, type Settings } from '../lib/egiftPage';
 
-const POLL_MS = 1500;
-const WAIT_MS = 40_000;
-const STEP_DELAY_MS = 3000; // the sidecar's pause between opening / advancing cards
 const KEEPALIVE_MS = 20_000;
-
-// The sidecar's Costco site config (egiftSites.js).
-const OPEN_LABEL = 'Access eGift';
 
 let running = false;
 export function egiftRunActive(): boolean { return running; }
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
-// ---- run inside the delivery page (self-contained: serialised by executeScript) ----
-
-function pageText(): { text: string; hasEmail: boolean; hasOpen: boolean; hasNext: boolean; alert: boolean } {
-  const text = document.body?.innerText ?? '';
-  const clickables = Array.from(document.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]'));
-  const label = (e: Element) => ((e as HTMLInputElement).value || e.textContent || '').trim();
-  return {
-    text: text.slice(0, 100_000),
-    hasEmail: !!document.querySelector('input[type="email"], input[name*="email" i], input[id*="email" i]'),
-    hasOpen: clickables.some(e => label(e).toLowerCase().includes('access egift')),
-    hasNext: clickables.some(e => /^next\b/i.test(label(e))),
-    alert: !!document.querySelector('[role="alert"]') && /\b(invalid|not match|incorrect|error)\b/i.test(document.querySelector('[role="alert"]')?.textContent ?? ''),
-  };
-}
-
-function enterEmail(email: string): boolean {
-  const input = document.querySelector('input[type="email"], input[name*="email" i], input[id*="email" i]') as HTMLInputElement | null;
-  if (!input) return false;
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-  input.focus();
-  setter?.call(input, email);
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  input.dispatchEvent(new Event('change', { bubbles: true }));
-  const form = input.closest('form');
-  const btn = (form?.querySelector('button[type="submit"], input[type="submit"]')
-    ?? Array.from((form ?? document).querySelectorAll('button')).find(b => /submit|continue|next|view|access/i.test(b.textContent ?? ''))) as HTMLElement | undefined;
-  if (btn) btn.click(); else form?.requestSubmit();
-  return true;
-}
-
-function clickLabel(startsWith: string, contains: boolean): boolean {
-  const want = startsWith.toLowerCase();
-  const els = Array.from(document.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]'));
-  const el = els.find(e => {
-    const t = (((e as HTMLInputElement).value || e.textContent) ?? '').trim().toLowerCase();
-    return contains ? t.includes(want) : t.startsWith(want);
-  }) as HTMLElement | undefined;
-  if (!el) return false;
-  el.click();
-  return true;
-}
-
 // ---- background side ----
 
-type PageState = Awaited<ReturnType<typeof read>>;
-async function read(tabId: number) {
-  const res = await chrome.scripting.executeScript({ target: { tabId }, func: pageText });
+type PageState = NonNullable<Awaited<ReturnType<typeof read>>>;
+async function read(tabId: number, c: PageCfg) {
+  const res = await chrome.scripting.executeScript({ target: { tabId }, func: pageText, args: [c] });
   return res[0]?.result ?? null;
 }
 
-async function waitFor(tabId: number, ok: (s: NonNullable<PageState>) => boolean): Promise<NonNullable<PageState> | null> {
-  const deadline = Date.now() + WAIT_MS;
+/** Polls until `ok`; on a timeout `hit` is null and `last` is the last state read (for the failure reason). */
+async function waitFor(tabId: number, cfg: Settings, ok: (s: PageState) => boolean, waitMs = cfg.waitMs): Promise<{ hit: PageState | null; last: PageState | null }> {
+  const deadline = Date.now() + waitMs;
+  let last: PageState | null = null;
   while (Date.now() < deadline) {
-    await sleep(POLL_MS);
+    await sleep(cfg.pollMs);
     try {
-      const s = await read(tabId);
-      if (s && ok(s)) return s;
+      const s = await read(tabId, cfg.page);
+      if (s) { last = s; if (ok(s)) return { hit: s, last }; }
     } catch { /* still loading or navigating */ }
   }
-  return null;
+  return { hit: null, last };
+}
+
+const timedOut = (last: PageState | null, otherwise: EgiftFailure): EgiftFailure => (last?.botCheck ? 'bot-check' : otherwise);
+
+function hostOf(url: string | undefined): string {
+  try { return url ? new URL(url).hostname.toLowerCase() : ''; } catch { return ''; }
+}
+
+/**
+ * Records tabs created after Access eGift is clicked. `portal` lists the ones the portal opened (the
+ * run's tab is their opener, or they are on the portal host), the only ones the run reads or closes:
+ * a tab the user opened meanwhile is never touched.
+ */
+function watchNewTabs(openerId: number) {
+  const seen = new Set<number>();
+  const onCreated = (t: chrome.tabs.Tab) => { if (t.id != null && t.id !== openerId) seen.add(t.id); };
+  chrome.tabs.onCreated.addListener(onCreated);
+  return {
+    stop: () => chrome.tabs.onCreated.removeListener(onCreated),
+    async portal(): Promise<number[]> {
+      const out: number[] = [];
+      for (const id of [...seen]) {
+        try {
+          const t = await chrome.tabs.get(id);
+          if (t.openerTabId === openerId || EGIFT_HOSTS.includes(hostOf(t.pendingUrl || t.url))) out.push(id);
+        } catch { seen.delete(id); }
+      }
+      return out;
+    },
+  };
 }
 
 type Fetcher = typeof fetch;
@@ -93,11 +83,15 @@ export async function runEgiftOrder(base: string, headers: Record<string, string
   if (running) return egiftReport(0, 0, 'run-busy');
   running = true;
   const keep = setInterval(() => { chrome.runtime.getPlatformInfo().catch(() => {}); }, KEEPALIVE_MS);
+  const cfg = settings();
   let tabId: number | undefined;
+  let tabs: ReturnType<typeof watchNewTabs> | null = null;
   let cards = 0;
   let saved = 0;
   let failure: EgiftFailure | null = null;
+  let opened: EgiftOpened | undefined;
   let step: EgiftStep = 'info';
+  const card = (s: PageState): EgiftCard | null => readCard(s, cfg.pats);
   try {
     const res = await doFetch(`${base}/api/extension/egift?orderId=${orderId}`, { headers, cache: 'no-store' });
     if (!res.ok) return egiftReport(0, 0, `info-http-${res.status}`);
@@ -110,24 +104,49 @@ export async function runEgiftOrder(base: string, headers: Record<string, string
     tabId = tab.id;
     if (tabId == null) return egiftReport(0, 0, 'error-tab');
 
-    // The site asks for the address before it shows the order.
+    // The portal asks for the address used at Costco before it shows the order.
     step = 'page';
-    const first = await waitFor(tabId, s => s.hasEmail || s.hasOpen || s.alert);
-    if (!first) return egiftReport(0, 0, 'page-timeout');
-    if (first.hasEmail && !first.hasOpen) {
+    const first = await waitFor(tabId, cfg, s => s.hasEmail || s.hasOpen || s.alert || !!card(s));
+    if (!first.hit) return egiftReport(0, 0, timedOut(first.last, 'page-timeout'));
+    if (first.hit.hasEmail && !first.hit.hasOpen && !card(first.hit)) {
       step = 'email';
-      await chrome.scripting.executeScript({ target: { tabId }, func: enterEmail, args: [info.email] });
+      await chrome.scripting.executeScript({ target: { tabId }, func: enterEmail, args: [info.email, cfg.submit] });
+      await sleep(cfg.stepDelayMs);
     }
     step = 'page';
-    const list = await waitFor(tabId, s => s.hasOpen || (s.alert && !s.hasEmail) || !!parseCardText(s.text));
-    if (!list) return egiftReport(0, 0, 'page-timeout');
-    if (list.alert && !list.hasOpen) return egiftReport(0, 0, 'email-rejected');
-    if (!list.hasOpen && !parseCardText(list.text)) return egiftReport(0, 0, 'no-open-button');
+    const list = await waitFor(tabId, cfg, s => s.hasOpen || s.alert || !!card(s));
+    if (!list.hit) return egiftReport(0, 0, timedOut(list.last, list.last?.hasEmail ? 'email-no-response' : 'page-timeout'));
+    if (list.hit.alert && !list.hit.hasOpen && !card(list.hit)) return egiftReport(0, 0, 'email-rejected');
 
-    if (list.hasOpen) {
+    // Access eGift opens the cards in a new tab; a script's click may have that tab blocked, so a
+    // second click keeps it in this tab.
+    let cardTab = tabId;
+    if (!card(list.hit)) {
       step = 'open';
-      await sleep(STEP_DELAY_MS);
-      await chrome.scripting.executeScript({ target: { tabId }, func: clickLabel, args: [OPEN_LABEL, true] });
+      tabs = watchNewTabs(tabId);
+      for (const attempt of ['new-tab', 'kept-in-tab'] as const) {
+        await sleep(cfg.stepDelayMs);
+        if (attempt === 'kept-in-tab') await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: keepInTab });
+        const clicked = await chrome.scripting.executeScript({ target: { tabId }, func: clickOpen, args: [cfg.page] });
+        if (!clicked[0]?.result) return egiftReport(0, 0, 'no-open-button');
+        step = 'card-tab';
+        const deadline = Date.now() + cfg.newTabWaitMs;
+        while (Date.now() < deadline) {
+          await sleep(cfg.pollMs);
+          const child = (await tabs.portal())[0];
+          if (child != null) { cardTab = child; opened = 'new-tab'; break; }
+          try {
+            const s = await read(tabId, cfg.page);
+            if (s && card(s)) { opened = attempt === 'new-tab' ? 'same-tab' : 'kept-in-tab'; break; }
+          } catch { /* navigating */ }
+        }
+        if (opened) break;
+        step = 'open';
+      }
+      // A slow new tab: still read it; otherwise the card loop below waits on this tab.
+      if (!opened) { const late = (await tabs.portal())[0]; if (late != null) { cardTab = late; opened = 'new-tab'; } }
+    } else {
+      opened = 'same-tab';
     }
 
     let expected = 1;
@@ -135,36 +154,40 @@ export async function runEgiftOrder(base: string, headers: Record<string, string
     let lastCode = '';
     while (cards < MAX_CARDS) {
       step = 'page';
-      const s = await waitFor(tabId, st => { const c = parseCardText(st.text); return !!c && c.code !== lastCode; });
-      if (!s) { failure = cards ? 'ended-early' : 'page-timeout'; break; }
-      const card = parseCardText(s.text) as EgiftCard;
-      if (cards === 0) total = card.total;
-      if (card.index !== expected) { failure = 'out-of-sequence'; break; }
-      if (card.total !== total) { failure = 'total-mismatch'; break; }
+      const got = await waitFor(cardTab, cfg, st => { const c = card(st); return !!c && c.code !== lastCode; });
+      if (!got.hit) { failure = cards ? 'ended-early' : timedOut(got.last, 'page-timeout'); break; }
+      const c = card(got.hit) as EgiftCard;
+      if (cards === 0) total = c.total;
+      if (c.index !== expected) { failure = 'out-of-sequence'; break; }
+      if (c.total !== total) { failure = 'total-mismatch'; break; }
       cards++;
-      lastCode = card.code;
+      lastCode = c.code;
       let ok = false;
       try {
         const r = await doFetch(`${base}/api/extension/egift`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(egiftPostBody(orderId, card)),
+          method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(egiftPostBody(orderId, c)),
         });
         ok = r.ok;
       } catch { ok = false; }
       if (!ok) { failure = 'save-failed'; break; }
       saved++;
-      if (card.index >= total) { if (card.index !== total) failure = 'ended-early'; break; }
+      if (c.index >= total) { if (c.index !== total) failure = 'ended-early'; break; }
       step = 'next';
-      await sleep(STEP_DELAY_MS);
-      const next = await chrome.scripting.executeScript({ target: { tabId }, func: clickLabel, args: ['next', false] });
+      await sleep(cfg.stepDelayMs);
+      const next = await chrome.scripting.executeScript({ target: { tabId: cardTab }, func: clickNext, args: [cfg.page] });
       if (!next[0]?.result) { failure = 'ended-early'; break; }
       expected++;
     }
     if (!failure && cards >= MAX_CARDS && saved < total) failure = 'ended-early';
-    return egiftReport(cards, saved, failure);
+    return egiftReport(cards, saved, failure, opened);
   } catch (e) {
-    return egiftReport(cards, saved, egiftErrorCode(step, e));
+    return egiftReport(cards, saved, egiftErrorCode(step, e), opened);
   } finally {
     clearInterval(keep);
+    if (tabs) {
+      tabs.stop();
+      for (const id of await tabs.portal().catch(() => [])) await chrome.tabs.remove(id).catch(() => {});
+    }
     if (tabId != null) await chrome.tabs.remove(tabId).catch(() => {});
     running = false;
   }
