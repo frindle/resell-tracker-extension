@@ -11,6 +11,7 @@ import { visitCommandPlan } from '../lib/visitCommand';
 import { extensionBrowser } from '../lib/browserTarget';
 import { orderCommandPlan, costcoReport, type CommandReport } from '../lib/costcoCommand';
 import { runCostcoSync, readCostcoOrders, noteCostcoMessage, claimCostcoRun, releaseCostcoRun, closeOrphanCostcoTab } from './costcoRun';
+import { loadRemotePlans } from '../lib/planRemote';
 import { initScrapeConfig, loadScrapeConfig, scrapeConfigIsStale } from '../lib/scrapeConfig';
 import { localPairingStore, stepPairing } from '../lib/pairing';
 import { savePaired } from '../lib/storage';
@@ -53,13 +54,14 @@ async function refreshScrapeConfig(): Promise<void> {
   await initScrapeConfig();
   try {
     const { trackerUrl, apiKey, extensionSecret, userId } = await import('../lib/storage').then(m => m.getSettings());
-    if (!trackerUrl) { await loadScrapeConfig(null); return; }
+    if (!trackerUrl) { await loadScrapeConfig(null); await loadRemotePlans(null); return; }
     const headers: Record<string, string> = {};
     if (apiKey) headers['X-API-Key'] = apiKey;
     if (extensionSecret) headers['X-Extension-Secret'] = extensionSecret;
     if (userId) headers['X-Extension-User-Id'] = userId;
     headers['X-Extension-Browser'] = isFirefox ? 'firefox' : 'chrome';
     await loadScrapeConfig({ base: upgradeUrl(trackerUrl), headers });
+    await loadRemotePlans({ base: upgradeUrl(trackerUrl), headers });
   } catch { /* keep whatever is in effect */ }
 }
 initScrapeConfig().then(() => refreshScrapeConfig()).catch(() => {});

@@ -106,10 +106,19 @@ with plain-HTTP traffic to the tracker, could click Cancel on an Amazon order. T
 - **Action denylist (v1, cheap).** `click` refuses elements whose text matches a bundled pattern
   (cancel, delete, remove, place order, buy, pay, return, sign out). It is coarse but stops the
   costly mistakes.
-- **Signed plans (recommended v2).** Plans are signed with Ed25519 (WebCrypto), and the extension
-  bundles the public key. Someone tampering with LAN traffic cannot forge a signature. **Decision for
-  Penn:** where the signing key lives. Recommended: a GitHub Actions secret, so CI signs
-  `config/plans.json` when it builds the tracker image. A plan change is still only a tracker deploy.
+- **Signed plans (built).** Plans are signed with Ed25519 (WebCrypto), and the extension bundles the
+  public key (`src/lib/planKey.ts`; empty means remote plans are never accepted). Someone tampering
+  with LAN traffic cannot forge a signature. The signing key is a GitHub Actions secret in the tracker
+  repo. A workflow signs `config/plans.json` on the PR and commits `config/plans.json.sig`, because the
+  tracker image is built on the server, not in CI. The tracker serves
+  `GET /api/extension/plans` as `{ plans: "<exact text>", sig: "<base64>" | null }` (ETag, 304).
+  The extension (`src/lib/planRemote.ts`) fetches it with the scrape-config refresh and stores
+  `{plans, sig}` only when the signature verifies, the plan file validates, and its version is not
+  older than the stored or bundled one. Any failure keeps the previous plans and records a status
+  (no-key, no-sig, bad-sig, invalid, older, fetch-error, no-webcrypto, http-N), shown next to the
+  scrape-config status. The stored copy is re-verified before each run; if it fails, or is older than
+  the bundled plan, the bundled plan runs. Ed25519 needs a browser with WebCrypto Ed25519; without
+  it the status is no-webcrypto and bundled plans are used.
 
 ## Diagnosis without a release
 
@@ -137,7 +146,7 @@ with plain-HTTP traffic to the tracker, could click Cancel on an Amazon order. T
    two releases.
 4. Move `TRACK_CARRIER` and `VISIT_AMAZON`. Costco sync (GraphQL) needs a `fetchJson` step on an
    allowed host and is out of scope for v1.
-5. v2: signed plans.
+5. v2: signed plans (extension side built; needs the public key filled in `planKey.ts`).
 
 ## Still a release
 
