@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
 import { BUNDLED_PLANS } from '../src/lib/stepPlan.ts';
+import { PLAN_PUBLIC_KEY_B64 } from '../src/lib/planKey.ts';
 import { loadRemotePlans, selectPlans, verifyPlans, type PlanStore, type StoredPlans, type PlanStatus } from '../src/lib/planRemote.ts';
 
 const subtle = webcrypto.subtle as unknown as SubtleCrypto;
@@ -155,4 +156,11 @@ test('fetch errors and missing Ed25519 are reported, nothing changes', async () 
   const r2 = await loadRemotePlans(tracker, { store: a.store, subtle: broken, publicKeyB64: k.pub, fetch: respond({ plans: text, sig: 'AAAA' }) });
   assert.equal(r2.code, 'no-webcrypto');
   assert.equal(a.s.puts, 0);
+});
+
+test('the bundled public key is 32 bytes and imports as Ed25519', async () => {
+  const raw = Buffer.from(PLAN_PUBLIC_KEY_B64, 'base64');
+  assert.equal(raw.length, 32);
+  const key = await subtle.importKey('raw', raw, { name: 'Ed25519' }, false, ['verify']);
+  assert.equal(key.type, 'public');
 });

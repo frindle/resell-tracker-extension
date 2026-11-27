@@ -107,7 +107,7 @@ with plain-HTTP traffic to the tracker, could click Cancel on an Amazon order. T
   (cancel, delete, remove, place order, buy, pay, return, sign out). It is coarse but stops the
   costly mistakes.
 - **Signed plans (built).** Plans are signed with Ed25519 (WebCrypto), and the extension bundles the
-  public key (`src/lib/planKey.ts`; empty means remote plans are never accepted). Someone tampering
+  public key (`src/lib/planKey.ts`; an empty key means remote plans are never accepted). Someone tampering
   with LAN traffic cannot forge a signature. The signing key is a GitHub Actions secret in the tracker
   repo. A workflow signs `config/plans.json` on the PR and commits `config/plans.json.sig`, because the
   tracker image is built on the server, not in CI. The tracker serves
@@ -146,7 +146,7 @@ with plain-HTTP traffic to the tracker, could click Cancel on an Amazon order. T
    two releases.
 4. Move `TRACK_CARRIER` and `VISIT_AMAZON`. Costco sync (GraphQL) needs a `fetchJson` step on an
    allowed host and is out of scope for v1.
-5. v2: signed plans (extension side built; needs the public key filled in `planKey.ts`).
+5. v2: signed plans (extension side built; public key in `planKey.ts`).
 
 ## Still a release
 
