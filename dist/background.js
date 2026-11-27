@@ -61,6 +61,7 @@
   var storage_exports = {};
   __export(storage_exports, {
     getSettings: () => getSettings,
+    savePaired: () => savePaired,
     saveSettings: () => saveSettings,
     setLastSync: () => setLastSync
   });
@@ -70,6 +71,9 @@
   }
   async function saveSettings(settings2) {
     await chrome.storage.sync.set(settings2);
+  }
+  async function savePaired(p) {
+    await saveSettings({ extensionSecret: p.secret, userId: p.userId, userName: p.userName });
   }
   async function setLastSync(platform, date) {
     const key = platform === "amazon" ? "amazonLastSync" : platform === "walmart" ? "walmartLastSync" : platform === "costco" ? "costcoLastSync" : "bigskyLastSync";
@@ -2332,6 +2336,64 @@
     }
   });
 
+  // src/lib/pairing.ts
+  async function stepPairing(store3, save, fetchImpl, now) {
+    const p = await store3.get();
+    if (!p) return { state: "none" };
+    if (now >= p.expiresAt) {
+      await store3.clear(p.code);
+      return { state: "expired" };
+    }
+    let res;
+    try {
+      res = await fetchImpl(`${p.trackerUrl}/api/extension/pair/claim`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: p.code, claim: p.claim })
+      });
+    } catch {
+      return { state: "error", message: "Could not reach the tracker." };
+    }
+    if (res.status === 404) {
+      await store3.clear(p.code);
+      return { state: "unknown" };
+    }
+    if (!res.ok) return { state: "error", message: `Pairing check failed (HTTP ${res.status}).` };
+    const body = await res.json().catch(() => null);
+    if (body?.status === "pending") return { state: "pending", expiresAt: p.expiresAt };
+    if (body?.status !== "approved" || typeof body.secret !== "string" || body.userId == null) {
+      return { state: "error", message: "The tracker sent an unexpected pairing reply." };
+    }
+    const userName = typeof body.userName === "string" ? body.userName : "";
+    await save({ secret: body.secret, userId: String(body.userId), userName });
+    await store3.clear(p.code);
+    return { state: "paired", userName };
+  }
+  function localPairingStore() {
+    return {
+      async get() {
+        const got = await chrome.storage.local.get(PAIRING_KEY).catch(() => ({}));
+        const p = got[PAIRING_KEY];
+        return p && typeof p.code === "string" && typeof p.claim === "string" ? p : null;
+      },
+      async set(p) {
+        await chrome.storage.local.set({ [PAIRING_KEY]: p });
+      },
+      async clear(code) {
+        const got = await chrome.storage.local.get(PAIRING_KEY).catch(() => ({}));
+        if (got[PAIRING_KEY]?.code === code) await chrome.storage.local.remove(PAIRING_KEY);
+      }
+    };
+  }
+  var PAIRING_KEY, PAIRING_TTL_MS;
+  var init_pairing = __esm({
+    "src/lib/pairing.ts"() {
+      "use strict";
+      PAIRING_KEY = "pendingPairing";
+      PAIRING_TTL_MS = 9.5 * 6e4;
+    }
+  });
+
   // src/background/index.ts
   var require_background = __commonJS({
     "src/background/index.ts"() {
@@ -2347,6 +2409,8 @@
       init_costcoCommand();
       init_costcoRun();
       init_scrapeConfig();
+      init_pairing();
+      init_storage();
       var ICON_PATHS_CHROME = { 16: "icons/icon16.png", 32: "icons/icon32.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
       var ICON_PATH_FIREFOX = "icons/icon.svg";
       var _browser = globalThis.browser;
@@ -2411,6 +2475,8 @@
         if (alarm.name === "scrapeConfig") refreshScrapeConfig().catch(() => {
         });
         if (alarm.name === "pollCommands") {
+          stepPairing(localPairingStore(), savePaired, (url, init) => fetch(url, init), Date.now()).catch(() => {
+          });
           pollAndExecuteCommands().catch(console.error);
           flushQueue().catch(console.error);
         }

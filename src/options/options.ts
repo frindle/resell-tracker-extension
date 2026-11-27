@@ -1,8 +1,10 @@
-import { getSettings, saveSettings } from '../lib/storage';
+import { getSettings, saveSettings, savePaired } from '../lib/storage';
 import { fetchUsers } from '../lib/api';
 import { grantTrackerAccess, ensureTrackerScriptRegistered } from '../lib/tracker-script';
 import type { TrackerUser } from '../lib/types';
 import { describeScrapeStatus, SCRAPE_STATUS_KEY } from '../lib/scrapeConfig';
+import { approvalUrl, beginPairing, checkSecret, localPairingStore, PAIRING_POLL_MS, stepPairing, trackerBase } from '../lib/pairing';
+import { extensionBrowser } from '../lib/browserTarget';
 
 async function showScrapeConfig() {
   const el = document.getElementById('scrapeConfigLabel');
@@ -13,6 +15,74 @@ async function showScrapeConfig() {
 showScrapeConfig();
 
 let users: TrackerUser[] = [];
+const http = (url: string, init?: RequestInit) => fetch(url, init);
+
+function setPairStatus(text: string, kind: '' | 'ok' | 'fail' = '') {
+  const el = document.getElementById('pairStatus')!;
+  el.textContent = text;
+  el.className = `status${kind ? ' ' + kind : ''}`;
+}
+
+async function showUsers(trackerUrl: string) {
+  await loadUsers(trackerUrl);
+  const { userId } = await getSettings();
+  if (userId) (document.getElementById('userSelect') as HTMLSelectElement).value = userId;
+}
+
+// Polls the claim while this page is open; the background poll alarm does the same when it is not.
+let pairTimer: ReturnType<typeof setInterval> | undefined;
+function watchPairing(trackerUrl: string) {
+  clearInterval(pairTimer);
+  let busy = false;
+  const stop = () => { clearInterval(pairTimer); pairTimer = undefined; };
+  pairTimer = setInterval(async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const r = await stepPairing(localPairingStore(), savePaired, http, Date.now());
+      if (r.state === 'pending') return;
+      if (r.state === 'error') { setPairStatus(`${r.message} Still trying…`, 'fail'); return; }
+      stop();
+      if (r.state === 'paired') {
+        setPairStatus(`Paired as ${r.userName || 'your tracker user'}.`, 'ok');
+        await showUsers(trackerUrl);
+      } else if (r.state === 'expired') {
+        setPairStatus('Pairing timed out. Click Connect to try again.', 'fail');
+      } else {
+        // 'none' or 'unknown': the background may have finished it first.
+        await showPairState(trackerUrl, 'Pairing ended without approval. Click Connect to try again.');
+      }
+    } finally {
+      busy = false;
+    }
+  }, PAIRING_POLL_MS);
+}
+
+/** Shows whether the tracker accepts the saved secret, and returns the check. */
+async function showPairState(trackerUrl: string, notPaired = 'Not paired. Click Connect to pair this browser.'): Promise<'ok' | 'rejected' | 'unreachable'> {
+  const s = await getSettings();
+  const check = await checkSecret(trackerUrl, s.userId, s.extensionSecret, http);
+  if (check === 'ok') {
+    setPairStatus(s.userName ? `Paired as ${s.userName}.` : 'Paired.', 'ok');
+    await showUsers(trackerUrl);
+    return check;
+  }
+  setPairStatus(check === 'rejected' ? notPaired : 'Could not reach the tracker.', 'fail');
+  return check;
+}
+
+async function startPairing(trackerUrl: string) {
+  setPairStatus('Starting pairing…');
+  try {
+    const p = await beginPairing(trackerUrl, extensionBrowser(chrome.runtime.getURL('')), http, Date.now());
+    await localPairingStore().set(p);
+    await chrome.tabs.create({ url: approvalUrl(p.trackerUrl, p.code) });
+    setPairStatus('Approve this browser in the tracker tab that just opened (sign in if asked). Waiting…');
+    watchPairing(p.trackerUrl);
+  } catch (err) {
+    setPairStatus(err instanceof Error ? err.message : String(err), 'fail');
+  }
+}
 
 async function loadUsers(trackerUrl: string) {
   const select = document.getElementById('userSelect') as HTMLSelectElement;
@@ -37,34 +107,28 @@ async function init() {
   const settings = await getSettings();
 
   (document.getElementById('trackerUrl') as HTMLInputElement).value = settings.trackerUrl;
-  // Auto-generate an extension secret on first load so the user never has
-  // to think about it. They still have to paste this value into
-  // EXTENSION_SHARED_SECRET on the tracker .env — that's the side we can't
-  // write to from here.
-  let secret = settings.extensionSecret;
-  if (!secret) {
-    const bytes = crypto.getRandomValues(new Uint8Array(32));
-    secret = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-    await saveSettings({ extensionSecret: secret });
-  }
-  (document.getElementById('extensionSecret') as HTMLInputElement).value = secret;
   (document.getElementById('amazonLastSync') as HTMLInputElement).value = settings.amazonLastSync;
   (document.getElementById('walmartLastSync') as HTMLInputElement).value = settings.walmartLastSync;
   (document.getElementById('costcoLastSync') as HTMLInputElement).value = settings.costcoLastSync;
 
-  const userSection = document.getElementById('userSection') as HTMLElement;
   const select = document.getElementById('userSelect') as HTMLSelectElement;
 
   if (settings.trackerUrl) {
-    await loadUsers(settings.trackerUrl);
-    if (settings.userId) select.value = settings.userId;
+    const waiting = await localPairingStore().get();
+    if (waiting && waiting.trackerUrl === trackerBase(settings.trackerUrl)) {
+      setPairStatus('Waiting for approval in the tracker tab…');
+      watchPairing(waiting.trackerUrl);
+      await showUsers(settings.trackerUrl);
+    } else {
+      await showPairState(settings.trackerUrl);
+    }
     // Re-register the status-banner content script if we already hold
     // permission for this origin (e.g. after a browser restart).
     await ensureTrackerScriptRegistered(settings.trackerUrl);
   }
 
   document.getElementById('connect')!.addEventListener('click', async () => {
-    const trackerUrl = (document.getElementById('trackerUrl') as HTMLInputElement).value.trim();
+    const trackerUrl = trackerBase((document.getElementById('trackerUrl') as HTMLInputElement).value);
     if (!trackerUrl) return;
     // Ask for access to just this origin so the sync-status banner can run
     // there, instead of the extension holding <all_urls> permanently.
@@ -73,7 +137,8 @@ async function init() {
     const granting = grantTrackerAccess(trackerUrl).catch(() => false);
     await saveSettings({ trackerUrl });
     await granting;
-    await loadUsers(trackerUrl);
+    // A secret the tracker already accepts is kept; otherwise pair to get one.
+    if (await showPairState(trackerUrl) === 'rejected') await startPairing(trackerUrl);
   });
 
   document.getElementById('saveUser')!.addEventListener('click', async () => {
