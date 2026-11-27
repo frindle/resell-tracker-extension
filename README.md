@@ -51,6 +51,12 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.4.2
+
+- **eGift reads follow the mapped Costco portal.** The email goes into the portal's own field (`#p2`, a text box, which 1.4.1 did not recognise, so every run timed out on the first page) and "View Digital Code" is clicked. The cards are read on the print page Access eGift opens in a new tab; when the browser blocks that tab (a script's click has no user gesture), the run clicks again and keeps the page in its own tab. The code comes from the "Code:" cell and the position from the pager counter; Next is the pager's button. Every tab the run opened is closed, and no other tab is touched.
+- **Selectors come from the tracker.** Every selector, label, regex and timeout the eGift run uses is now in the tracker's scrape config (site `costcoEgift`, config v2), so a page change ships as a tracker deploy.
+- **New failure codes:** `bot-check` (the portal's bot check was showing when the run timed out) and `email-no-response` (the address was entered but the page did not move on). The result also says how the card page opened (`opened`: new-tab, same-tab or kept-in-tab).
+
 ### 1.4.1
 
 - **A failed eGift read says where it failed.** A run that used to end with a bare `error` now reports `info-http-<status>` when the tracker refuses the order details, or `error-<step>` (tab, page, email, open, next), plus the kind of browser error when it is known (error-page, permission, tab-gone, navigated, network). These are fixed codes: the browser's error text, which can include the delivery link, is never sent.

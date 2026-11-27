@@ -68,8 +68,8 @@
     const result = await chrome.storage.sync.get(Object.keys(DEFAULTS));
     return { ...DEFAULTS, ...result };
   }
-  async function saveSettings(settings) {
-    await chrome.storage.sync.set(settings);
+  async function saveSettings(settings2) {
+    await chrome.storage.sync.set(settings2);
   }
   async function setLastSync(platform, date) {
     const key = platform === "amazon" ? "amazonLastSync" : platform === "walmart" ? "walmartLastSync" : platform === "costco" ? "costcoLastSync" : "bigskyLastSync";
@@ -98,7 +98,7 @@
   var init_scrapeConfig_default = __esm({
     "src/lib/scrapeConfig.default.json"() {
       scrapeConfig_default_default = {
-        version: 1,
+        version: 2,
         sites: {
           amazon: {
             selectors: {
@@ -233,23 +233,32 @@
           costcoEgift: {
             selectors: {
               clickables: 'button, a, [role="button"], input[type="button"], input[type="submit"]',
-              emailInput: 'input[type="email"], input[name*="email" i], input[id*="email" i]',
-              alert: '[role="alert"]',
-              submitButton: 'button[type="submit"], input[type="submit"]',
-              buttons: "button"
+              emailInput: '#p2, input[type="email"], input[placeholder*="mail" i], input[name*="email" i], input[id*="email" i]',
+              alert: 'div.ui-message[role="alert"], [role="alert"]',
+              submitButton: '#submitBtn, button[type="submit"], input[type="submit"]',
+              buttons: "button",
+              nextButton: 'input[id$="wdt-nav-next"], button[id$="wdt-nav-next"]',
+              counter: "#wdt-page-counter",
+              labelCells: "td, th, div, p, li, span, label",
+              botCheck: 'iframe[src*="_Incapsula_Resource"], iframe[src*="captcha" i], iframe[title*="challenge" i]'
             },
             labels: {
               openLabel: "Access eGift",
-              nextLabel: "next"
+              nextLabel: "next",
+              codeLabel: "Code:",
+              pinLabel: "PIN:"
             },
             patterns: {
               nextButton: "^next\\b",
               alertText: "\\b(invalid|not match|incorrect|error)\\b",
               submitText: "submit|continue|next|view|access",
               code: "\\bCode:\\s*([A-Za-z0-9-]{4,64})",
+              codeValue: "^[A-Za-z0-9][A-Za-z0-9 -]{2,62}[A-Za-z0-9]$",
               pin: "\\bPIN:\\s*([A-Za-z0-9]{2,32})",
+              pinValue: "^[A-Za-z0-9]{2,32}$",
               sequence: "\\b(\\d{1,3})\\s+of\\s+(\\d{1,3})\\b",
-              amount: "\\$\\s?(\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})?|\\d+(?:\\.\\d{2})?)"
+              amount: "\\$\\s?(\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})?|\\d+(?:\\.\\d{2})?)",
+              botCheckText: "incapsula|incident id|additional security check|verify (?:that )?you are (?:a )?human|are you a robot|press (?:&|and) hold"
             },
             urls: {
               host: "www.memberedelivery.com"
@@ -257,7 +266,8 @@
             timeoutsMs: {
               pollMs: 1500,
               waitMs: 4e4,
-              stepDelayMs: 3e3
+              stepDelayMs: 3e3,
+              newTabWaitMs: 1e4
             }
           },
           bestbuyEgift: {
@@ -1340,19 +1350,28 @@
     const email = b.email.trim();
     return b.link && email ? { link: b.link, email } : null;
   }
-  function parseCardText(text) {
-    const code = /\bCode:\s*([A-Za-z0-9-]{4,64})/.exec(text)?.[1];
-    if (!code) return null;
-    const pin = /\bPIN:\s*([A-Za-z0-9]{2,32})/i.exec(text)?.[1] ?? null;
-    const seq = /\b(\d{1,3})\s+of\s+(\d{1,3})\b/i.exec(text);
-    const amt = /\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+(?:\.\d{2})?)/.exec(text)?.[1];
+  function amountOf(text, re) {
+    const amt = re.exec(text)?.[1];
     const value = amt ? Number(amt.replace(/,/g, "")) : NaN;
+    return Number.isFinite(value) && value > 0 && value <= 1e4 ? value : null;
+  }
+  function readCard(page, pats = {}) {
+    const p = { ...DEFAULT_PATTERNS, ...pats };
+    const text = page.text ?? "";
+    const cell = (v, ok) => {
+      const t = (v ?? "").trim().replace(/\s+/g, " ");
+      return t && ok.test(t) ? t : null;
+    };
+    const code = cell(page.code, p.codeValue) ?? p.code.exec(text)?.[1] ?? null;
+    if (!code) return null;
+    const pin = cell(page.pin, p.pinValue) ?? p.pin.exec(text)?.[1] ?? null;
+    const seq = p.sequence.exec(page.counter ?? "") ?? p.sequence.exec(text);
     return {
       index: seq ? Number(seq[1]) : 1,
       total: seq ? Number(seq[2]) : 1,
       code,
       pin,
-      value: Number.isFinite(value) && value > 0 && value <= 1e4 ? value : null
+      value: amountOf(text, p.amount)
     };
   }
   function egiftPostBody(orderId, card) {
@@ -1361,16 +1380,227 @@
     if (card.value != null) body.value = card.value;
     return body;
   }
-  function egiftReport(cards, saved, failure) {
-    if (!failure && cards > 0 && saved === cards) return { status: "done", result: { cards, saved } };
-    return { status: "failed", result: { cards, saved, error: failure ?? "no-cards" } };
+  function egiftReport(cards, saved, failure, opened) {
+    const via = opened ? { opened } : {};
+    if (!failure && cards > 0 && saved === cards) return { status: "done", result: { cards, saved, ...via } };
+    return { status: "failed", result: { cards, saved, error: failure ?? "no-cards", ...via } };
   }
-  var EGIFT_HOSTS, MAX_CARDS;
+  var EGIFT_HOSTS, MAX_CARDS, DEFAULT_PATTERNS;
   var init_egiftCommand = __esm({
     "src/lib/egiftCommand.ts"() {
       "use strict";
       EGIFT_HOSTS = ["www.memberedelivery.com"];
       MAX_CARDS = 50;
+      DEFAULT_PATTERNS = {
+        code: /\bCode:\s*([A-Za-z0-9-]{4,64})/,
+        pin: /\bPIN:\s*([A-Za-z0-9]{2,32})/i,
+        sequence: /\b(\d{1,3})\s+of\s+(\d{1,3})\b/i,
+        amount: /\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+(?:\.\d{2})?)/,
+        codeValue: /^[A-Za-z0-9][A-Za-z0-9 -]{2,62}[A-Za-z0-9]$/,
+        pinValue: /^[A-Za-z0-9]{2,32}$/
+      };
+    }
+  });
+
+  // src/lib/egiftPage.ts
+  function settings() {
+    const s = getScrape("costcoEgift");
+    const ms = (k, d) => {
+      const v = s.timeoutsMs[k];
+      return typeof v === "number" && v > 0 ? v : d;
+    };
+    const clickables = s.selectors.clickables || 'button, a, [role="button"], input[type="button"], input[type="submit"]';
+    const emailInput = s.selectors.emailInput || '#p2, input[type="email"]';
+    return {
+      page: {
+        clickables,
+        emailInput,
+        alert: s.selectors.alert || '[role="alert"]',
+        alertText: s.patterns.alertText || "\\b(invalid|not match|incorrect|error)\\b",
+        openLabel: s.labels.openLabel || "Access eGift",
+        nextButton: s.selectors.nextButton || "",
+        nextText: s.patterns.nextButton || "^next\\b",
+        counter: s.selectors.counter || "",
+        labelCells: s.selectors.labelCells || "td, th, div, p, li, span, label",
+        codeLabel: s.labels.codeLabel || "Code:",
+        pinLabel: s.labels.pinLabel || "PIN:",
+        botCheck: s.selectors.botCheck || "",
+        botCheckText: s.patterns.botCheckText || ""
+      },
+      submit: {
+        emailInput,
+        submitButton: s.selectors.submitButton || 'button[type="submit"], input[type="submit"]',
+        buttons: s.selectors.buttons || "button",
+        submitText: s.patterns.submitText || "submit|continue|next|view|access"
+      },
+      pats: {
+        code: s.regex("code"),
+        pin: s.regex("pin", "i"),
+        sequence: s.regex("sequence", "i"),
+        amount: s.regex("amount"),
+        codeValue: s.regex("codeValue"),
+        pinValue: s.regex("pinValue")
+      },
+      pollMs: ms("pollMs", 1500),
+      waitMs: ms("waitMs", 4e4),
+      stepDelayMs: ms("stepDelayMs", 3e3),
+      newTabWaitMs: ms("newTabWaitMs", 1e4)
+    };
+  }
+  function pageText(c) {
+    const rx = (src, flags) => {
+      try {
+        return src ? new RegExp(src, flags) : null;
+      } catch {
+        return null;
+      }
+    };
+    const qa = (sel) => {
+      try {
+        return sel ? Array.from(document.querySelectorAll(sel)) : [];
+      } catch {
+        return [];
+      }
+    };
+    const q = (sel) => qa(sel)[0] ?? null;
+    const text = document.body?.innerText ?? "";
+    const label = (e) => (e.value || e.textContent || "").trim();
+    const clickables = qa(c.clickables);
+    const open = c.openLabel.toLowerCase();
+    const nextRe = rx(c.nextText, "i");
+    const alertRe = rx(c.alertText, "i");
+    const botRe = rx(c.botCheckText, "i");
+    const labelled = (want) => {
+      const w = want.trim().toLowerCase();
+      if (!w) return null;
+      let best = null;
+      for (const el of qa(c.labelCells)) {
+        const t = (el.textContent ?? "").trim();
+        if (t.length <= w.length || t.length > w.length + 100 || !t.toLowerCase().startsWith(w)) continue;
+        if (!best || best.contains(el)) best = el;
+      }
+      if (!best) return null;
+      const span = Array.from(best.querySelectorAll("span")).map((s) => (s.textContent ?? "").trim()).find((t) => t && !t.toLowerCase().startsWith(w));
+      if (span) return span;
+      const rest = (best.textContent ?? "").trim().slice(w.length).trim();
+      return rest || null;
+    };
+    const nextEl = q(c.nextButton);
+    return {
+      text: text.slice(0, 1e5),
+      hasEmail: !!q(c.emailInput),
+      hasOpen: clickables.some((e) => label(e).toLowerCase().includes(open)),
+      hasNext: !!nextEl && !nextEl.disabled || !!nextRe && clickables.some((e) => nextRe.test(label(e))),
+      alert: !!alertRe && qa(c.alert).some((el) => alertRe.test(el.textContent ?? "")),
+      botCheck: !!q(c.botCheck) || !!botRe && botRe.test(text.slice(0, 5e3)),
+      code: labelled(c.codeLabel),
+      pin: labelled(c.pinLabel),
+      counter: (q(c.counter)?.textContent ?? "").trim() || null
+    };
+  }
+  function enterEmail(email, c) {
+    const pick = (root, sel) => {
+      try {
+        return root.querySelector(sel);
+      } catch {
+        return null;
+      }
+    };
+    const input = pick(document, c.emailInput);
+    if (!input) return false;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    input.focus();
+    setter?.call(input, email);
+    for (const type of ["input", "keyup", "change"]) input.dispatchEvent(new Event(type, { bubbles: true }));
+    input.blur();
+    const form = input.closest("form");
+    let re = null;
+    try {
+      re = new RegExp(c.submitText, "i");
+    } catch {
+    }
+    const byText = (root) => {
+      try {
+        return Array.from(root.querySelectorAll(c.buttons)).find((b) => !!re && re.test(b.textContent ?? "")) ?? null;
+      } catch {
+        return null;
+      }
+    };
+    const btn = (form && pick(form, c.submitButton)) ?? pick(document, c.submitButton) ?? (form && byText(form)) ?? byText(document);
+    if (btn) btn.click();
+    else form?.requestSubmit();
+    return true;
+  }
+  function clickOpen(c) {
+    const want = c.openLabel.toLowerCase();
+    let els = [];
+    try {
+      els = Array.from(document.querySelectorAll(c.clickables));
+    } catch {
+      return false;
+    }
+    const el = els.find((e) => ((e.value || e.textContent) ?? "").trim().toLowerCase().includes(want));
+    if (!el) return false;
+    el.click();
+    return true;
+  }
+  function clickNext(c) {
+    let el = null;
+    try {
+      el = c.nextButton ? document.querySelector(c.nextButton) : null;
+    } catch {
+      el = null;
+    }
+    if (!el) {
+      let re = null;
+      try {
+        re = new RegExp(c.nextText, "i");
+      } catch {
+        return false;
+      }
+      let els = [];
+      try {
+        els = Array.from(document.querySelectorAll(c.clickables));
+      } catch {
+        return false;
+      }
+      el = els.find((e) => re.test(((e.value || e.textContent) ?? "").trim())) ?? null;
+    }
+    if (!el || el.disabled) return false;
+    el.click();
+    return true;
+  }
+  function keepInTab() {
+    const w = window;
+    if (w.__rtKeepInTab) return;
+    w.__rtKeepInTab = true;
+    window.open = function(url) {
+      if (url) location.assign(String(url));
+      return window;
+    };
+    const submit = HTMLFormElement.prototype.submit;
+    HTMLFormElement.prototype.submit = function() {
+      this.target = "_self";
+      return submit.call(this);
+    };
+    document.addEventListener("submit", (e) => {
+      const f = e.target;
+      if (f) f.target = "_self";
+    }, true);
+    document.addEventListener("click", (e) => {
+      const el = e.target?.closest?.("a[target], button[formtarget], input[formtarget]");
+      if (el) {
+        el.removeAttribute("target");
+        el.removeAttribute("formtarget");
+      }
+      const f = e.target?.closest?.("form");
+      if (f) f.target = "_self";
+    }, true);
+  }
+  var init_egiftPage = __esm({
+    "src/lib/egiftPage.ts"() {
+      "use strict";
+      init_scrapeConfig();
     }
   });
 
@@ -1378,58 +1608,54 @@
   function egiftRunActive() {
     return running2;
   }
-  function pageText() {
-    const text = document.body?.innerText ?? "";
-    const clickables = Array.from(document.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]'));
-    const label = (e) => (e.value || e.textContent || "").trim();
-    return {
-      text: text.slice(0, 1e5),
-      hasEmail: !!document.querySelector('input[type="email"], input[name*="email" i], input[id*="email" i]'),
-      hasOpen: clickables.some((e) => label(e).toLowerCase().includes("access egift")),
-      hasNext: clickables.some((e) => /^next\b/i.test(label(e))),
-      alert: !!document.querySelector('[role="alert"]') && /\b(invalid|not match|incorrect|error)\b/i.test(document.querySelector('[role="alert"]')?.textContent ?? "")
-    };
-  }
-  function enterEmail(email) {
-    const input = document.querySelector('input[type="email"], input[name*="email" i], input[id*="email" i]');
-    if (!input) return false;
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-    input.focus();
-    setter?.call(input, email);
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-    const form = input.closest("form");
-    const btn = form?.querySelector('button[type="submit"], input[type="submit"]') ?? Array.from((form ?? document).querySelectorAll("button")).find((b) => /submit|continue|next|view|access/i.test(b.textContent ?? ""));
-    if (btn) btn.click();
-    else form?.requestSubmit();
-    return true;
-  }
-  function clickLabel(startsWith, contains) {
-    const want = startsWith.toLowerCase();
-    const els = Array.from(document.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]'));
-    const el = els.find((e) => {
-      const t = ((e.value || e.textContent) ?? "").trim().toLowerCase();
-      return contains ? t.includes(want) : t.startsWith(want);
-    });
-    if (!el) return false;
-    el.click();
-    return true;
-  }
-  async function read(tabId) {
-    const res = await chrome.scripting.executeScript({ target: { tabId }, func: pageText });
+  async function read(tabId, c) {
+    const res = await chrome.scripting.executeScript({ target: { tabId }, func: pageText, args: [c] });
     return res[0]?.result ?? null;
   }
-  async function waitFor(tabId, ok) {
-    const deadline = Date.now() + WAIT_MS2;
+  async function waitFor(tabId, cfg, ok, waitMs2 = cfg.waitMs) {
+    const deadline = Date.now() + waitMs2;
+    let last = null;
     while (Date.now() < deadline) {
-      await sleep2(POLL_MS2);
+      await sleep2(cfg.pollMs);
       try {
-        const s = await read(tabId);
-        if (s && ok(s)) return s;
+        const s = await read(tabId, cfg.page);
+        if (s) {
+          last = s;
+          if (ok(s)) return { hit: s, last };
+        }
       } catch {
       }
     }
-    return null;
+    return { hit: null, last };
+  }
+  function hostOf(url) {
+    try {
+      return url ? new URL(url).hostname.toLowerCase() : "";
+    } catch {
+      return "";
+    }
+  }
+  function watchNewTabs(openerId) {
+    const seen = /* @__PURE__ */ new Set();
+    const onCreated = (t) => {
+      if (t.id != null && t.id !== openerId) seen.add(t.id);
+    };
+    chrome.tabs.onCreated.addListener(onCreated);
+    return {
+      stop: () => chrome.tabs.onCreated.removeListener(onCreated),
+      async portal() {
+        const out = [];
+        for (const id of [...seen]) {
+          try {
+            const t = await chrome.tabs.get(id);
+            if (t.openerTabId === openerId || EGIFT_HOSTS.includes(hostOf(t.pendingUrl || t.url))) out.push(id);
+          } catch {
+            seen.delete(id);
+          }
+        }
+        return out;
+      }
+    };
   }
   async function runEgiftOrder(base, headers, orderId, doFetch = fetch) {
     if (running2) return egiftReport(0, 0, "run-busy");
@@ -1438,11 +1664,15 @@
       chrome.runtime.getPlatformInfo().catch(() => {
       });
     }, KEEPALIVE_MS3);
+    const cfg = settings();
     let tabId;
+    let tabs = null;
     let cards = 0;
     let saved = 0;
     let failure = null;
+    let opened;
     let step = "info";
+    const card = (s) => readCard(s, cfg.pats);
     try {
       const res = await doFetch(`${base}/api/extension/egift?orderId=${orderId}`, { headers, cache: "no-store" });
       if (!res.ok) return egiftReport(0, 0, `info-http-${res.status}`);
@@ -1454,53 +1684,89 @@
       tabId = tab.id;
       if (tabId == null) return egiftReport(0, 0, "error-tab");
       step = "page";
-      const first = await waitFor(tabId, (s) => s.hasEmail || s.hasOpen || s.alert);
-      if (!first) return egiftReport(0, 0, "page-timeout");
-      if (first.hasEmail && !first.hasOpen) {
+      const first = await waitFor(tabId, cfg, (s) => s.hasEmail || s.hasOpen || s.alert || !!card(s));
+      if (!first.hit) return egiftReport(0, 0, timedOut(first.last, "page-timeout"));
+      if (first.hit.hasEmail && !first.hit.hasOpen && !card(first.hit)) {
         step = "email";
-        await chrome.scripting.executeScript({ target: { tabId }, func: enterEmail, args: [info.email] });
+        await chrome.scripting.executeScript({ target: { tabId }, func: enterEmail, args: [info.email, cfg.submit] });
+        await sleep2(cfg.stepDelayMs);
       }
       step = "page";
-      const list = await waitFor(tabId, (s) => s.hasOpen || s.alert && !s.hasEmail || !!parseCardText(s.text));
-      if (!list) return egiftReport(0, 0, "page-timeout");
-      if (list.alert && !list.hasOpen) return egiftReport(0, 0, "email-rejected");
-      if (!list.hasOpen && !parseCardText(list.text)) return egiftReport(0, 0, "no-open-button");
-      if (list.hasOpen) {
+      const list = await waitFor(tabId, cfg, (s) => s.hasOpen || s.alert || !!card(s));
+      if (!list.hit) return egiftReport(0, 0, timedOut(list.last, list.last?.hasEmail ? "email-no-response" : "page-timeout"));
+      if (list.hit.alert && !list.hit.hasOpen && !card(list.hit)) return egiftReport(0, 0, "email-rejected");
+      let cardTab = tabId;
+      if (!card(list.hit)) {
         step = "open";
-        await sleep2(STEP_DELAY_MS);
-        await chrome.scripting.executeScript({ target: { tabId }, func: clickLabel, args: [OPEN_LABEL, true] });
+        tabs = watchNewTabs(tabId);
+        for (const attempt of ["new-tab", "kept-in-tab"]) {
+          await sleep2(cfg.stepDelayMs);
+          if (attempt === "kept-in-tab") await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", func: keepInTab });
+          const clicked = await chrome.scripting.executeScript({ target: { tabId }, func: clickOpen, args: [cfg.page] });
+          if (!clicked[0]?.result) return egiftReport(0, 0, "no-open-button");
+          step = "card-tab";
+          const deadline = Date.now() + cfg.newTabWaitMs;
+          while (Date.now() < deadline) {
+            await sleep2(cfg.pollMs);
+            const child = (await tabs.portal())[0];
+            if (child != null) {
+              cardTab = child;
+              opened = "new-tab";
+              break;
+            }
+            try {
+              const s = await read(tabId, cfg.page);
+              if (s && card(s)) {
+                opened = attempt === "new-tab" ? "same-tab" : "kept-in-tab";
+                break;
+              }
+            } catch {
+            }
+          }
+          if (opened) break;
+          step = "open";
+        }
+        if (!opened) {
+          const late = (await tabs.portal())[0];
+          if (late != null) {
+            cardTab = late;
+            opened = "new-tab";
+          }
+        }
+      } else {
+        opened = "same-tab";
       }
       let expected = 1;
       let total = 0;
       let lastCode = "";
       while (cards < MAX_CARDS) {
         step = "page";
-        const s = await waitFor(tabId, (st) => {
-          const c = parseCardText(st.text);
-          return !!c && c.code !== lastCode;
+        const got = await waitFor(cardTab, cfg, (st) => {
+          const c2 = card(st);
+          return !!c2 && c2.code !== lastCode;
         });
-        if (!s) {
-          failure = cards ? "ended-early" : "page-timeout";
+        if (!got.hit) {
+          failure = cards ? "ended-early" : timedOut(got.last, "page-timeout");
           break;
         }
-        const card = parseCardText(s.text);
-        if (cards === 0) total = card.total;
-        if (card.index !== expected) {
+        const c = card(got.hit);
+        if (cards === 0) total = c.total;
+        if (c.index !== expected) {
           failure = "out-of-sequence";
           break;
         }
-        if (card.total !== total) {
+        if (c.total !== total) {
           failure = "total-mismatch";
           break;
         }
         cards++;
-        lastCode = card.code;
+        lastCode = c.code;
         let ok = false;
         try {
           const r = await doFetch(`${base}/api/extension/egift`, {
             method: "POST",
             headers: { "Content-Type": "application/json", ...headers },
-            body: JSON.stringify(egiftPostBody(orderId, card))
+            body: JSON.stringify(egiftPostBody(orderId, c))
           });
           ok = r.ok;
         } catch {
@@ -1511,13 +1777,13 @@
           break;
         }
         saved++;
-        if (card.index >= total) {
-          if (card.index !== total) failure = "ended-early";
+        if (c.index >= total) {
+          if (c.index !== total) failure = "ended-early";
           break;
         }
         step = "next";
-        await sleep2(STEP_DELAY_MS);
-        const next = await chrome.scripting.executeScript({ target: { tabId }, func: clickLabel, args: ["next", false] });
+        await sleep2(cfg.stepDelayMs);
+        const next = await chrome.scripting.executeScript({ target: { tabId: cardTab }, func: clickNext, args: [cfg.page] });
         if (!next[0]?.result) {
           failure = "ended-early";
           break;
@@ -1525,28 +1791,31 @@
         expected++;
       }
       if (!failure && cards >= MAX_CARDS && saved < total) failure = "ended-early";
-      return egiftReport(cards, saved, failure);
+      return egiftReport(cards, saved, failure, opened);
     } catch (e) {
-      return egiftReport(cards, saved, egiftErrorCode(step, e));
+      return egiftReport(cards, saved, egiftErrorCode(step, e), opened);
     } finally {
       clearInterval(keep);
+      if (tabs) {
+        tabs.stop();
+        for (const id of await tabs.portal().catch(() => [])) await chrome.tabs.remove(id).catch(() => {
+        });
+      }
       if (tabId != null) await chrome.tabs.remove(tabId).catch(() => {
       });
       running2 = false;
     }
   }
-  var POLL_MS2, WAIT_MS2, STEP_DELAY_MS, KEEPALIVE_MS3, OPEN_LABEL, running2, sleep2;
+  var KEEPALIVE_MS3, running2, sleep2, timedOut;
   var init_egiftRun = __esm({
     "src/background/egiftRun.ts"() {
       "use strict";
       init_egiftCommand();
-      POLL_MS2 = 1500;
-      WAIT_MS2 = 4e4;
-      STEP_DELAY_MS = 3e3;
+      init_egiftPage();
       KEEPALIVE_MS3 = 2e4;
-      OPEN_LABEL = "Access eGift";
       running2 = false;
       sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
+      timedOut = (last, otherwise) => last?.botCheck ? "bot-check" : otherwise;
     }
   });
 
@@ -1668,8 +1937,8 @@
   function judgeDeadline(look2) {
     return isSignInUrl(look2.url) ? "signed-out" : "timeout";
   }
-  function noDetailsMessage(timedOut, skipped, deferred = 0) {
-    const base = `Costco order details: none of ${timedOut} page(s) loaded`;
+  function noDetailsMessage(timedOut2, skipped, deferred = 0) {
+    const base = `Costco order details: none of ${timedOut2} page(s) loaded`;
     const notes = [
       skipped > 0 ? `${skipped} other order(s) skipped` : "",
       deferred > 0 ? `${deferred} not tried, out of time` : ""
@@ -1844,7 +2113,7 @@
       }), [S().patterns.appIdHash]) || COSTCO_APP_ID;
       const deadline = Date.now() + ordersTimeoutMs();
       const rows = [];
-      let timedOut = 0;
+      let timedOut2 = 0;
       let skipped = 0;
       let deferred = 0;
       for (let i = 0; i < orderNumbers.length; i++) {
@@ -1860,15 +2129,15 @@
         const found = await waitForDetails(tabId, n);
         if (found === "signed-out") return { kind: "error", message: COSTCO_SIGN_IN_MESSAGE };
         if (!found) {
-          timedOut++;
+          timedOut2++;
           continue;
         }
         const row = mapOrderDetails(found);
         if (row) rows.push(row);
         else skipped++;
       }
-      if (!rows.length && timedOut) return { kind: "error", message: noDetailsMessage(timedOut, skipped, deferred) };
-      return { kind: "rows", rows, timedOut, skipped, deferred };
+      if (!rows.length && timedOut2) return { kind: "error", message: noDetailsMessage(timedOut2, skipped, deferred) };
+      return { kind: "rows", rows, timedOut: timedOut2, skipped, deferred };
     } catch (e) {
       return { kind: "error", message: String(e).slice(0, 200) };
     } finally {

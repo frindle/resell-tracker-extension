@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  parseEgiftPayload, isAllowedEgiftLink, parseEgiftInfo, parseCardText, egiftPostBody, egiftReport,
+  parseEgiftPayload, isAllowedEgiftLink, parseEgiftInfo, parseCardText, readCard, egiftPostBody, egiftReport,
 } from '../src/lib/egiftCommand.ts';
 
 const LINK = 'https://www.memberedelivery.com/redeem?login=abc123';
@@ -84,4 +84,18 @@ test('a thrown error becomes a fixed step code, never the error text', async () 
   const r = egiftReport(0, 0, egiftErrorCode('email', new Error(secret)));
   assert.ok(!JSON.stringify(r).includes('memberedelivery'));
   assert.deepEqual(egiftReport(0, 0, 'info-http-401').result, { cards: 0, saved: 0, error: 'info-http-401' });
+});
+
+test('card from the page: labelled cell and pager win over the text, junk cells fall back', () => {
+  const text = 'Card 1 of 9\nCode: 9999999999\n$50.00';
+  assert.deepEqual(readCard({ text, code: ' 1111 2222 ', counter: '3 of 4' }),
+    { index: 3, total: 4, code: '1111 2222', pin: null, value: 50 });
+  assert.equal(readCard({ text, code: 'x' })!.code, '9999999999');
+  assert.equal(readCard({ text: 'nothing here', code: null }), null);
+  assert.equal(readCard({ text: '', code: 'ABCD-1234', pin: '77' })!.pin, '77');
+});
+
+test('report says how the card page opened, still no card data', () => {
+  assert.deepEqual(egiftReport(1, 1, null, 'kept-in-tab'), { status: 'done', result: { cards: 1, saved: 1, opened: 'kept-in-tab' } });
+  assert.deepEqual(egiftReport(0, 0, 'bot-check'), { status: 'failed', result: { cards: 0, saved: 0, error: 'bot-check' } });
 });

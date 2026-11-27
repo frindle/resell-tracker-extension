@@ -10,12 +10,12 @@ export const MAX_CARDS = 50;
 
 /** Fixed failure reasons: the only text a failed run reports. */
 export type EgiftFailure =
-  | 'no-link' | 'link-rejected' | 'email-rejected' | 'no-open-button' | 'page-timeout'
+  | 'no-link' | 'link-rejected' | 'email-rejected' | 'email-no-response' | 'no-open-button' | 'page-timeout' | 'bot-check'
   | 'out-of-sequence' | 'total-mismatch' | 'ended-early' | 'save-failed' | 'run-busy' | 'error'
   | `info-http-${number}` | `error-${EgiftStep}` | `error-${EgiftStep}-${EgiftErrorKind}`;
 
 /** Where a run threw, so a failed run says which step broke instead of a bare "error". */
-export type EgiftStep = 'info' | 'tab' | 'page' | 'email' | 'open' | 'next';
+export type EgiftStep = 'info' | 'tab' | 'page' | 'email' | 'open' | 'card-tab' | 'next';
 export type EgiftErrorKind = 'error-page' | 'permission' | 'tab-gone' | 'navigated' | 'network';
 
 /**
@@ -62,19 +62,56 @@ export function parseEgiftInfo(body: unknown): { link: string; email: string } |
 
 export type EgiftCard = { index: number; total: number; code: string; pin: string | null; value: number | null };
 
-/** Reads one card from the page's visible text. The labels are the sidecar's ('Code:', 'PIN:'). */
-export function parseCardText(text: string): EgiftCard | null {
-  const code = /\bCode:\s*([A-Za-z0-9-]{4,64})/.exec(text)?.[1];
-  if (!code) return null;
-  const pin = /\bPIN:\s*([A-Za-z0-9]{2,32})/i.exec(text)?.[1] ?? null;
-  const seq = /\b(\d{1,3})\s+of\s+(\d{1,3})\b/i.exec(text);
-  const amt = /\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+(?:\.\d{2})?)/.exec(text)?.[1];
+/** The regexes a card is read with: the tracker's scrape config (costcoEgift.patterns), else these defaults. */
+export interface CardPatterns {
+  code?: RegExp; pin?: RegExp; sequence?: RegExp; amount?: RegExp;
+  /** A code or PIN read from its labelled cell must look like one, else the text match is used. */
+  codeValue?: RegExp; pinValue?: RegExp;
+}
+const DEFAULT_PATTERNS: Required<CardPatterns> = {
+  code: /\bCode:\s*([A-Za-z0-9-]{4,64})/,
+  pin: /\bPIN:\s*([A-Za-z0-9]{2,32})/i,
+  sequence: /\b(\d{1,3})\s+of\s+(\d{1,3})\b/i,
+  amount: /\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+(?:\.\d{2})?)/,
+  codeValue: /^[A-Za-z0-9][A-Za-z0-9 -]{2,62}[A-Za-z0-9]$/,
+  pinValue: /^[A-Za-z0-9]{2,32}$/,
+};
+
+/** What the page script reads: the visible text, plus the labelled code/PIN cells and the pager counter when found. */
+export type CardPage = { text: string; code?: string | null; pin?: string | null; counter?: string | null };
+
+function amountOf(text: string, re: RegExp): number | null {
+  const amt = re.exec(text)?.[1];
   const value = amt ? Number(amt.replace(/,/g, '')) : NaN;
+  return Number.isFinite(value) && value > 0 && value <= 10000 ? value : null;
+}
+
+/** Reads one card from the page's visible text. The labels are the portal's ('Code:', 'PIN:'). */
+export function parseCardText(text: string, pats: CardPatterns = {}): EgiftCard | null {
+  return readCard({ text }, pats);
+}
+
+/**
+ * Reads one card: the code and PIN from their labelled cells when the page script found them (the
+ * portal puts the value in a <span> next to "Code:"), else from the text; the position from the
+ * pager counter ("N of M") when present, else from the text.
+ */
+export function readCard(page: CardPage, pats: CardPatterns = {}): EgiftCard | null {
+  const p = { ...DEFAULT_PATTERNS, ...pats };
+  const text = page.text ?? '';
+  const cell = (v: string | null | undefined, ok: RegExp) => {
+    const t = (v ?? '').trim().replace(/\s+/g, ' ');
+    return t && ok.test(t) ? t : null;
+  };
+  const code = cell(page.code, p.codeValue) ?? p.code.exec(text)?.[1] ?? null;
+  if (!code) return null;
+  const pin = cell(page.pin, p.pinValue) ?? p.pin.exec(text)?.[1] ?? null;
+  const seq = p.sequence.exec(page.counter ?? '') ?? p.sequence.exec(text);
   return {
     index: seq ? Number(seq[1]) : 1,
     total: seq ? Number(seq[2]) : 1,
     code, pin,
-    value: Number.isFinite(value) && value > 0 && value <= 10000 ? value : null,
+    value: amountOf(text, p.amount),
   };
 }
 
@@ -90,10 +127,14 @@ export function egiftPostBody(orderId: number, card: EgiftCard): Record<string, 
   return body;
 }
 
-export type EgiftReport = { status: 'done' | 'failed'; result: { cards: number; saved: number; error?: string } };
+/** How the card page was reached: the portal's new tab, the run's own tab, or the run's tab after a blocked new tab. */
+export type EgiftOpened = 'new-tab' | 'same-tab' | 'kept-in-tab';
 
-/** Counts only. Done when every card found was saved. */
-export function egiftReport(cards: number, saved: number, failure: EgiftFailure | null): EgiftReport {
-  if (!failure && cards > 0 && saved === cards) return { status: 'done', result: { cards, saved } };
-  return { status: 'failed', result: { cards, saved, error: failure ?? 'no-cards' } };
+export type EgiftReport = { status: 'done' | 'failed'; result: { cards: number; saved: number; error?: string; opened?: EgiftOpened } };
+
+/** Counts only (plus how the card page opened, when it did). Done when every card found was saved. */
+export function egiftReport(cards: number, saved: number, failure: EgiftFailure | null, opened?: EgiftOpened): EgiftReport {
+  const via = opened ? { opened } : {};
+  if (!failure && cards > 0 && saved === cards) return { status: 'done', result: { cards, saved, ...via } };
+  return { status: 'failed', result: { cards, saved, error: failure ?? 'no-cards', ...via } };
 }
