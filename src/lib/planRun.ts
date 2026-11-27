@@ -51,8 +51,10 @@ export type PlanReport = {
 
 export interface RunState { cards: number; saved: number; images: number; named: number; mismatched: number; total: number; opened?: EgiftOpened }
 type Vars = Record<string, unknown>;
+/** What `Hook.parse` returns while the page does not hold a whole card yet: the read is tried again. */
+export const NOT_READY = 'not-ready';
 interface Hook {
-  /** Turns a read step's fields into vars.card (+ vars.title); returns a failure code, or null when fine. */
+  /** Turns a read step's fields into vars.card (+ vars.title); returns a failure code, NOT_READY, or null when fine. */
   parse(kind: string, fields: Record<string, string | null>, vars: Vars, st: RunState): string | null;
   /** The JSON body for a post to `to`, or undefined to build it from the step's $variables. */
   postBody(to: string, vars: Vars, inputs: PlanInputs): unknown;
@@ -82,7 +84,7 @@ function egiftHook(plan: Plan): Hook {
     parse(kind, f, vars, st) {
       if (kind !== 'card') return 'plan-failed';
       const card = readCard({ text: f.text ?? '', code: f.code, pin: f.pin, counter: f.counter }, pats);
-      if (!card) return st.cards ? 'ended-early' : 'page-timeout';
+      if (!card) return NOT_READY;
       if (st.cards === 0) st.total = card.total;
       if (card.index !== st.cards + 1) return 'out-of-sequence';
       if (card.total !== st.total) return 'total-mismatch';
@@ -266,19 +268,42 @@ export async function runPlan(
         return { flow: 'next' };
       }
       case 'read': {
-        const res = await driver.read(need(), { page: plan.page, fields: step.fields, all: step.all });
-        if (!res) return { flow: failFlow(st.cards ? 'ended-early' : 'page-timeout', step.id) };
-        if (step.all) { vars[step.into] = res.all; return { flow: 'next' }; }
-        for (const [k, f] of Object.entries(step.fields ?? {})) {
-          const v = res.fields[k];
-          if (f.label && v) lastSeen[f.label] = v;
+        const spec = { page: plan.page, fields: step.fields, all: step.all };
+        const notRead = (): { flow: Flow; matched?: string } => ({ flow: failFlow(st.cards ? 'ended-early' : 'page-timeout', step.id) });
+        if (!step.parse) {
+          const res = await driver.read(need(), spec);
+          if (!res) return notRead();
+          if (step.all) { vars[step.into] = res.all; return { flow: 'next' }; }
+          vars[step.into] = res.fields;
+          return { flow: 'next' };
         }
-        vars[step.into] = res.fields;
-        if (step.parse) {
+        // A parsed read polls like the built-in runner's card wait: a page still loading (no result,
+        // a script error while navigating, or a card that does not parse yet) is read again until
+        // the wait time is up. A card that parses but is out of sequence fails at once. When the last
+        // try still threw, that error is rethrown, so a lost permission gets its coded failure.
+        const deadline = driver.now() + timing.waitMs;
+        let lastErr: unknown = null;
+        for (let tries = 0; ; tries++) {
+          if (tries) {
+            if (driver.now() >= deadline) {
+              if (lastErr) throw lastErr;
+              return { ...notRead(), matched: 'not-ready' };
+            }
+            await driver.sleep(timing.pollMs);
+          }
+          let res: ReadRes | null = null;
+          try { res = await driver.read(need(), spec); lastErr = null; } catch (e) { lastErr = e; }
+          if (!res) continue;
+          for (const [k, f] of Object.entries(step.fields ?? {})) {
+            const v = res.fields[k];
+            if (f.label && v) lastSeen[f.label] = v;
+          }
+          vars[step.into] = res.fields;
           const code = hook.parse(step.parse, res.fields, vars, st);
+          if (code === NOT_READY) continue;
           if (code) return { flow: failFlow(code, step.id) };
+          return { flow: 'next', ...(tries ? { matched: `retry:${tries}` } : {}) };
         }
-        return { flow: 'next' };
       }
       case 'shoot': {
         if (dry) { vars[step.into] = null; return { flow: 'next', matched: 'skipped' }; }

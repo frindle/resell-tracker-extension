@@ -16,7 +16,8 @@ export function planProbe(req: ProbeReq): ProbeRes {
   const alertRe = rx(c.alertText, 'i');
   const botRe = rx(c.botCheckText, 'i');
   // The value next to a label ("Code:" -> its <span>): the deepest short element whose text starts
-  // with the label and holds more than it; else the first word after the label in the page text.
+  // with the label and holds more than it. Same rule as egiftPage.pageText, with no looser fallback,
+  // so a "Zip code:" elsewhere on a page never reads as a card.
   const labelled = (want: string): string | null => {
     const w = want.trim().toLowerCase();
     if (!w) return null;
@@ -26,14 +27,11 @@ export function planProbe(req: ProbeReq): ProbeRes {
       if (t.length <= w.length || t.length > w.length + 100 || !t.toLowerCase().startsWith(w)) continue;
       if (!best || best.contains(el)) best = el;
     }
-    if (best) {
-      const span = Array.from(best.querySelectorAll('span')).map(s => (s.textContent ?? '').trim()).find(t => t && !t.toLowerCase().startsWith(w));
-      if (span) return span;
-      const rest = (best.textContent ?? '').trim().slice(w.length).trim();
-      if (rest) return rest;
-    }
-    const m = new RegExp(want.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*(\\S{1,64})', 'i').exec(text);
-    return m ? m[1] : null;
+    if (!best) return null;
+    const span = Array.from(best.querySelectorAll('span')).map(s => (s.textContent ?? '').trim()).find(t => t && !t.toLowerCase().startsWith(w));
+    if (span) return span;
+    const rest = (best.textContent ?? '').trim().slice(w.length).trim();
+    return rest || null;
   };
   const alert = !!alertRe && qa(c.alert).some(el => alertRe.test(el.textContent ?? ''));
   const botCheck = qa(c.botCheck).length > 0 || (!!botRe && botRe.test(text.slice(0, 5000)));
@@ -119,14 +117,11 @@ export function planRead(spec: ReadSpec): ReadRes {
       if (t.length <= w.length || t.length > w.length + 100 || !t.toLowerCase().startsWith(w)) continue;
       if (!best || best.contains(el)) best = el;
     }
-    if (best) {
-      const span = Array.from(best.querySelectorAll('span')).map(s => (s.textContent ?? '').trim()).find(t => t && !t.toLowerCase().startsWith(w));
-      if (span) return span;
-      const rest = (best.textContent ?? '').trim().slice(w.length).trim();
-      if (rest) return rest;
-    }
-    const m = new RegExp(want.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*(\\S{1,64})', 'i').exec(text);
-    return m ? m[1] : null;
+    if (!best) return null;
+    const span = Array.from(best.querySelectorAll('span')).map(s => (s.textContent ?? '').trim()).find(t => t && !t.toLowerCase().startsWith(w));
+    if (span) return span;
+    const rest = (best.textContent ?? '').trim().slice(w.length).trim();
+    return rest || null;
   };
   const fields: Record<string, string | null> = {};
   for (const [name, f] of Object.entries(spec.fields ?? {})) {

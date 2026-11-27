@@ -208,6 +208,45 @@ test('the pager ends early; the tab-less Next button', async () => {
   assert.equal(s.result.error, 'ended-early');
 });
 
+test('a card still loading is read again, as the built-in runner waits for it', async () => {
+  const slow = new Fake({ start: 'cards', total: 2 });
+  const orig = slow.read.bind(slow);
+  let reads = 0;
+  // The first read of card 1 catches the page re-rendering (no code in it yet); a script error
+  // while navigating and a null result are retried too.
+  slow.read = async (tab, spec) => {
+    reads++;
+    if (reads === 1) { const r = await orig(tab, spec); if (r) { r.fields.code = null; r.fields.text = 'Loading'; } return r; }
+    if (reads === 2) throw new Error('Frame with ID 0 was removed');
+    if (reads === 3) return null;
+    return orig(tab, spec);
+  };
+  const r = await runPlan('costcoEgift', PLAN, 1, slow, inputs);
+  assert.deepEqual(strip(r), egiftReport(2, 2, null, 'same-tab', { images: 2, named: 0, mismatched: 0 }));
+  assert.equal(r.result.trace.find(t => t.stepId === 'cardRead')?.matched, 'retry:3');
+  noSecrets(r);
+});
+
+test('a card that never parses fails after the wait: page-timeout first, ended-early later', async () => {
+  const never = new Fake({ start: 'cards', total: 2 });
+  const orig = never.cardPage.bind(never);
+  // The label is there (so the wait passes) but its value is not a code, and the text holds none.
+  const blank = (p: Page) => { p.labels['Code:'] = '…'; p.text = 'Loading'; return p; };
+  never.cardPage = (tab, n) => blank(orig(tab, n));
+  const r = await runPlan('costcoEgift', PLAN, 1, never, inputs);
+  assert.equal(r.result.error, 'page-timeout');
+  assert.equal(r.result.step, 'cardRead');
+  assert.equal(r.result.trace.findLast(t => t.stepId === 'cardRead')?.matched, 'not-ready');
+  assert.ok(never.clock >= 40_000);
+  const later = new Fake({ start: 'cards', total: 2 });
+  const o2 = later.cardPage.bind(later);
+  later.cardPage = (tab, n) => (n === 2 ? blank(o2(tab, n)) : o2(tab, n));
+  const l = await runPlan('costcoEgift', PLAN, 1, later, inputs);
+  assert.equal(l.result.error, 'ended-early');
+  assert.equal(l.result.saved, 1);
+  noSecrets(l);
+});
+
 test('save failed stops the run with the earlier cards counted', async () => {
   const { r, d } = await run({ start: 'cards', total: 3, failPostAt: 2 });
   assert.equal(r.result.error, 'save-failed');
