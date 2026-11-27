@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  parseEgiftPayload, isAllowedEgiftLink, parseEgiftInfo, parseCardText, readCard, egiftPostBody, egiftReport,
+  parseEgiftPayload, isAllowedEgiftLink, parseEgiftInfo, parseCardText, readCard, egiftPostBody, egiftReport, parseCardTitle, titleFor,
 } from '../src/lib/egiftCommand.ts';
 
 const LINK = 'https://www.memberedelivery.com/redeem?login=abc123';
@@ -98,4 +98,39 @@ test('card from the page: labelled cell and pager win over the text, junk cells 
 test('report says how the card page opened, still no card data', () => {
   assert.deepEqual(egiftReport(1, 1, null, 'kept-in-tab'), { status: 'done', result: { cards: 1, saved: 1, opened: 'kept-in-tab' } });
   assert.deepEqual(egiftReport(0, 0, 'bot-check'), { status: 'failed', result: { cards: 0, saved: 0, error: 'bot-check' } });
+});
+
+test('card titles: brand and value from "Brand $25" and its variants; nothing without both', () => {
+  assert.deepEqual(parseCardTitle('StubHub $100'), { merchant: 'StubHub', value: 100 });
+  assert.deepEqual(parseCardTitle('Brand eGift $25.00'), { merchant: 'Brand', value: 25 });
+  assert.deepEqual(parseCardTitle('Two Word Brand e-Gift Card - $1,000'), { merchant: 'Two Word Brand', value: 1000 });
+  assert.deepEqual(parseCardTitle('$50 Brand eGift Card'), { merchant: 'Brand', value: 50 });
+  assert.deepEqual(parseCardTitle('Brand $100 (2 x $50)'), { merchant: 'Brand', value: 100 });
+  assert.equal(parseCardTitle('eGift $25'), null);
+  assert.equal(parseCardTitle('Brand eGift'), null);
+  assert.equal(parseCardTitle('Brand $0'), null);
+  assert.equal(parseCardTitle(''), null);
+  assert.deepEqual(parseCardTitle('Brand $25', /\$\s?(\d+)/g), { merchant: 'Brand', value: 25 });
+});
+
+test('titleFor: by position when there is one title per card, else the title they all share', () => {
+  assert.deepEqual(titleFor(['A $25', 'B $50'], 2, 2), { merchant: 'B', value: 50 });
+  assert.deepEqual(titleFor(['A $25'], 3, 4), { merchant: 'A', value: 25 });
+  assert.deepEqual(titleFor(['A $25', 'a $25'], 3, 4), { merchant: 'A', value: 25 });
+  assert.equal(titleFor(['A $25', 'B $50'], 1, 3), null);
+  assert.equal(titleFor(['A $25', 'no amount'], 1, 3), null);
+  assert.equal(titleFor([], 1, 1), null);
+  assert.equal(titleFor(['no amount', 'B $50'], 1, 2), null);
+});
+
+test('post body: a title supplies merchant and value; the photo rides along', () => {
+  const card = parseCardText('Code: 0000000000 PIN: 1234 $10.00')!;
+  assert.deepEqual(egiftPostBody(9, card, { title: { merchant: 'Brand', value: 25 }, image: 'QUJD' }),
+    { orderId: 9, cardNumber: '0000000000', pin: '1234', merchant: 'Brand', value: 25, image: 'QUJD' });
+  assert.deepEqual(egiftPostBody(9, card, { title: null, image: null }), { orderId: 9, cardNumber: '0000000000', pin: '1234', value: 10 });
+});
+
+test('report: photo and naming counts ride with the result, never a code', () => {
+  const r = egiftReport(2, 2, null, 'new-tab', { images: 2, named: 2, mismatched: 0 });
+  assert.deepEqual(r, { status: 'done', result: { cards: 2, saved: 2, opened: 'new-tab', images: 2, named: 2, mismatched: 0 } });
 });

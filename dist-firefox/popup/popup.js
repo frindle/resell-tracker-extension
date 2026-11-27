@@ -236,7 +236,7 @@
   var init_scrapeConfig_default = __esm({
     "src/lib/scrapeConfig.default.json"() {
       scrapeConfig_default_default = {
-        version: 2,
+        version: 4,
         sites: {
           amazon: {
             selectors: {
@@ -372,13 +372,15 @@
             selectors: {
               clickables: 'button, a, [role="button"], input[type="button"], input[type="submit"]',
               emailInput: '#p2, input[type="email"], input[placeholder*="mail" i], input[name*="email" i], input[id*="email" i]',
-              alert: 'div.ui-message[role="alert"], [role="alert"]',
+              alert: 'div.ui-message[role="alert"], [role="alert"], .ui-messages-error, .ui-message-error, .ui-growl-message-error',
               submitButton: '#submitBtn, button[type="submit"], input[type="submit"]',
               buttons: "button",
               nextButton: 'input[id$="wdt-nav-next"], button[id$="wdt-nav-next"]',
               counter: "#wdt-page-counter",
               labelCells: "td, th, div, p, li, span, label",
-              botCheck: 'iframe[src*="_Incapsula_Resource"], iframe[src*="captcha" i], iframe[title*="challenge" i]'
+              botCheck: 'iframe[src*="_Incapsula_Resource"], iframe[src*="captcha" i], iframe[title*="challenge" i]',
+              itemTitle: "section.order-item .order-item-title",
+              cardImage: "#print-content-section, #body-canvas"
             },
             labels: {
               openLabel: "Access eGift",
@@ -388,7 +390,7 @@
             },
             patterns: {
               nextButton: "^next\\b",
-              alertText: "\\b(invalid|not match|incorrect|error)\\b",
+              alertText: "\\b(invalid|not match|incorrect|error|not found|unable|could ?n[o']t|not recogni[sz]ed|try again|not valid|no (?:order|record)s?)\\b",
               submitText: "submit|continue|next|view|access",
               code: "\\bCode:\\s*([A-Za-z0-9-]{4,64})",
               codeValue: "^[A-Za-z0-9][A-Za-z0-9 -]{2,62}[A-Za-z0-9]$",

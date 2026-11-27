@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Reselling Tracker Sync",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Auto-syncs Amazon and Walmart orders to your Resell Tracker instance",
   "permissions": [
     "storage",
     "alarms",
     "tabs",
-    "scripting"
+    "scripting",
+    "debugger"
   ],
   "host_permissions": [
     "https://www.amazon.com/*",
