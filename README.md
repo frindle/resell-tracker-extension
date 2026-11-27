@@ -51,6 +51,11 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.4.1
+
+- **A failed eGift read says where it failed.** A run that used to end with a bare `error` now reports `info-http-<status>` when the tracker refuses the order details, or `error-<step>` (tab, page, email, open, next), plus the kind of browser error when it is known (error-page, permission, tab-gone, navigated, network). These are fixed codes: the browser's error text, which can include the delivery link, is never sent.
+- **Unknown commands fail visibly.** A command type this build does not know (the tracker is newer than the extension) is now marked failed with "reload or update the extension", instead of done with no result.
+
 ### 1.3.9
 
 - **Costco eGift cards are read automatically.** The tracker's SCRAPE_EGIFT command opens the order's delivery link (www.memberedelivery.com only) in a background tab, enters the delivery email, reads each card and saves it to the tracker. The tab is always closed; the result is counts only (never card numbers, PINs, the email or the link).

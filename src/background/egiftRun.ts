@@ -4,8 +4,8 @@
 // never logged or reported: the result is counts only.
 
 import {
-  MAX_CARDS, egiftPostBody, egiftReport, isAllowedEgiftLink, parseCardText, parseEgiftInfo,
-  type EgiftCard, type EgiftFailure, type EgiftReport,
+  MAX_CARDS, egiftErrorCode, egiftPostBody, egiftReport, isAllowedEgiftLink, parseCardText, parseEgiftInfo,
+  type EgiftCard, type EgiftFailure, type EgiftReport, type EgiftStep,
 } from '../lib/egiftCommand';
 
 const POLL_MS = 1500;
@@ -97,29 +97,35 @@ export async function runEgiftOrder(base: string, headers: Record<string, string
   let cards = 0;
   let saved = 0;
   let failure: EgiftFailure | null = null;
+  let step: EgiftStep = 'info';
   try {
     const res = await doFetch(`${base}/api/extension/egift?orderId=${orderId}`, { headers, cache: 'no-store' });
-    if (!res.ok) return egiftReport(0, 0, 'error');
+    if (!res.ok) return egiftReport(0, 0, `info-http-${res.status}`);
     const info = parseEgiftInfo(await res.json().catch(() => null));
     if (!info) return egiftReport(0, 0, 'no-link');
     if (!isAllowedEgiftLink(info.link)) return egiftReport(0, 0, 'link-rejected');
 
+    step = 'tab';
     const tab = await chrome.tabs.create({ url: info.link, active: false });
     tabId = tab.id;
-    if (tabId == null) return egiftReport(0, 0, 'error');
+    if (tabId == null) return egiftReport(0, 0, 'error-tab');
 
     // The site asks for the address before it shows the order.
+    step = 'page';
     const first = await waitFor(tabId, s => s.hasEmail || s.hasOpen || s.alert);
     if (!first) return egiftReport(0, 0, 'page-timeout');
     if (first.hasEmail && !first.hasOpen) {
+      step = 'email';
       await chrome.scripting.executeScript({ target: { tabId }, func: enterEmail, args: [info.email] });
     }
+    step = 'page';
     const list = await waitFor(tabId, s => s.hasOpen || (s.alert && !s.hasEmail) || !!parseCardText(s.text));
     if (!list) return egiftReport(0, 0, 'page-timeout');
     if (list.alert && !list.hasOpen) return egiftReport(0, 0, 'email-rejected');
     if (!list.hasOpen && !parseCardText(list.text)) return egiftReport(0, 0, 'no-open-button');
 
     if (list.hasOpen) {
+      step = 'open';
       await sleep(STEP_DELAY_MS);
       await chrome.scripting.executeScript({ target: { tabId }, func: clickLabel, args: [OPEN_LABEL, true] });
     }
@@ -128,6 +134,7 @@ export async function runEgiftOrder(base: string, headers: Record<string, string
     let total = 0;
     let lastCode = '';
     while (cards < MAX_CARDS) {
+      step = 'page';
       const s = await waitFor(tabId, st => { const c = parseCardText(st.text); return !!c && c.code !== lastCode; });
       if (!s) { failure = cards ? 'ended-early' : 'page-timeout'; break; }
       const card = parseCardText(s.text) as EgiftCard;
@@ -146,6 +153,7 @@ export async function runEgiftOrder(base: string, headers: Record<string, string
       if (!ok) { failure = 'save-failed'; break; }
       saved++;
       if (card.index >= total) { if (card.index !== total) failure = 'ended-early'; break; }
+      step = 'next';
       await sleep(STEP_DELAY_MS);
       const next = await chrome.scripting.executeScript({ target: { tabId }, func: clickLabel, args: ['next', false] });
       if (!next[0]?.result) { failure = 'ended-early'; break; }
@@ -153,8 +161,8 @@ export async function runEgiftOrder(base: string, headers: Record<string, string
     }
     if (!failure && cards >= MAX_CARDS && saved < total) failure = 'ended-early';
     return egiftReport(cards, saved, failure);
-  } catch {
-    return egiftReport(cards, saved, 'error');
+  } catch (e) {
+    return egiftReport(cards, saved, egiftErrorCode(step, e));
   } finally {
     clearInterval(keep);
     if (tabId != null) await chrome.tabs.remove(tabId).catch(() => {});
