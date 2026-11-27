@@ -41,8 +41,8 @@ test('apple and google store product links are intercepted', () => {
 test('same-site redirect wrapping a retailer URL is intercepted, original href kept', () => {
   const wrapped = 'https://www.bfmr.com/out?url=' + encodeURIComponent('https://www.bestbuy.com/site/x/1.p');
   assert.equal(isOutboundDealLink(wrapped, bfmr), true);
-  assert.match(destinationFor(wrapped, 'bfmr', { trackerUrl: 'http://t.lan', extensionSecret: 's' }),
-    new RegExp('url=' + encodeURIComponent(wrapped).replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')));
+  assert.equal(destinationFor(wrapped, 'bfmr', { trackerUrl: 'http://t.lan', extensionSecret: 's' }),
+    'http://t.lan/go?url=' + encodeURIComponent(wrapped) + '&src=bfmr');
 });
 
 test('same-site links with no dest, a same-site dest, or a non-http dest are left alone', () => {
