@@ -93,6 +93,383 @@
     }
   });
 
+  // src/lib/scrapeConfig.default.json
+  var scrapeConfig_default_default;
+  var init_scrapeConfig_default = __esm({
+    "src/lib/scrapeConfig.default.json"() {
+      scrapeConfig_default_default = {
+        version: 1,
+        sites: {
+          amazon: {
+            selectors: {
+              blockedSignIn: 'form[name="signIn"]:not(#ap_navbar_form), #ap_email, #ap_password, input[name="password"][type="password"]',
+              blockedCaptcha: 'form[action*="validateCaptcha"], #captchacharacters, img[src*="captcha"]',
+              stripElements: 'script, noscript, style, link, meta, iframe, svg, template, input[type="hidden"], [id^="shipToData-"]'
+            },
+            labels: {},
+            patterns: {
+              agentBlock: "unauthorized AI agent|violates Amazon'?s Conditions of Use|automated access",
+              refSuffix: "\\/ref=[^/]*\\/?$",
+              ordersPath: "^(?:/your-orders/orders|/gp/css/order-history|/gp/your-account/order-history)$",
+              detailPath: "^(?:/gp/your-account/order-details|/your-orders/order-details|/gp/css/order-details|/gp/css/summary/edit\\.html)$",
+              trackingPath: "^(?:/progress-tracker/package(?:/.*)?|/gp/your-account/ship-track|/gp/css/shiptrack/view\\.html)$"
+            },
+            urls: {
+              host: "www.amazon.com"
+            },
+            timeoutsMs: {
+              quietMs: 1500,
+              maxWaitMs: 15e3,
+              urlPollMs: 2e3,
+              runWaitMs: 3e4
+            }
+          },
+          costco: {
+            selectors: {},
+            labels: {
+              refreshTokenKey: "refreshtoken",
+              accessTokenKey: "accesstoken",
+              msalKeyMarker: "a3a5186b",
+              msalClientId: "a3a5186b-7c89-4b4c-93a8-dd604e930757",
+              msalScope: "openid profile offline_access"
+            },
+            patterns: {
+              warehouseKey: "store|warehouse|wh",
+              warehouseValue: "^\\d{3,4}$",
+              appIdHash: "^#\\/app\\/([^/]+)\\/"
+            },
+            urls: {
+              tokenRefresh: "https://signin.costco.com/e0714dd4-784d-46d6-a278-3e29553483eb/B2C_1A_SSO_WCS_signup_signin_209/oauth2/v2.0/token",
+              orderDetail: "https://www.costco.com/myaccount/#/app/4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf/orderdetails/{orderNumber}",
+              orders: "https://www.costco.com/myaccount/",
+              orderDetailHash: "#/app/{appId}/orderdetails/{orderNumber}",
+              apiHost: "ecom-api.costco.com",
+              graphqlPath: "order/v1/orders/graphql"
+            },
+            timeoutsMs: {
+              authWaitMs: 2e4,
+              authPollMs: 1e3,
+              pageDelayMs: 600,
+              readyWaitMs: 45e3,
+              syncTimeoutMs: 24e4,
+              detailWaitMs: 2e4,
+              ordersTimeoutMs: 3e5,
+              detailDelayMs: 500,
+              pollMs: 500
+            }
+          },
+          walmart: {
+            selectors: {
+              orderBlocks: '[data-testid*="orderGroup"], [data-testid*="order-card"], [data-testid*="orderCard"]',
+              orderCaption: '[id^="caption-"]',
+              itemFallback: 'a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]',
+              productName: '[data-testid="productName"]',
+              nextPageLink: '[aria-label="Next page"]:not([disabled]) a, [data-automation-id*="next-page"]:not([disabled]) a, [aria-label="Next page"]:not([disabled])',
+              nextPageButton: '[aria-label="Next page"]:not([disabled]), [data-automation-id*="next-page"]:not([disabled])',
+              nextClick: '[aria-label="Next page"]:not([disabled]), [data-automation-id*="next-page"]:not([disabled]), button[aria-label*="next" i]:not([disabled])',
+              nextData: "#__NEXT_DATA__",
+              detailAddress: '[data-automation-id*="shipping-address"], [class*="shipping-address"], [class*="shippingAddress"]',
+              detailTotal: '[data-automation-id*="order-total"], [class*="orderTotal"], [class*="order-total"]',
+              detailItem: '[data-automation-id*="product-title"], [class*="product-title"], h2[class*="item"]',
+              deliveryPhoto: 'img[alt="Proof of delivery location"], img[src*="/delivery-photo/"]'
+            },
+            labels: {
+              groupsKeyPrefix: "groups_"
+            },
+            patterns: {
+              cancelledOrReturned: "(?:\\b(?:cancell?ed|cancellation|returned|refunded)\\b|we had to cancel|we['\u2019]ve canceled|cancel these items|won['\u2019]t be charged|released the temporary hold)",
+              captionOrderNumber: "caption-(\\d+)",
+              orderNumberLabeled: "Order\\s*#?\\s*(\\d{10,})",
+              orderNumberBare: "\\b(\\d{13,20})\\b",
+              dateLabeledFull: "(?:Placed|Ordered|Delivered|on)\\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+\\d{1,2},?\\s+\\d{4})",
+              dateFull: "\\b((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+\\d{1,2},?\\s+\\d{4})",
+              dateLabeledNoYear: "(?:Placed|Ordered|Delivered|on)\\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+\\d{1,2})(?!\\d)",
+              storePickup: "\\b(?:Free\\s+store\\s+pickup|Curbside\\s+pickup|Pickup\\s+at|Ready\\s+for\\s+pickup|Store\\s+Pickup|Pickup\\s+order)\\b",
+              orderTotal: "Total\\s+\\$?([\\d,]+\\.?\\d*)",
+              genericTitle: "^(Walmart\\.com|Walmart|Loading|\u2014|\u2014\\s*\u2014)$",
+              genericTitleJson: "^(Walmart\\.com|Walmart|Loading)$",
+              cardLast4: "(?:ending\\s+(?:in)?|\\*{2,}|\\.{2,})\\s*(\\d{4})\\b",
+              trackingField: `trackingNumber["\\s:]+["']?([A-Z0-9]{10,25})`,
+              trackingUps: "\\b(1Z[A-Z0-9]{16})\\b",
+              trackingDigits: "\\b([0-9]{20,22})\\b",
+              internalTracking: "^555\\d{15,}$",
+              scriptBlock: "<script[^>]*>([\\s\\S]*?)<\\/script>",
+              jsonOrderDate: '"orderDate":"([^"]+)"',
+              jsonPlacedDate: '"placedDate":"([^"]+)"',
+              jsonOrderPlacedDate: '"orderPlacedDate":"([^"]+)"',
+              jsonCreatedDate: '"createdDate":"([^"]+)"',
+              jsonCost: '"(?:totalAmount|financeTotal|orderTotal|grandTotal|chargeTotal|estimatedTotal|totalCharges|orderTotalAmount|total)"\\s*:\\s*([\\d.]+)',
+              jsonProductName: '"(?:productName|itemDescription)"\\s*:\\s*"([^"]{5,120})"',
+              htmlTotal: "(?:order\\s+)?total[^$\\d]{0,30}\\$\\s*([\\d,]+\\.?\\d*)",
+              htmlPlaced: "[Pp]laced[^<]{0,80}?(\\d{4}-\\d{2}-\\d{2})",
+              jsonLastFour: '"lastFour"\\s*:\\s*"?(\\d{4})"?',
+              jsonLastFourDigits: '"lastFourDigits"\\s*:\\s*"?(\\d{4})"?',
+              jsonCardLast4: '"cardLast4"\\s*:\\s*"?(\\d{4})"?',
+              jsonLast4: '"last4"\\s*:\\s*"?(\\d{4})"?',
+              jsonCardNumberLast4: '"cardNumberLast4"\\s*:\\s*"?(\\d{4})"?',
+              jsonAccountNumberLast4: '"accountNumberLast4"\\s*:\\s*"?(\\d{4})"?',
+              textEndingIn: "\\bending\\s+in\\s+(\\d{4})\\b",
+              textEnding: "\\bending\\s+(\\d{4})\\b",
+              textAsterisks: "\\*{2,}\\s*(\\d{4})\\b",
+              textXs: "\\bx{4,}\\s*(\\d{4})\\b",
+              textBullets: "[\u2022\xB7\u2024\u22C5\u25CF]{2,}\\s*(\\d{4})\\b",
+              textHtmlBullet: "(?:&bull;|&middot;|&#x2022;|&#8226;){2,}\\s*(\\d{4})\\b",
+              httpUrl: "^https?:\\/\\/"
+            },
+            urls: {
+              orders: "https://www.walmart.com/orders",
+              orderDetail: "https://www.walmart.com/orders/{orderNumber}",
+              ordersPath: "/orders",
+              purchasesPath: "/account/mypurchases"
+            },
+            timeoutsMs: {
+              detailFetchMs: 5e3,
+              firstLoadMs: 15e3,
+              pageLoadMs: 12e3,
+              loadPollMs: 400,
+              resumeDelayMs: 2e3
+            }
+          },
+          costcoEgift: {
+            selectors: {
+              clickables: 'button, a, [role="button"], input[type="button"], input[type="submit"]',
+              emailInput: 'input[type="email"], input[name*="email" i], input[id*="email" i]',
+              alert: '[role="alert"]',
+              submitButton: 'button[type="submit"], input[type="submit"]',
+              buttons: "button"
+            },
+            labels: {
+              openLabel: "Access eGift",
+              nextLabel: "next"
+            },
+            patterns: {
+              nextButton: "^next\\b",
+              alertText: "\\b(invalid|not match|incorrect|error)\\b",
+              submitText: "submit|continue|next|view|access",
+              code: "\\bCode:\\s*([A-Za-z0-9-]{4,64})",
+              pin: "\\bPIN:\\s*([A-Za-z0-9]{2,32})",
+              sequence: "\\b(\\d{1,3})\\s+of\\s+(\\d{1,3})\\b",
+              amount: "\\$\\s?(\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})?|\\d+(?:\\.\\d{2})?)"
+            },
+            urls: {
+              host: "www.memberedelivery.com"
+            },
+            timeoutsMs: {
+              pollMs: 1500,
+              waitMs: 4e4,
+              stepDelayMs: 3e3
+            }
+          },
+          bestbuyEgift: {
+            selectors: {},
+            labels: {},
+            patterns: {},
+            urls: {},
+            timeoutsMs: {}
+          }
+        }
+      };
+    }
+  });
+
+  // src/lib/scrapeConfig.ts
+  function isPlainObject(v) {
+    if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+    const proto = Object.getPrototypeOf(v);
+    return proto === Object.prototype || proto === null;
+  }
+  function validateScrapeConfig(raw) {
+    const fail = (error) => ({ ok: false, error });
+    if (!isPlainObject(raw)) return fail("config must be an object");
+    for (const k of Object.keys(raw)) {
+      if (k !== "version" && k !== "sites") return fail(`unknown top-level key "${k}"`);
+    }
+    const version = raw.version;
+    if (typeof version !== "number" || !Number.isInteger(version) || version < 1) return fail("version must be a positive integer");
+    if (!isPlainObject(raw.sites)) return fail("sites must be an object");
+    const sites = {};
+    for (const [siteKey, siteRaw] of Object.entries(raw.sites)) {
+      if (!SITE_RE.test(siteKey)) return fail(`bad site key "${siteKey}"`);
+      if (!isPlainObject(siteRaw)) return fail(`site "${siteKey}" must be an object`);
+      for (const k of Object.keys(siteRaw)) {
+        if (!SCRAPE_CATEGORIES.includes(k)) return fail(`site "${siteKey}": unknown key "${k}"`);
+      }
+      const site = { selectors: {}, labels: {}, patterns: {}, urls: {}, timeoutsMs: {} };
+      for (const cat of SCRAPE_CATEGORIES) {
+        const group = siteRaw[cat];
+        if (!isPlainObject(group)) return fail(`site "${siteKey}": ${cat} must be an object`);
+        for (const [name, value] of Object.entries(group)) {
+          const where = `${siteKey}.${cat}.${name}`;
+          if (!NAME_RE.test(name)) return fail(`bad entry name "${where}"`);
+          if (cat === "timeoutsMs") {
+            if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > MAX_MS) return fail(`${where} must be an integer 0..${MAX_MS}`);
+            site.timeoutsMs[name] = value;
+            continue;
+          }
+          if (typeof value !== "string") return fail(`${where} must be a string`);
+          if (value.length > MAX_STRING) return fail(`${where} is too long`);
+          if (cat === "patterns") {
+            try {
+              new RegExp(value);
+            } catch {
+              return fail(`${where} is not a valid regex`);
+            }
+          }
+          site[cat][name] = value;
+        }
+      }
+      sites[siteKey] = site;
+    }
+    return { ok: true, config: { version, sites } };
+  }
+  function adopt(config, source, etag) {
+    active = config;
+    activeSource = source;
+    activeEtag = etag;
+    resolved = /* @__PURE__ */ new Map();
+  }
+  function chromeStore() {
+    return {
+      async get() {
+        return (await chrome.storage.local.get(SCRAPE_STORAGE_KEY))[SCRAPE_STORAGE_KEY];
+      },
+      async put(v) {
+        await chrome.storage.local.set({ [SCRAPE_STORAGE_KEY]: v });
+      },
+      async putStatus(s) {
+        await chrome.storage.local.set({ [SCRAPE_STATUS_KEY]: s });
+      }
+    };
+  }
+  function readStored(raw) {
+    if (!isPlainObject(raw)) return null;
+    const v = validateScrapeConfig(raw.config);
+    if (!v.ok) return null;
+    return { config: v.config, etag: typeof raw.etag === "string" ? raw.etag : null, fetchedAt: typeof raw.fetchedAt === "number" ? raw.fetchedAt : 0 };
+  }
+  function adoptStored(stored) {
+    if (stored && stored.config.version >= BUNDLED_SCRAPE_CONFIG.version) {
+      adopt(stored.config, "cache", stored.etag);
+      return true;
+    }
+    return false;
+  }
+  function initScrapeConfig(store3) {
+    if (!initPromise) {
+      const s = store3 ?? chromeStore();
+      initPromise = (async () => {
+        try {
+          adoptStored(readStored(await s.get()));
+        } catch {
+        }
+        if (!store3 && typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+          chrome.storage.onChanged.addListener((changes, area) => {
+            const ch = changes[SCRAPE_STORAGE_KEY];
+            if (area !== "local" || !ch) return;
+            const next = readStored(ch.newValue);
+            if (next && next.config.version >= active.version) adopt(next.config, "cache", next.etag);
+          });
+        }
+      })();
+    }
+    return initPromise;
+  }
+  async function loadScrapeConfig(tracker, deps2 = {}) {
+    const store3 = deps2.store ?? chromeStore();
+    await initScrapeConfig(deps2.store);
+    const now = deps2.now ?? Date.now;
+    let updated = false;
+    let note;
+    let confirmed = false;
+    if (tracker) {
+      try {
+        const headers = { ...tracker.headers };
+        if (activeEtag) headers["If-None-Match"] = activeEtag;
+        const res = await (deps2.fetch ?? fetch)(`${tracker.base.replace(/\/$/, "")}/api/extension/scrape-config`, { headers, cache: "no-store" });
+        if (res.status === 304 && activeEtag) {
+          confirmed = true;
+        } else if (!res.ok) {
+          note = `tracker answered ${res.status}`;
+        } else {
+          let body = null;
+          try {
+            body = JSON.parse(await res.text());
+          } catch {
+          }
+          const v = validateScrapeConfig(body);
+          if (!v.ok) note = `ignored invalid config: ${v.error}`;
+          else if (v.config.version < active.version) note = `ignored older config v${v.config.version} (in effect: v${active.version})`;
+          else {
+            const etag = res.headers.get("ETag");
+            adopt(v.config, "remote", etag);
+            confirmed = true;
+            updated = true;
+            await store3.put({ config: v.config, etag, fetchedAt: now() });
+          }
+        }
+      } catch (e) {
+        note = `fetch failed: ${String(e).slice(0, 120)}`;
+      }
+    }
+    if (confirmed) activeSource = "remote";
+    try {
+      await store3.putStatus({ version: active.version, source: activeSource, ts: now() });
+    } catch {
+    }
+    return { source: activeSource, version: active.version, updated, ...note ? { note } : {} };
+  }
+  function scrapeConfigIsStale(advertised) {
+    const n = Number(advertised);
+    return Number.isInteger(n) && n > active.version;
+  }
+  function compile(src, flags) {
+    if (src === void 0) return null;
+    try {
+      return new RegExp(src, flags);
+    } catch {
+      return null;
+    }
+  }
+  function getScrape(siteKey) {
+    const hit = resolved.get(siteKey);
+    if (hit) return hit;
+    const def = Object.prototype.hasOwnProperty.call(BUNDLED_SCRAPE_CONFIG.sites, siteKey) ? BUNDLED_SCRAPE_CONFIG.sites[siteKey] : void 0;
+    const cur = Object.prototype.hasOwnProperty.call(active.sites, siteKey) ? active.sites[siteKey] : void 0;
+    const out = {
+      selectors: { ...def?.selectors, ...cur?.selectors },
+      labels: { ...def?.labels, ...cur?.labels },
+      patterns: { ...def?.patterns, ...cur?.patterns },
+      urls: { ...def?.urls, ...cur?.urls },
+      timeoutsMs: { ...def?.timeoutsMs, ...cur?.timeoutsMs },
+      regex(name, flags) {
+        return compile(out.patterns[name], flags) ?? compile(def?.patterns[name], flags) ?? new RegExp("(?!)", flags && flags.replace(/[uv]/g, ""));
+      }
+    };
+    resolved.set(siteKey, out);
+    return out;
+  }
+  var SCRAPE_CATEGORIES, NAME_RE, SITE_RE, MAX_STRING, MAX_MS, bundledCheck, BUNDLED_SCRAPE_CONFIG, active, activeSource, activeEtag, resolved, initPromise, SCRAPE_STORAGE_KEY, SCRAPE_STATUS_KEY;
+  var init_scrapeConfig = __esm({
+    "src/lib/scrapeConfig.ts"() {
+      "use strict";
+      init_scrapeConfig_default();
+      SCRAPE_CATEGORIES = ["selectors", "labels", "patterns", "urls", "timeoutsMs"];
+      NAME_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+      SITE_RE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+      MAX_STRING = 2e4;
+      MAX_MS = 864e5;
+      bundledCheck = validateScrapeConfig(scrapeConfig_default_default);
+      BUNDLED_SCRAPE_CONFIG = bundledCheck.ok ? bundledCheck.config : scrapeConfig_default_default;
+      active = BUNDLED_SCRAPE_CONFIG;
+      activeSource = "bundled";
+      activeEtag = null;
+      resolved = /* @__PURE__ */ new Map();
+      initPromise = null;
+      SCRAPE_STORAGE_KEY = "scrapeConfig";
+      SCRAPE_STATUS_KEY = "scrapeConfigStatus";
+    }
+  });
+
   // src/lib/amazonCapture.ts
   function classifyAmazonUrl(rawUrl) {
     let u;
@@ -101,11 +478,12 @@
     } catch {
       return null;
     }
-    if (u.protocol !== "https:" || u.hostname !== "www.amazon.com") return null;
-    const p = u.pathname.replace(/\/ref=[^/]*\/?$/, "").replace(/\/+$/, "");
-    if (p === "/your-orders/orders" || p === "/gp/css/order-history" || p === "/gp/your-account/order-history") return "orders";
-    if (p === "/gp/your-account/order-details" || p === "/your-orders/order-details" || p === "/gp/css/order-details" || p === "/gp/css/summary/edit.html") return "detail";
-    if (p === "/progress-tracker/package" || p.startsWith("/progress-tracker/package/") || p === "/gp/your-account/ship-track" || p === "/gp/css/shiptrack/view.html") return "tracking";
+    const S2 = getScrape("amazon");
+    if (u.protocol !== "https:" || u.hostname !== S2.urls.host) return null;
+    const p = u.pathname.replace(S2.regex("refSuffix"), "").replace(/\/+$/, "");
+    if (S2.regex("ordersPath").test(p)) return "orders";
+    if (S2.regex("detailPath").test(p)) return "detail";
+    if (S2.regex("trackingPath").test(p)) return "tracking";
     return null;
   }
   function isDuplicate(seen, hash, now, windowMs = DEDUPE_WINDOW_MS) {
@@ -149,6 +527,7 @@
   var init_amazonCapture = __esm({
     "src/lib/amazonCapture.ts"() {
       "use strict";
+      init_scrapeConfig();
       DEDUPE_WINDOW_MS = 10 * 60 * 1e3;
       QUEUE_MAX_ENTRIES = 20;
       QUEUE_MAX_BYTES = 6e6;
@@ -660,7 +1039,7 @@
       };
       const t = setTimeout(() => {
         chrome.tabs.get(tabId).then((tab) => done({ kind: "timeout", note: tab.status === "loading" ? "the tab was still loading" : judge.note() })).catch(() => done({ kind: "timeout", note: judge.note() }));
-      }, WAIT_MS);
+      }, waitMs());
       const ask = async () => {
         poke = null;
         let answer = null;
@@ -756,14 +1135,15 @@
   function amazonRunActive() {
     return runner.isRunning();
   }
-  var WAIT_MS, pending, early, runTabId, background, fillsTracking, runWindowId, lastPageId, seenPageId, RUN_TAB_KEY, KEEPALIVE_MS, store, waiter, deps, runner;
+  var waitMs, pending, early, runTabId, background, fillsTracking, runWindowId, lastPageId, seenPageId, RUN_TAB_KEY, KEEPALIVE_MS, store, waiter, deps, runner;
   var init_amazonRun = __esm({
     "src/background/amazonRun.ts"() {
       "use strict";
       init_syncRun();
       init_amazonCapture2();
       init_capturePoke();
-      WAIT_MS = 3e4;
+      init_scrapeConfig();
+      waitMs = () => getScrape("amazon").timeoutsMs.runWaitMs;
       pending = /* @__PURE__ */ new Map();
       early = /* @__PURE__ */ new Map();
       runTabId = null;
@@ -857,7 +1237,7 @@
     return { text: (document.body?.innerText ?? "").slice(0, max) };
   }
   async function readWhenReady(tabId, ready) {
-    const deadline = Date.now() + WAIT_MS2;
+    const deadline = Date.now() + WAIT_MS;
     while (Date.now() < deadline) {
       await sleep(POLL_MS);
       try {
@@ -908,14 +1288,14 @@
     }
     return { ok: done > 0, done, failed };
   }
-  var MAX_ITEMS, MAX_TEXT, POLL_MS, WAIT_MS2, GAP_MIN_MS, GAP_MAX_MS, KEEPALIVE_MS2, DEFAULT_STATUS_WORDS, running, sleep;
+  var MAX_ITEMS, MAX_TEXT, POLL_MS, WAIT_MS, GAP_MIN_MS, GAP_MAX_MS, KEEPALIVE_MS2, DEFAULT_STATUS_WORDS, running, sleep;
   var init_carrierRun = __esm({
     "src/background/carrierRun.ts"() {
       "use strict";
       MAX_ITEMS = 5;
       MAX_TEXT = 2e5;
       POLL_MS = 2e3;
-      WAIT_MS2 = 4e4;
+      WAIT_MS = 4e4;
       GAP_MIN_MS = 5e3;
       GAP_MAX_MS = 15e3;
       KEEPALIVE_MS2 = 2e4;
@@ -1035,7 +1415,7 @@
     return res[0]?.result ?? null;
   }
   async function waitFor(tabId, ok) {
-    const deadline = Date.now() + WAIT_MS3;
+    const deadline = Date.now() + WAIT_MS2;
     while (Date.now() < deadline) {
       await sleep2(POLL_MS2);
       try {
@@ -1142,13 +1522,13 @@
       running2 = false;
     }
   }
-  var POLL_MS2, WAIT_MS3, STEP_DELAY_MS, KEEPALIVE_MS3, OPEN_LABEL, running2, sleep2;
+  var POLL_MS2, WAIT_MS2, STEP_DELAY_MS, KEEPALIVE_MS3, OPEN_LABEL, running2, sleep2;
   var init_egiftRun = __esm({
     "src/background/egiftRun.ts"() {
       "use strict";
       init_egiftCommand();
       POLL_MS2 = 1500;
-      WAIT_MS3 = 4e4;
+      WAIT_MS2 = 4e4;
       STEP_DELAY_MS = 3e3;
       KEEPALIVE_MS3 = 2e4;
       OPEN_LABEL = "Access eGift";
@@ -1299,13 +1679,13 @@
 
   // src/background/costcoRun.ts
   function claimCostcoRun(commandId) {
-    if (active || sweeping) return false;
-    active = true;
+    if (active2 || sweeping) return false;
+    active2 = true;
     currentCommandId = commandId;
     return true;
   }
   function releaseCostcoRun() {
-    active = false;
+    active2 = false;
     currentCommandId = null;
   }
   async function rememberRunTab2(tabId) {
@@ -1352,7 +1732,7 @@
     }
   }
   async function openTab() {
-    const tab = await chrome.tabs.create({ url: ORDERS_URL, active: false });
+    const tab = await chrome.tabs.create({ url: ordersUrl(), active: false });
     if (tab.id == null) throw new Error("could not open a tab");
     await rememberRunTab2(tab.id);
     return tab.id;
@@ -1385,12 +1765,12 @@
     });
     return { url, hasAuth: !!state?.hasAuth, orderPages: state?.orderPages ?? 0, listSeen: !!state?.listSeen };
   }
-  async function waitReady(tabId, timeoutMs = READY_WAIT_MS) {
+  async function waitReady(tabId, timeoutMs = readyWaitMs()) {
     const end = Date.now() + timeoutMs;
     while (Date.now() < end) {
       const verdict = judgeTab(await look(tabId));
       if (verdict !== "wait") return verdict;
-      await sleep3(POLL_MS3);
+      await sleep3(pollMs());
     }
     const last = await look(tabId);
     return judgeTab(last) === "ready" ? "ready" : judgeDeadline(last);
@@ -1423,7 +1803,7 @@
       const ready = await waitReady(tabId);
       if (ready === "timeout") return { kind: "timeout", message: COSTCO_TIMEOUT_MESSAGE };
       if (ready !== "ready") return { kind: "error", message: COSTCO_SIGN_IN_MESSAGE };
-      const report = expectReport(tabId, SYNC_TIMEOUT_MS);
+      const report = expectReport(tabId, syncTimeoutMs());
       const alive = await chrome.tabs.sendMessage(tabId, { type: "PING" }).catch(() => null);
       if (!alive) await chrome.scripting.executeScript({ target: { tabId }, files: ["content/costco.js"] });
       await chrome.tabs.sendMessage(tabId, { type: "START_SYNC", platform: "Costco" });
@@ -1445,11 +1825,11 @@
       const ready = await waitReady(tabId);
       if (ready === "timeout") return { kind: "error", message: COSTCO_TIMEOUT_MESSAGE };
       if (ready !== "ready") return { kind: "error", message: COSTCO_SIGN_IN_MESSAGE };
-      const appId = await inPage(tabId, () => {
-        const m = /^#\/app\/([^/]+)\//.exec(location.hash || "");
+      const appId = await inPage(tabId, ((src) => {
+        const m = new RegExp(src).exec(location.hash || "");
         return m ? m[1] : null;
-      }) || COSTCO_APP_ID;
-      const deadline = Date.now() + ORDERS_TIMEOUT_MS;
+      }), [S().patterns.appIdHash]) || COSTCO_APP_ID;
+      const deadline = Date.now() + ordersTimeoutMs();
       const rows = [];
       let timedOut = 0;
       let skipped = 0;
@@ -1459,11 +1839,11 @@
           deferred = orderNumbers.length - i;
           break;
         }
-        if (i > 0) await sleep3(DETAIL_DELAY_MS);
+        if (i > 0) await sleep3(detailDelayMs());
         const n = orderNumbers[i];
         await inPage(tabId, ((h) => {
           location.hash = h;
-        }), [`#/app/${appId}/orderdetails/${n}`]);
+        }), [S().urls.orderDetailHash.replace("{appId}", () => String(appId)).replace("{orderNumber}", () => n)]);
         const found = await waitForDetails(tabId, n);
         if (found === "signed-out") return { kind: "error", message: COSTCO_SIGN_IN_MESSAGE };
         if (!found) {
@@ -1483,30 +1863,32 @@
     }
   }
   async function waitForDetails(tabId, orderNumber) {
-    const end = Date.now() + DETAIL_WAIT_MS;
+    const end = Date.now() + detailWaitMs();
     while (Date.now() < end) {
       const o = await inPage(tabId, ((k) => (window.__costcoOrderDetails ?? {})[k] ?? null), [orderNumber]);
       if (o) return o;
       if (judgeTab(await look(tabId)) === "signed-out") return "signed-out";
-      await sleep3(POLL_MS3);
+      await sleep3(pollMs());
     }
     return null;
   }
-  var ORDERS_URL, READY_WAIT_MS, SYNC_TIMEOUT_MS, DETAIL_WAIT_MS, ORDERS_TIMEOUT_MS, DETAIL_DELAY_MS, POLL_MS3, sleep3, MAIN, active, sweeping, currentCommandId, RUN_TAB_KEY2, KEEPALIVE_MS4, store2, waiting;
+  var S, ordersUrl, readyWaitMs, syncTimeoutMs, detailWaitMs, ordersTimeoutMs, detailDelayMs, pollMs, sleep3, MAIN, active2, sweeping, currentCommandId, RUN_TAB_KEY2, KEEPALIVE_MS4, store2, waiting;
   var init_costcoRun = __esm({
     "src/background/costcoRun.ts"() {
       "use strict";
       init_costcoCommand();
-      ORDERS_URL = "https://www.costco.com/myaccount/";
-      READY_WAIT_MS = 45e3;
-      SYNC_TIMEOUT_MS = 4 * 6e4;
-      DETAIL_WAIT_MS = 2e4;
-      ORDERS_TIMEOUT_MS = 5 * 6e4;
-      DETAIL_DELAY_MS = 500;
-      POLL_MS3 = 500;
+      init_scrapeConfig();
+      S = () => getScrape("costco");
+      ordersUrl = () => S().urls.orders;
+      readyWaitMs = () => S().timeoutsMs.readyWaitMs;
+      syncTimeoutMs = () => S().timeoutsMs.syncTimeoutMs;
+      detailWaitMs = () => S().timeoutsMs.detailWaitMs;
+      ordersTimeoutMs = () => S().timeoutsMs.ordersTimeoutMs;
+      detailDelayMs = () => S().timeoutsMs.detailDelayMs;
+      pollMs = () => S().timeoutsMs.pollMs;
       sleep3 = (ms) => new Promise((r) => setTimeout(r, ms));
       MAIN = "MAIN";
-      active = false;
+      active2 = false;
       sweeping = true;
       currentCommandId = null;
       RUN_TAB_KEY2 = "costcoRunTab";
@@ -1533,6 +1915,7 @@
       init_browserTarget();
       init_costcoCommand();
       init_costcoRun();
+      init_scrapeConfig();
       var ICON_PATHS_CHROME = { 16: "icons/icon16.png", 32: "icons/icon32.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
       var ICON_PATH_FIREFOX = "icons/icon.svg";
       var _browser = globalThis.browser;
@@ -1555,20 +1938,47 @@
       }
       flushQueue().catch(() => {
       });
+      async function refreshScrapeConfig() {
+        await initScrapeConfig();
+        try {
+          const { trackerUrl, apiKey, extensionSecret, userId } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
+          if (!trackerUrl) {
+            await loadScrapeConfig(null);
+            return;
+          }
+          const headers = {};
+          if (apiKey) headers["X-API-Key"] = apiKey;
+          if (extensionSecret) headers["X-Extension-Secret"] = extensionSecret;
+          if (userId) headers["X-Extension-User-Id"] = userId;
+          headers["X-Extension-Browser"] = isFirefox ? "firefox" : "chrome";
+          await loadScrapeConfig({ base: upgradeUrl2(trackerUrl), headers });
+        } catch {
+        }
+      }
+      initScrapeConfig().then(() => refreshScrapeConfig()).catch(() => {
+      });
       chrome.runtime.onInstalled.addListener(() => {
         console.log("[Reselling Tracker] Extension installed.");
         setToolbarIcon();
+        chrome.alarms.create("scrapeConfig", { delayInMinutes: 1, periodInMinutes: 360 });
+        refreshScrapeConfig().catch(() => {
+        });
         chrome.alarms.create("pollCommands", { when: Date.now() + 2e3, periodInMinutes: 1 });
         pollAndExecuteCommands().catch(console.error);
         reregisterTrackerScript();
       });
       chrome.runtime.onStartup.addListener(() => {
         setToolbarIcon();
+        chrome.alarms.create("scrapeConfig", { delayInMinutes: 1, periodInMinutes: 360 });
+        refreshScrapeConfig().catch(() => {
+        });
         chrome.alarms.create("pollCommands", { when: Date.now() + 2e3, periodInMinutes: 1 });
         pollAndExecuteCommands().catch(console.error);
         reregisterTrackerScript();
       });
       chrome.alarms.onAlarm.addListener((alarm) => {
+        if (alarm.name === "scrapeConfig") refreshScrapeConfig().catch(() => {
+        });
         if (alarm.name === "pollCommands") {
           pollAndExecuteCommands().catch(console.error);
           flushQueue().catch(console.error);
@@ -2212,6 +2622,8 @@
         try {
           const res = await fetch(`${base}/api/extension/commands`, { headers });
           if (!res.ok) return;
+          if (scrapeConfigIsStale(res.headers.get("X-Scrape-Config-Version"))) refreshScrapeConfig().catch(() => {
+          });
           commands = await res.json();
         } catch {
           return;
