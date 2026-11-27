@@ -395,10 +395,10 @@
     return s.status === "capped" ? `${base} (page cap reached)` : s.status === "error" ? `${base} (${s.message})` : base;
   }
   function createSyncRunner(deps2) {
-    let running = false;
+    let running3 = false;
     async function run(opts = {}) {
-      if (running) return { started: false, reason: "a sync is already running" };
-      running = true;
+      if (running3) return { started: false, reason: "a sync is already running" };
+      running3 = true;
       const maxPages = opts.maxPages ?? DEFAULT_MAX_PAGES;
       const paceMs = opts.paceMs ?? DEFAULT_PACE_MS;
       const sum = { status: "done", pages: 0, created: 0, updated: 0, unchanged: 0, discrepancies: 0, message: "" };
@@ -524,11 +524,11 @@
           } catch {
           }
         }
-        running = false;
+        running3 = false;
       }
       return sum;
     }
-    return { run, isRunning: () => running };
+    return { run, isRunning: () => running3 };
   }
   var START_URL, DEFAULT_MAX_PAGES, DEFAULT_PACE_MS, CLICK_MAX_ORDERS, MAX_TRACK_PAGES_PER_ORDER, digitsOf, detailUrlFor;
   var init_syncRun = __esm({
@@ -822,6 +822,341 @@
     }
   });
 
+  // src/background/carrierRun.ts
+  function statusRegex(words) {
+    const esc = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    return new RegExp(`\\b(${esc.join("|")})\\b`, "i");
+  }
+  function carrierRunActive() {
+    return running;
+  }
+  function pageUrl(item) {
+    const n = encodeURIComponent(item.trackingNumber);
+    return item.carrier === "fedex" ? `https://www.fedex.com/fedextrack/?trknbr=${n}` : `https://www.ups.com/track?tracknum=${n}`;
+  }
+  function parseCarrierPayload(raw, userId) {
+    let p;
+    try {
+      p = JSON.parse(raw ?? "null");
+    } catch {
+      return { error: "bad payload" };
+    }
+    if (!p || !Array.isArray(p.items)) return { error: "bad payload" };
+    if (userId && p.userId != null && String(p.userId) !== String(userId)) return { error: "command is for another user" };
+    const items = [];
+    for (const it of p.items.slice(0, MAX_ITEMS)) {
+      const c = it?.carrier;
+      const n = String(it?.trackingNumber ?? "").replace(/\s+/g, "").toUpperCase();
+      if ((c === "fedex" || c === "ups") && /^[A-Z0-9]{8,40}$/.test(n)) items.push({ carrier: c, trackingNumber: n });
+    }
+    const sent = Array.isArray(p.statusWords) ? p.statusWords.filter((w) => typeof w === "string" && w.length > 0 && w.length <= 40).slice(0, 40) : [];
+    const statusWords = sent.length ? sent : [...DEFAULT_STATUS_WORDS];
+    return items.length ? { items, statusWords } : { error: "no usable items" };
+  }
+  function readPage(max) {
+    return { text: (document.body?.innerText ?? "").slice(0, max) };
+  }
+  async function readWhenReady(tabId, ready) {
+    const deadline = Date.now() + WAIT_MS2;
+    while (Date.now() < deadline) {
+      await sleep(POLL_MS);
+      try {
+        const res = await chrome.scripting.executeScript({ target: { tabId }, func: readPage, args: [MAX_TEXT] });
+        const text = res[0]?.result?.text ?? "";
+        if (ready.test(text)) return text;
+      } catch {
+      }
+    }
+    return null;
+  }
+  async function readOne(item, ready, post) {
+    const url = pageUrl(item);
+    let tabId;
+    try {
+      const tab = await chrome.tabs.create({ url, active: false });
+      tabId = tab.id;
+      if (tabId == null) return false;
+      const text = await readWhenReady(tabId, ready);
+      if (!text) return false;
+      return await post({ carrier: item.carrier, trackingNumber: item.trackingNumber, url, text });
+    } catch {
+      return false;
+    } finally {
+      if (tabId != null) await chrome.tabs.remove(tabId).catch(() => {
+      });
+    }
+  }
+  async function runCarrierItems(items, post, statusWords = DEFAULT_STATUS_WORDS) {
+    const ready = statusRegex(statusWords.length ? statusWords : DEFAULT_STATUS_WORDS);
+    if (running) return { ok: false, done: 0, failed: items.length };
+    running = true;
+    const keep = setInterval(() => {
+      chrome.runtime.getPlatformInfo().catch(() => {
+      });
+    }, KEEPALIVE_MS2);
+    let done = 0;
+    let failed = 0;
+    try {
+      for (let i = 0; i < items.length; i++) {
+        if (i > 0) await sleep(GAP_MIN_MS + Math.random() * (GAP_MAX_MS - GAP_MIN_MS));
+        if (await readOne(items[i], ready, post)) done++;
+        else failed++;
+      }
+    } finally {
+      clearInterval(keep);
+      running = false;
+    }
+    return { ok: done > 0, done, failed };
+  }
+  var MAX_ITEMS, MAX_TEXT, POLL_MS, WAIT_MS2, GAP_MIN_MS, GAP_MAX_MS, KEEPALIVE_MS2, DEFAULT_STATUS_WORDS, running, sleep;
+  var init_carrierRun = __esm({
+    "src/background/carrierRun.ts"() {
+      "use strict";
+      MAX_ITEMS = 5;
+      MAX_TEXT = 2e5;
+      POLL_MS = 2e3;
+      WAIT_MS2 = 4e4;
+      GAP_MIN_MS = 5e3;
+      GAP_MAX_MS = 15e3;
+      KEEPALIVE_MS2 = 2e4;
+      DEFAULT_STATUS_WORDS = ["delivered", "in transit", "out for delivery", "on the way", "exception", "delivery exception", "label created", "shipment created", "pending", "delayed", "picked up", "arriving"];
+      running = false;
+      sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    }
+  });
+
+  // src/lib/egiftCommand.ts
+  function parseEgiftPayload(raw, userId) {
+    let p;
+    try {
+      p = JSON.parse(raw ?? "null");
+    } catch {
+      return { error: "bad payload" };
+    }
+    if (!p || typeof p !== "object") return { error: "bad payload" };
+    if (userId && p.userId != null && String(p.userId) !== String(userId)) return { error: "command is for another user" };
+    const orderId = Number(p.orderId);
+    if (typeof p.orderId === "boolean" || p.orderId === null || !Number.isInteger(orderId) || orderId <= 0) return { error: "bad payload" };
+    return { orderId };
+  }
+  function isAllowedEgiftLink(raw) {
+    if (typeof raw !== "string") return false;
+    let u;
+    try {
+      u = new URL(raw);
+    } catch {
+      return false;
+    }
+    return u.protocol === "https:" && EGIFT_HOSTS.includes(u.hostname.toLowerCase()) && !u.username && !u.password && !!u.searchParams.get("login");
+  }
+  function parseEgiftInfo(body) {
+    const b = body;
+    if (!b || typeof b.link !== "string" || typeof b.email !== "string") return null;
+    const email = b.email.trim();
+    return b.link && email ? { link: b.link, email } : null;
+  }
+  function parseCardText(text) {
+    const code = /\bCode:\s*([A-Za-z0-9-]{4,64})/.exec(text)?.[1];
+    if (!code) return null;
+    const pin = /\bPIN:\s*([A-Za-z0-9]{2,32})/i.exec(text)?.[1] ?? null;
+    const seq = /\b(\d{1,3})\s+of\s+(\d{1,3})\b/i.exec(text);
+    const amt = /\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+(?:\.\d{2})?)/.exec(text)?.[1];
+    const value = amt ? Number(amt.replace(/,/g, "")) : NaN;
+    return {
+      index: seq ? Number(seq[1]) : 1,
+      total: seq ? Number(seq[2]) : 1,
+      code,
+      pin,
+      value: Number.isFinite(value) && value > 0 && value <= 1e4 ? value : null
+    };
+  }
+  function egiftPostBody(orderId, card) {
+    const body = { orderId, cardNumber: card.code };
+    if (card.pin) body.pin = card.pin;
+    if (card.value != null) body.value = card.value;
+    return body;
+  }
+  function egiftReport(cards, saved, failure) {
+    if (!failure && cards > 0 && saved === cards) return { status: "done", result: { cards, saved } };
+    return { status: "failed", result: { cards, saved, error: failure ?? "no-cards" } };
+  }
+  var EGIFT_HOSTS, MAX_CARDS;
+  var init_egiftCommand = __esm({
+    "src/lib/egiftCommand.ts"() {
+      "use strict";
+      EGIFT_HOSTS = ["www.memberedelivery.com"];
+      MAX_CARDS = 50;
+    }
+  });
+
+  // src/background/egiftRun.ts
+  function egiftRunActive() {
+    return running2;
+  }
+  function pageText() {
+    const text = document.body?.innerText ?? "";
+    const clickables = Array.from(document.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]'));
+    const label = (e) => (e.value || e.textContent || "").trim();
+    return {
+      text: text.slice(0, 1e5),
+      hasEmail: !!document.querySelector('input[type="email"], input[name*="email" i], input[id*="email" i]'),
+      hasOpen: clickables.some((e) => label(e).toLowerCase().includes("access egift")),
+      hasNext: clickables.some((e) => /^next\b/i.test(label(e))),
+      alert: !!document.querySelector('[role="alert"]') && /\b(invalid|not match|incorrect|error)\b/i.test(document.querySelector('[role="alert"]')?.textContent ?? "")
+    };
+  }
+  function enterEmail(email) {
+    const input = document.querySelector('input[type="email"], input[name*="email" i], input[id*="email" i]');
+    if (!input) return false;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    input.focus();
+    setter?.call(input, email);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    const form = input.closest("form");
+    const btn = form?.querySelector('button[type="submit"], input[type="submit"]') ?? Array.from((form ?? document).querySelectorAll("button")).find((b) => /submit|continue|next|view|access/i.test(b.textContent ?? ""));
+    if (btn) btn.click();
+    else form?.requestSubmit();
+    return true;
+  }
+  function clickLabel(startsWith, contains) {
+    const want = startsWith.toLowerCase();
+    const els = Array.from(document.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]'));
+    const el = els.find((e) => {
+      const t = ((e.value || e.textContent) ?? "").trim().toLowerCase();
+      return contains ? t.includes(want) : t.startsWith(want);
+    });
+    if (!el) return false;
+    el.click();
+    return true;
+  }
+  async function read(tabId) {
+    const res = await chrome.scripting.executeScript({ target: { tabId }, func: pageText });
+    return res[0]?.result ?? null;
+  }
+  async function waitFor(tabId, ok) {
+    const deadline = Date.now() + WAIT_MS3;
+    while (Date.now() < deadline) {
+      await sleep2(POLL_MS2);
+      try {
+        const s = await read(tabId);
+        if (s && ok(s)) return s;
+      } catch {
+      }
+    }
+    return null;
+  }
+  async function runEgiftOrder(base, headers, orderId, doFetch = fetch) {
+    if (running2) return egiftReport(0, 0, "run-busy");
+    running2 = true;
+    const keep = setInterval(() => {
+      chrome.runtime.getPlatformInfo().catch(() => {
+      });
+    }, KEEPALIVE_MS3);
+    let tabId;
+    let cards = 0;
+    let saved = 0;
+    let failure = null;
+    try {
+      const res = await doFetch(`${base}/api/extension/egift?orderId=${orderId}`, { headers, cache: "no-store" });
+      if (!res.ok) return egiftReport(0, 0, "error");
+      const info = parseEgiftInfo(await res.json().catch(() => null));
+      if (!info) return egiftReport(0, 0, "no-link");
+      if (!isAllowedEgiftLink(info.link)) return egiftReport(0, 0, "link-rejected");
+      const tab = await chrome.tabs.create({ url: info.link, active: false });
+      tabId = tab.id;
+      if (tabId == null) return egiftReport(0, 0, "error");
+      const first = await waitFor(tabId, (s) => s.hasEmail || s.hasOpen || s.alert);
+      if (!first) return egiftReport(0, 0, "page-timeout");
+      if (first.hasEmail && !first.hasOpen) {
+        await chrome.scripting.executeScript({ target: { tabId }, func: enterEmail, args: [info.email] });
+      }
+      const list = await waitFor(tabId, (s) => s.hasOpen || s.alert && !s.hasEmail || !!parseCardText(s.text));
+      if (!list) return egiftReport(0, 0, "page-timeout");
+      if (list.alert && !list.hasOpen) return egiftReport(0, 0, "email-rejected");
+      if (!list.hasOpen && !parseCardText(list.text)) return egiftReport(0, 0, "no-open-button");
+      if (list.hasOpen) {
+        await sleep2(STEP_DELAY_MS);
+        await chrome.scripting.executeScript({ target: { tabId }, func: clickLabel, args: [OPEN_LABEL, true] });
+      }
+      let expected = 1;
+      let total = 0;
+      let lastCode = "";
+      while (cards < MAX_CARDS) {
+        const s = await waitFor(tabId, (st) => {
+          const c = parseCardText(st.text);
+          return !!c && c.code !== lastCode;
+        });
+        if (!s) {
+          failure = cards ? "ended-early" : "page-timeout";
+          break;
+        }
+        const card = parseCardText(s.text);
+        if (cards === 0) total = card.total;
+        if (card.index !== expected) {
+          failure = "out-of-sequence";
+          break;
+        }
+        if (card.total !== total) {
+          failure = "total-mismatch";
+          break;
+        }
+        cards++;
+        lastCode = card.code;
+        let ok = false;
+        try {
+          const r = await doFetch(`${base}/api/extension/egift`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...headers },
+            body: JSON.stringify(egiftPostBody(orderId, card))
+          });
+          ok = r.ok;
+        } catch {
+          ok = false;
+        }
+        if (!ok) {
+          failure = "save-failed";
+          break;
+        }
+        saved++;
+        if (card.index >= total) {
+          if (card.index !== total) failure = "ended-early";
+          break;
+        }
+        await sleep2(STEP_DELAY_MS);
+        const next = await chrome.scripting.executeScript({ target: { tabId }, func: clickLabel, args: ["next", false] });
+        if (!next[0]?.result) {
+          failure = "ended-early";
+          break;
+        }
+        expected++;
+      }
+      if (!failure && cards >= MAX_CARDS && saved < total) failure = "ended-early";
+      return egiftReport(cards, saved, failure);
+    } catch {
+      return egiftReport(cards, saved, "error");
+    } finally {
+      clearInterval(keep);
+      if (tabId != null) await chrome.tabs.remove(tabId).catch(() => {
+      });
+      running2 = false;
+    }
+  }
+  var POLL_MS2, WAIT_MS3, STEP_DELAY_MS, KEEPALIVE_MS3, OPEN_LABEL, running2, sleep2;
+  var init_egiftRun = __esm({
+    "src/background/egiftRun.ts"() {
+      "use strict";
+      init_egiftCommand();
+      POLL_MS2 = 1500;
+      WAIT_MS3 = 4e4;
+      STEP_DELAY_MS = 3e3;
+      KEEPALIVE_MS3 = 2e4;
+      OPEN_LABEL = "Access eGift";
+      running2 = false;
+      sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
+    }
+  });
+
   // src/lib/trackCommand.ts
   function trackCommandPlan(payloadJson, settingsUserId, runActive) {
     if (runActive) return { action: "wait" };
@@ -990,7 +1325,7 @@
     const t = setInterval(() => {
       chrome.runtime.getPlatformInfo().catch(() => {
       });
-    }, KEEPALIVE_MS2);
+    }, KEEPALIVE_MS4);
     try {
       return await work();
     } finally {
@@ -1055,7 +1390,7 @@
     while (Date.now() < end) {
       const verdict = judgeTab(await look(tabId));
       if (verdict !== "wait") return verdict;
-      await sleep(POLL_MS);
+      await sleep3(POLL_MS3);
     }
     const last = await look(tabId);
     return judgeTab(last) === "ready" ? "ready" : judgeDeadline(last);
@@ -1124,7 +1459,7 @@
           deferred = orderNumbers.length - i;
           break;
         }
-        if (i > 0) await sleep(DETAIL_DELAY_MS);
+        if (i > 0) await sleep3(DETAIL_DELAY_MS);
         const n = orderNumbers[i];
         await inPage(tabId, ((h) => {
           location.hash = h;
@@ -1153,11 +1488,11 @@
       const o = await inPage(tabId, ((k) => (window.__costcoOrderDetails ?? {})[k] ?? null), [orderNumber]);
       if (o) return o;
       if (judgeTab(await look(tabId)) === "signed-out") return "signed-out";
-      await sleep(POLL_MS);
+      await sleep3(POLL_MS3);
     }
     return null;
   }
-  var ORDERS_URL, READY_WAIT_MS, SYNC_TIMEOUT_MS, DETAIL_WAIT_MS, ORDERS_TIMEOUT_MS, DETAIL_DELAY_MS, POLL_MS, sleep, MAIN, active, sweeping, currentCommandId, RUN_TAB_KEY2, KEEPALIVE_MS2, store2, waiting;
+  var ORDERS_URL, READY_WAIT_MS, SYNC_TIMEOUT_MS, DETAIL_WAIT_MS, ORDERS_TIMEOUT_MS, DETAIL_DELAY_MS, POLL_MS3, sleep3, MAIN, active, sweeping, currentCommandId, RUN_TAB_KEY2, KEEPALIVE_MS4, store2, waiting;
   var init_costcoRun = __esm({
     "src/background/costcoRun.ts"() {
       "use strict";
@@ -1168,14 +1503,14 @@
       DETAIL_WAIT_MS = 2e4;
       ORDERS_TIMEOUT_MS = 5 * 6e4;
       DETAIL_DELAY_MS = 500;
-      POLL_MS = 500;
-      sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      POLL_MS3 = 500;
+      sleep3 = (ms) => new Promise((r) => setTimeout(r, ms));
       MAIN = "MAIN";
       active = false;
       sweeping = true;
       currentCommandId = null;
       RUN_TAB_KEY2 = "costcoRunTab";
-      KEEPALIVE_MS2 = 2e4;
+      KEEPALIVE_MS4 = 2e4;
       store2 = () => chrome.storage.local;
       waiting = /* @__PURE__ */ new Map();
       chrome.tabs.onRemoved.addListener((tabId) => {
@@ -1190,6 +1525,9 @@
       init_tracker_script();
       init_amazonCapture2();
       init_amazonRun();
+      init_carrierRun();
+      init_egiftRun();
+      init_egiftCommand();
       init_trackCommand();
       init_visitCommand();
       init_browserTarget();
@@ -1942,6 +2280,42 @@
             }
             continue;
           }
+          if (cmd.type === "TRACK_CARRIER") {
+            if (carrierRunActive()) continue;
+            await patchCommand(base, cmd.id, "running", headers);
+            const plan = parseCarrierPayload(cmd.payload, userId);
+            if ("error" in plan) {
+              await patchCommand(base, cmd.id, "failed", headers, { error: plan.error });
+              continue;
+            }
+            try {
+              const post = async (body) => {
+                const r = await fetch(`${base}/api/extension/carrier-page`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
+                return r.ok;
+              };
+              const out = await runCarrierItems(plan.items, post, plan.statusWords);
+              await patchCommand(base, cmd.id, out.ok ? "done" : "failed", headers, out.ok ? out : { ...out, error: "no page could be read" });
+            } catch (e) {
+              await patchCommand(base, cmd.id, "failed", headers, { error: String(e) });
+            }
+            continue;
+          }
+          if (cmd.type === "SCRAPE_EGIFT") {
+            if (egiftRunActive()) continue;
+            await patchCommand(base, cmd.id, "running", headers);
+            const plan = parseEgiftPayload(cmd.payload, userId);
+            if ("error" in plan) {
+              await patchCommand(base, cmd.id, "failed", headers, { error: plan.error });
+              continue;
+            }
+            try {
+              const report = await runEgiftOrder(base, headers, plan.orderId);
+              await patchCommand(base, cmd.id, report.status, headers, report.result);
+            } catch {
+              await patchCommand(base, cmd.id, "failed", headers, { error: "error" });
+            }
+            continue;
+          }
           await patchCommand(base, cmd.id, "running", headers);
           try {
             let result;
@@ -1983,12 +2357,12 @@
         }
       }
       async function runCostcoOrderCommand(trackerUrl, apiKey, userId, orderNumbers) {
-        const read = await readCostcoOrders(orderNumbers);
-        if (read.kind === "error") return costcoReport(read);
-        const counts = { platform: "Costco", requested: orderNumbers.length, scraped: read.rows.length, timedOut: read.timedOut, skipped: read.skipped, deferred: read.deferred };
-        if (!read.rows.length) return costcoReport({ kind: "done", result: counts });
+        const read2 = await readCostcoOrders(orderNumbers);
+        if (read2.kind === "error") return costcoReport(read2);
+        const counts = { platform: "Costco", requested: orderNumbers.length, scraped: read2.rows.length, timedOut: read2.timedOut, skipped: read2.skipped, deferred: read2.deferred };
+        if (!read2.rows.length) return costcoReport({ kind: "done", result: counts });
         try {
-          const res = await handlePushOrders(trackerUrl, apiKey, userId, read.rows);
+          const res = await handlePushOrders(trackerUrl, apiKey, userId, read2.rows);
           return costcoReport({ kind: "done", result: { ...counts, ...res && typeof res === "object" ? res : {} } });
         } catch (e) {
           return costcoReport({ kind: "error", message: String(e).slice(0, 200) });

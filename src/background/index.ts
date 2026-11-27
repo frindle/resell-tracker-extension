@@ -3,6 +3,8 @@ import { ensureTrackerScriptRegistered } from '../lib/tracker-script';
 import { handleCapture, flushQueue, getCaptureStatus, getLastRun } from './amazonCapture';
 import { startAmazonRun, startTrackingRun, startVisitRun, closeOrphanRunTab, notifyOutcome, notePage, isRunTab, isTrackRunTab, amazonRunActive } from './amazonRun';
 import { runCarrierItems, parseCarrierPayload, carrierRunActive } from './carrierRun';
+import { runEgiftOrder, egiftRunActive } from './egiftRun';
+import { parseEgiftPayload } from '../lib/egiftCommand';
 import { trackCommandPlan } from '../lib/trackCommand';
 import { visitCommandPlan } from '../lib/visitCommand';
 import { extensionBrowser } from '../lib/browserTarget';
@@ -868,6 +870,21 @@ async function pollAndExecuteCommands() {
         await patchCommand(base, cmd.id, out.ok ? 'done' : 'failed', headers, out.ok ? out : { ...out, error: 'no page could be read' });
       } catch (e) {
         await patchCommand(base, cmd.id, 'failed', headers, { error: String(e) });
+      }
+      continue;
+    }
+    if (cmd.type === 'SCRAPE_EGIFT') {
+      // Costco eGift cards for one order, read from the delivery link in a background tab.
+      // Left pending while another eGift run is going. The result is counts only.
+      if (egiftRunActive()) continue;
+      await patchCommand(base, cmd.id, 'running', headers);
+      const plan = parseEgiftPayload(cmd.payload, userId);
+      if ('error' in plan) { await patchCommand(base, cmd.id, 'failed', headers, { error: plan.error }); continue; }
+      try {
+        const report = await runEgiftOrder(base, headers, plan.orderId);
+        await patchCommand(base, cmd.id, report.status, headers, report.result);
+      } catch {
+        await patchCommand(base, cmd.id, 'failed', headers, { error: 'error' });
       }
       continue;
     }

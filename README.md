@@ -51,6 +51,10 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.3.9
+
+- **Costco eGift cards are read automatically.** The tracker's SCRAPE_EGIFT command opens the order's delivery link (www.memberedelivery.com only) in a background tab, enters the delivery email, reads each card and saves it to the tracker. The tab is always closed; the result is counts only (never card numbers, PINs, the email or the link).
+
 ### 1.3.8
 
 - **Costco sync runs in this browser.** The tracker queues a Costco sync (the order list, and details for single orders) and the extension runs it in a background tab on costco.com, using the page's own requests. The tab is always closed afterwards and nothing steals focus.
