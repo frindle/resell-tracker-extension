@@ -1,4 +1,4 @@
-// SCRAPE_EGIFT with `runner: 'plan'`: runs the bundled costcoEgift step plan (src/lib/plans.default.json)
+// SCRAPE_EGIFT with `runner: 'plan'`: runs the costcoEgift step plan (a signed remote one when verified, else src/lib/plans.default.json)
 // instead of the built-in runner. The link and email come from the same GET /api/extension/egift. A
 // plan that fails validation falls back to the built-in runner (and the report says so), except for a
 // dry run, which never falls back because the built-in runner would really save cards.
@@ -7,13 +7,17 @@ import { runPlan, type PlanReport } from '../lib/planRun';
 import { egiftReport, isAllowedEgiftLink, parseEgiftInfo } from '../lib/egiftCommand';
 import { claimEgiftRun, releaseEgiftRun, runEgiftOrder } from './egiftRun';
 import { chromeDriver } from './planDriver';
+import { selectPlans } from '../lib/planRemote';
 
 const PLAN_NAME = 'costcoEgift';
 
 export async function runEgiftPlan(
   base: string, headers: Record<string, string>, orderId: number, opts: { dryRun?: boolean } = {}, doFetch: typeof fetch = fetch,
 ): Promise<PlanReport | (ReturnType<typeof egiftReport> & { result: { runner: string; planFallback?: string } })> {
-  const bundled = BUNDLED_PLANS;
+  // A verified remote plan file (signed by the tracker) when it is current, else the bundled one.
+  const sel = await selectPlans();
+  const withPlan = sel.file?.plans[PLAN_NAME] ? sel : { file: BUNDLED_PLANS, source: 'bundled' as const };
+  const bundled = withPlan.file;
   const plan = bundled?.plans[PLAN_NAME];
   if (!bundled || !plan) {
     if (opts.dryRun) return { ...egiftReport(0, 0, 'plan-failed'), result: { ...egiftReport(0, 0, 'plan-failed').result, runner: 'plan-invalid' } };

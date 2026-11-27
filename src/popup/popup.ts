@@ -3,12 +3,14 @@ import { originsFor, missingOrigins, requestGrant } from '../lib/access';
 import type { ApiLogEntry } from '../lib/types';
 import { isNewerVersion } from '../lib/version';
 import { describeScrapeStatus, SCRAPE_STATUS_KEY } from '../lib/scrapeConfig';
+import { describePlanStatus, PLAN_STATUS_KEY } from '../lib/planRemote';
 
 async function showScrapeConfig() {
   const el = document.getElementById('scrapeConfigLabel');
   if (!el) return;
-  const got = await chrome.storage.local.get(SCRAPE_STATUS_KEY).catch(() => ({} as Record<string, unknown>));
-  el.textContent = describeScrapeStatus(got[SCRAPE_STATUS_KEY] as Parameters<typeof describeScrapeStatus>[0]);
+  const got = await chrome.storage.local.get([SCRAPE_STATUS_KEY, PLAN_STATUS_KEY]).catch(() => ({} as Record<string, unknown>));
+  el.textContent = describeScrapeStatus(got[SCRAPE_STATUS_KEY] as Parameters<typeof describeScrapeStatus>[0])
+    + ' · ' + describePlanStatus(got[PLAN_STATUS_KEY] as Parameters<typeof describePlanStatus>[0]);
 }
 showScrapeConfig();
 
