@@ -192,12 +192,343 @@
     }
   });
 
+  // src/lib/scrapeConfig.default.json
+  var scrapeConfig_default_default;
+  var init_scrapeConfig_default = __esm({
+    "src/lib/scrapeConfig.default.json"() {
+      scrapeConfig_default_default = {
+        version: 1,
+        sites: {
+          amazon: {
+            selectors: {
+              blockedSignIn: 'form[name="signIn"]:not(#ap_navbar_form), #ap_email, #ap_password, input[name="password"][type="password"]',
+              blockedCaptcha: 'form[action*="validateCaptcha"], #captchacharacters, img[src*="captcha"]',
+              stripElements: 'script, noscript, style, link, meta, iframe, svg, template, input[type="hidden"], [id^="shipToData-"]'
+            },
+            labels: {},
+            patterns: {
+              agentBlock: "unauthorized AI agent|violates Amazon'?s Conditions of Use|automated access",
+              refSuffix: "\\/ref=[^/]*\\/?$",
+              ordersPath: "^(?:/your-orders/orders|/gp/css/order-history|/gp/your-account/order-history)$",
+              detailPath: "^(?:/gp/your-account/order-details|/your-orders/order-details|/gp/css/order-details|/gp/css/summary/edit\\.html)$",
+              trackingPath: "^(?:/progress-tracker/package(?:/.*)?|/gp/your-account/ship-track|/gp/css/shiptrack/view\\.html)$"
+            },
+            urls: {
+              host: "www.amazon.com"
+            },
+            timeoutsMs: {
+              quietMs: 1500,
+              maxWaitMs: 15e3,
+              urlPollMs: 2e3,
+              runWaitMs: 3e4
+            }
+          },
+          costco: {
+            selectors: {},
+            labels: {
+              refreshTokenKey: "refreshtoken",
+              accessTokenKey: "accesstoken",
+              msalKeyMarker: "a3a5186b",
+              msalClientId: "a3a5186b-7c89-4b4c-93a8-dd604e930757",
+              msalScope: "openid profile offline_access"
+            },
+            patterns: {
+              warehouseKey: "store|warehouse|wh",
+              warehouseValue: "^\\d{3,4}$",
+              appIdHash: "^#\\/app\\/([^/]+)\\/"
+            },
+            urls: {
+              tokenRefresh: "https://signin.costco.com/e0714dd4-784d-46d6-a278-3e29553483eb/B2C_1A_SSO_WCS_signup_signin_209/oauth2/v2.0/token",
+              orderDetail: "https://www.costco.com/myaccount/#/app/4900eb1f-0c10-4bd9-99c3-c59e6c1ecebf/orderdetails/{orderNumber}",
+              orders: "https://www.costco.com/myaccount/",
+              orderDetailHash: "#/app/{appId}/orderdetails/{orderNumber}",
+              apiHost: "ecom-api.costco.com",
+              graphqlPath: "order/v1/orders/graphql"
+            },
+            timeoutsMs: {
+              authWaitMs: 2e4,
+              authPollMs: 1e3,
+              pageDelayMs: 600,
+              readyWaitMs: 45e3,
+              syncTimeoutMs: 24e4,
+              detailWaitMs: 2e4,
+              ordersTimeoutMs: 3e5,
+              detailDelayMs: 500,
+              pollMs: 500
+            }
+          },
+          walmart: {
+            selectors: {
+              orderBlocks: '[data-testid*="orderGroup"], [data-testid*="order-card"], [data-testid*="orderCard"]',
+              orderCaption: '[id^="caption-"]',
+              itemFallback: 'a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]',
+              productName: '[data-testid="productName"]',
+              nextPageLink: '[aria-label="Next page"]:not([disabled]) a, [data-automation-id*="next-page"]:not([disabled]) a, [aria-label="Next page"]:not([disabled])',
+              nextPageButton: '[aria-label="Next page"]:not([disabled]), [data-automation-id*="next-page"]:not([disabled])',
+              nextClick: '[aria-label="Next page"]:not([disabled]), [data-automation-id*="next-page"]:not([disabled]), button[aria-label*="next" i]:not([disabled])',
+              nextData: "#__NEXT_DATA__",
+              detailAddress: '[data-automation-id*="shipping-address"], [class*="shipping-address"], [class*="shippingAddress"]',
+              detailTotal: '[data-automation-id*="order-total"], [class*="orderTotal"], [class*="order-total"]',
+              detailItem: '[data-automation-id*="product-title"], [class*="product-title"], h2[class*="item"]',
+              deliveryPhoto: 'img[alt="Proof of delivery location"], img[src*="/delivery-photo/"]'
+            },
+            labels: {
+              groupsKeyPrefix: "groups_"
+            },
+            patterns: {
+              cancelledOrReturned: "(?:\\b(?:cancell?ed|cancellation|returned|refunded)\\b|we had to cancel|we['\u2019]ve canceled|cancel these items|won['\u2019]t be charged|released the temporary hold)",
+              captionOrderNumber: "caption-(\\d+)",
+              orderNumberLabeled: "Order\\s*#?\\s*(\\d{10,})",
+              orderNumberBare: "\\b(\\d{13,20})\\b",
+              dateLabeledFull: "(?:Placed|Ordered|Delivered|on)\\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+\\d{1,2},?\\s+\\d{4})",
+              dateFull: "\\b((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+\\d{1,2},?\\s+\\d{4})",
+              dateLabeledNoYear: "(?:Placed|Ordered|Delivered|on)\\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+\\d{1,2})(?!\\d)",
+              storePickup: "\\b(?:Free\\s+store\\s+pickup|Curbside\\s+pickup|Pickup\\s+at|Ready\\s+for\\s+pickup|Store\\s+Pickup|Pickup\\s+order)\\b",
+              orderTotal: "Total\\s+\\$?([\\d,]+\\.?\\d*)",
+              genericTitle: "^(Walmart\\.com|Walmart|Loading|\u2014|\u2014\\s*\u2014)$",
+              genericTitleJson: "^(Walmart\\.com|Walmart|Loading)$",
+              cardLast4: "(?:ending\\s+(?:in)?|\\*{2,}|\\.{2,})\\s*(\\d{4})\\b",
+              trackingField: `trackingNumber["\\s:]+["']?([A-Z0-9]{10,25})`,
+              trackingUps: "\\b(1Z[A-Z0-9]{16})\\b",
+              trackingDigits: "\\b([0-9]{20,22})\\b",
+              internalTracking: "^555\\d{15,}$",
+              scriptBlock: "<script[^>]*>([\\s\\S]*?)<\\/script>",
+              jsonOrderDate: '"orderDate":"([^"]+)"',
+              jsonPlacedDate: '"placedDate":"([^"]+)"',
+              jsonOrderPlacedDate: '"orderPlacedDate":"([^"]+)"',
+              jsonCreatedDate: '"createdDate":"([^"]+)"',
+              jsonCost: '"(?:totalAmount|financeTotal|orderTotal|grandTotal|chargeTotal|estimatedTotal|totalCharges|orderTotalAmount|total)"\\s*:\\s*([\\d.]+)',
+              jsonProductName: '"(?:productName|itemDescription)"\\s*:\\s*"([^"]{5,120})"',
+              htmlTotal: "(?:order\\s+)?total[^$\\d]{0,30}\\$\\s*([\\d,]+\\.?\\d*)",
+              htmlPlaced: "[Pp]laced[^<]{0,80}?(\\d{4}-\\d{2}-\\d{2})",
+              jsonLastFour: '"lastFour"\\s*:\\s*"?(\\d{4})"?',
+              jsonLastFourDigits: '"lastFourDigits"\\s*:\\s*"?(\\d{4})"?',
+              jsonCardLast4: '"cardLast4"\\s*:\\s*"?(\\d{4})"?',
+              jsonLast4: '"last4"\\s*:\\s*"?(\\d{4})"?',
+              jsonCardNumberLast4: '"cardNumberLast4"\\s*:\\s*"?(\\d{4})"?',
+              jsonAccountNumberLast4: '"accountNumberLast4"\\s*:\\s*"?(\\d{4})"?',
+              textEndingIn: "\\bending\\s+in\\s+(\\d{4})\\b",
+              textEnding: "\\bending\\s+(\\d{4})\\b",
+              textAsterisks: "\\*{2,}\\s*(\\d{4})\\b",
+              textXs: "\\bx{4,}\\s*(\\d{4})\\b",
+              textBullets: "[\u2022\xB7\u2024\u22C5\u25CF]{2,}\\s*(\\d{4})\\b",
+              textHtmlBullet: "(?:&bull;|&middot;|&#x2022;|&#8226;){2,}\\s*(\\d{4})\\b",
+              httpUrl: "^https?:\\/\\/"
+            },
+            urls: {
+              orders: "https://www.walmart.com/orders",
+              orderDetail: "https://www.walmart.com/orders/{orderNumber}",
+              ordersPath: "/orders",
+              purchasesPath: "/account/mypurchases"
+            },
+            timeoutsMs: {
+              detailFetchMs: 5e3,
+              firstLoadMs: 15e3,
+              pageLoadMs: 12e3,
+              loadPollMs: 400,
+              resumeDelayMs: 2e3
+            }
+          },
+          costcoEgift: {
+            selectors: {
+              clickables: 'button, a, [role="button"], input[type="button"], input[type="submit"]',
+              emailInput: 'input[type="email"], input[name*="email" i], input[id*="email" i]',
+              alert: '[role="alert"]',
+              submitButton: 'button[type="submit"], input[type="submit"]',
+              buttons: "button"
+            },
+            labels: {
+              openLabel: "Access eGift",
+              nextLabel: "next"
+            },
+            patterns: {
+              nextButton: "^next\\b",
+              alertText: "\\b(invalid|not match|incorrect|error)\\b",
+              submitText: "submit|continue|next|view|access",
+              code: "\\bCode:\\s*([A-Za-z0-9-]{4,64})",
+              pin: "\\bPIN:\\s*([A-Za-z0-9]{2,32})",
+              sequence: "\\b(\\d{1,3})\\s+of\\s+(\\d{1,3})\\b",
+              amount: "\\$\\s?(\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})?|\\d+(?:\\.\\d{2})?)"
+            },
+            urls: {
+              host: "www.memberedelivery.com"
+            },
+            timeoutsMs: {
+              pollMs: 1500,
+              waitMs: 4e4,
+              stepDelayMs: 3e3
+            }
+          },
+          bestbuyEgift: {
+            selectors: {},
+            labels: {},
+            patterns: {},
+            urls: {},
+            timeoutsMs: {}
+          }
+        }
+      };
+    }
+  });
+
+  // src/lib/scrapeConfig.ts
+  function isPlainObject(v) {
+    if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+    const proto = Object.getPrototypeOf(v);
+    return proto === Object.prototype || proto === null;
+  }
+  function validateScrapeConfig(raw) {
+    const fail = (error) => ({ ok: false, error });
+    if (!isPlainObject(raw)) return fail("config must be an object");
+    for (const k of Object.keys(raw)) {
+      if (k !== "version" && k !== "sites") return fail(`unknown top-level key "${k}"`);
+    }
+    const version = raw.version;
+    if (typeof version !== "number" || !Number.isInteger(version) || version < 1) return fail("version must be a positive integer");
+    if (!isPlainObject(raw.sites)) return fail("sites must be an object");
+    const sites = {};
+    for (const [siteKey, siteRaw] of Object.entries(raw.sites)) {
+      if (!SITE_RE.test(siteKey)) return fail(`bad site key "${siteKey}"`);
+      if (!isPlainObject(siteRaw)) return fail(`site "${siteKey}" must be an object`);
+      for (const k of Object.keys(siteRaw)) {
+        if (!SCRAPE_CATEGORIES.includes(k)) return fail(`site "${siteKey}": unknown key "${k}"`);
+      }
+      const site = { selectors: {}, labels: {}, patterns: {}, urls: {}, timeoutsMs: {} };
+      for (const cat of SCRAPE_CATEGORIES) {
+        const group = siteRaw[cat];
+        if (!isPlainObject(group)) return fail(`site "${siteKey}": ${cat} must be an object`);
+        for (const [name, value] of Object.entries(group)) {
+          const where = `${siteKey}.${cat}.${name}`;
+          if (!NAME_RE.test(name)) return fail(`bad entry name "${where}"`);
+          if (cat === "timeoutsMs") {
+            if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > MAX_MS) return fail(`${where} must be an integer 0..${MAX_MS}`);
+            site.timeoutsMs[name] = value;
+            continue;
+          }
+          if (typeof value !== "string") return fail(`${where} must be a string`);
+          if (value.length > MAX_STRING) return fail(`${where} is too long`);
+          if (cat === "patterns") {
+            try {
+              new RegExp(value);
+            } catch {
+              return fail(`${where} is not a valid regex`);
+            }
+          }
+          site[cat][name] = value;
+        }
+      }
+      sites[siteKey] = site;
+    }
+    return { ok: true, config: { version, sites } };
+  }
+  function adopt(config, source, etag) {
+    active = config;
+    activeSource = source;
+    activeEtag = etag;
+    resolved = /* @__PURE__ */ new Map();
+  }
+  function chromeStore() {
+    return {
+      async get() {
+        return (await chrome.storage.local.get(SCRAPE_STORAGE_KEY))[SCRAPE_STORAGE_KEY];
+      },
+      async put(v) {
+        await chrome.storage.local.set({ [SCRAPE_STORAGE_KEY]: v });
+      },
+      async putStatus(s) {
+        await chrome.storage.local.set({ [SCRAPE_STATUS_KEY]: s });
+      }
+    };
+  }
+  function readStored(raw) {
+    if (!isPlainObject(raw)) return null;
+    const v = validateScrapeConfig(raw.config);
+    if (!v.ok) return null;
+    return { config: v.config, etag: typeof raw.etag === "string" ? raw.etag : null, fetchedAt: typeof raw.fetchedAt === "number" ? raw.fetchedAt : 0 };
+  }
+  function adoptStored(stored) {
+    if (stored && stored.config.version >= BUNDLED_SCRAPE_CONFIG.version) {
+      adopt(stored.config, "cache", stored.etag);
+      return true;
+    }
+    return false;
+  }
+  function initScrapeConfig(store) {
+    if (!initPromise) {
+      const s = store ?? chromeStore();
+      initPromise = (async () => {
+        try {
+          adoptStored(readStored(await s.get()));
+        } catch {
+        }
+        if (!store && typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+          chrome.storage.onChanged.addListener((changes, area) => {
+            const ch = changes[SCRAPE_STORAGE_KEY];
+            if (area !== "local" || !ch) return;
+            const next = readStored(ch.newValue);
+            if (next && next.config.version >= active.version) adopt(next.config, "cache", next.etag);
+          });
+        }
+      })();
+    }
+    return initPromise;
+  }
+  function compile(src, flags) {
+    if (src === void 0) return null;
+    try {
+      return new RegExp(src, flags);
+    } catch {
+      return null;
+    }
+  }
+  function getScrape(siteKey) {
+    const hit = resolved.get(siteKey);
+    if (hit) return hit;
+    const def = Object.prototype.hasOwnProperty.call(BUNDLED_SCRAPE_CONFIG.sites, siteKey) ? BUNDLED_SCRAPE_CONFIG.sites[siteKey] : void 0;
+    const cur = Object.prototype.hasOwnProperty.call(active.sites, siteKey) ? active.sites[siteKey] : void 0;
+    const out = {
+      selectors: { ...def?.selectors, ...cur?.selectors },
+      labels: { ...def?.labels, ...cur?.labels },
+      patterns: { ...def?.patterns, ...cur?.patterns },
+      urls: { ...def?.urls, ...cur?.urls },
+      timeoutsMs: { ...def?.timeoutsMs, ...cur?.timeoutsMs },
+      regex(name, flags) {
+        return compile(out.patterns[name], flags) ?? compile(def?.patterns[name], flags) ?? new RegExp("(?!)", flags && flags.replace(/[uv]/g, ""));
+      }
+    };
+    resolved.set(siteKey, out);
+    return out;
+  }
+  var import_browser_polyfill_min3, SCRAPE_CATEGORIES, NAME_RE, SITE_RE, MAX_STRING, MAX_MS, bundledCheck, BUNDLED_SCRAPE_CONFIG, active, activeSource, activeEtag, resolved, initPromise, SCRAPE_STORAGE_KEY, SCRAPE_STATUS_KEY;
+  var init_scrapeConfig = __esm({
+    "src/lib/scrapeConfig.ts"() {
+      "use strict";
+      import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min(), 1);
+      init_scrapeConfig_default();
+      SCRAPE_CATEGORIES = ["selectors", "labels", "patterns", "urls", "timeoutsMs"];
+      NAME_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+      SITE_RE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+      MAX_STRING = 2e4;
+      MAX_MS = 864e5;
+      bundledCheck = validateScrapeConfig(scrapeConfig_default_default);
+      BUNDLED_SCRAPE_CONFIG = bundledCheck.ok ? bundledCheck.config : scrapeConfig_default_default;
+      active = BUNDLED_SCRAPE_CONFIG;
+      activeSource = "bundled";
+      activeEtag = null;
+      resolved = /* @__PURE__ */ new Map();
+      initPromise = null;
+      SCRAPE_STORAGE_KEY = "scrapeConfig";
+      SCRAPE_STATUS_KEY = "scrapeConfigStatus";
+    }
+  });
+
   // src/content/walmart.ts
   var require_walmart = __commonJS({
     "src/content/walmart.ts"() {
-      var import_browser_polyfill_min3 = __toESM(require_browser_polyfill_min());
+      var import_browser_polyfill_min4 = __toESM(require_browser_polyfill_min());
       init_storage();
       init_api();
+      init_scrapeConfig();
       console.log("[WM] content script loaded", location.href);
       function parseMoney(text) {
         return parseFloat(text.replace(/[^0-9.-]/g, "")) || 0;
@@ -220,31 +551,33 @@
         const orders = [];
         let hasOlder = false;
         const seen = /* @__PURE__ */ new Set();
-        const blocks = Array.from(document.querySelectorAll('[data-testid*="orderGroup"], [data-testid*="order-card"], [data-testid*="orderCard"]'));
+        const S = getScrape("walmart");
+        const rx = S.regex;
+        const blocks = Array.from(document.querySelectorAll(S.selectors.orderBlocks));
         console.log("[WM] DOM blocks found:", blocks.length, "url:", location.href);
         blocks.slice(0, 3).forEach((b, i) => console.log(`[WM] block[${i}] testid:`, b.getAttribute("data-testid"), "text:", (b.textContent ?? "").replace(/\s+/g, " ").slice(0, 300)));
-        const isCancelledOrReturned = (text) => /(?:\b(?:cancell?ed|cancellation|returned|refunded)\b|we had to cancel|we['’]ve canceled|cancel these items|won['’]t be charged|released the temporary hold)/i.test(text);
+        const isCancelledOrReturned = (text) => rx("cancelledOrReturned", "i").test(text);
         for (const block of blocks) {
           const blockText = (block.textContent ?? "").replace(/\s+/g, " ");
           let orderNumber = "";
-          const captionEl = block.querySelector('[id^="caption-"]');
+          const captionEl = block.querySelector(S.selectors.orderCaption);
           if (captionEl) {
-            const idMatch = captionEl.id.match(/caption-(\d+)/);
+            const idMatch = captionEl.id.match(rx("captionOrderNumber"));
             if (idMatch) orderNumber = idMatch[1];
           }
           if (!orderNumber) {
-            const m = blockText.match(/Order\s*#?\s*(\d{10,})/i);
+            const m = blockText.match(rx("orderNumberLabeled", "i"));
             if (m) orderNumber = m[1];
           }
           if (!orderNumber) {
-            const m = blockText.match(/\b(\d{13,20})\b/);
+            const m = blockText.match(rx("orderNumberBare"));
             if (m) orderNumber = m[1];
           }
           if (!orderNumber || seen.has(orderNumber)) continue;
           seen.add(orderNumber);
           const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
           let orderDate;
-          const dateMatch = blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ?? blockText.match(/\b((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i) ?? blockText.match(/(?:Placed|Ordered|Delivered|on)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})(?!\d)/i);
+          const dateMatch = blockText.match(rx("dateLabeledFull", "i")) ?? blockText.match(rx("dateFull", "i")) ?? blockText.match(rx("dateLabeledNoYear", "i"));
           if (dateMatch) {
             let rawDateStr = /\d{4}/.test(dateMatch[1]) ? dateMatch[1] : `${dateMatch[1]} ${currentYear}`;
             orderDate = new Date(rawDateStr);
@@ -261,8 +594,8 @@
           } else {
             console.log("[WM] no date found for order", orderNumber, "\u2014 will fetch detail for real date");
             if (isCancelledOrReturned(blockText)) continue;
-            const totalMatch2 = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
-            const itemEl2 = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
+            const totalMatch2 = blockText.match(rx("orderTotal", "i"));
+            const itemEl2 = block.querySelector(S.selectors.itemFallback);
             orders.push({
               platform: "Walmart",
               orderNumber,
@@ -272,7 +605,7 @@
               shippingCost: 0,
               shippingAddress: "",
               trackingNumbers: [],
-              sourceUrl: `https://www.walmart.com/orders/${orderNumber}`
+              sourceUrl: S.urls.orderDetail.replace("{orderNumber}", () => orderNumber)
             });
             continue;
           }
@@ -282,20 +615,20 @@
             continue;
           }
           if (isCancelledOrReturned(blockText)) continue;
-          if (/\b(?:Free\s+store\s+pickup|Curbside\s+pickup|Pickup\s+at|Ready\s+for\s+pickup|Store\s+Pickup|Pickup\s+order)\b/i.test(blockText)) {
+          if (rx("storePickup", "i").test(blockText)) {
             console.log("[WM] skipping store-pickup order:", orderNumber);
             continue;
           }
-          const totalMatch = blockText.match(/Total\s+\$?([\d,]+\.?\d*)/i);
+          const totalMatch = blockText.match(rx("orderTotal", "i"));
           const cost = totalMatch ? parseMoney(totalMatch[1]) : 0;
-          const productNameEl = block.querySelector('[data-testid="productName"]');
-          const fallbackItemEl = block.querySelector('a[href*="/ip/"], [data-testid*="product"], [data-testid*="item"]');
+          const productNameEl = block.querySelector(S.selectors.productName);
+          const fallbackItemEl = block.querySelector(S.selectors.itemFallback);
           let itemDescription = (productNameEl?.textContent ?? fallbackItemEl?.textContent ?? "").trim().slice(0, 120);
-          if (/^(Walmart\.com|Walmart|Loading|—|—\s*—)$/i.test(itemDescription)) {
+          if (rx("genericTitle", "i").test(itemDescription)) {
             console.log("[WM] rejecting generic item description, treating as empty:", itemDescription);
             itemDescription = "";
           }
-          const last4Match = blockText.match(/(?:ending\s+(?:in)?|\*{2,}|\.{2,})\s*(\d{4})\b/i);
+          const last4Match = blockText.match(rx("cardLast4", "i"));
           const paymentLast4 = last4Match?.[1];
           console.log("[WM] adding order", orderNumber, "date:", orderDate.toISOString().split("T")[0], "paymentLast4:", paymentLast4 ?? "(none)", "blockText snippet:", blockText.slice(0, 240));
           orders.push({
@@ -307,7 +640,7 @@
             shippingCost: 0,
             shippingAddress: "",
             trackingNumbers: [],
-            sourceUrl: `https://www.walmart.com/orders/${orderNumber}`,
+            sourceUrl: S.urls.orderDetail.replace("{orderNumber}", () => orderNumber),
             paymentLast4
           });
         }
@@ -315,23 +648,25 @@
         return { orders, hasOlder };
       }
       async function fetchOrderDetail(orderNumber, orderUrl) {
+        const S = getScrape("walmart");
+        const rx = S.regex;
         try {
           const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 5e3);
+          const timer = setTimeout(() => ctrl.abort(), S.timeoutsMs.detailFetchMs);
           const res = await fetch(orderUrl, { credentials: "include", signal: ctrl.signal });
           clearTimeout(timer);
           console.log("[WM] detail fetch status:", orderNumber, res.status, res.url);
           const html = await res.text();
           const doc = new DOMParser().parseFromString(html, "text/html");
           let address = "";
-          const nextDataEl = doc.querySelector("#__NEXT_DATA__");
+          const nextDataEl = doc.querySelector(S.selectors.nextData);
           let ndOrder = null;
           if (nextDataEl?.textContent) {
             try {
               const nd = JSON.parse(nextDataEl.textContent);
               ndOrder = nd?.props?.pageProps?.initialData?.data?.order ?? null;
               if (ndOrder) {
-                const groupsKey = Object.keys(ndOrder).find((k) => k.startsWith("groups_"));
+                const groupsKey = Object.keys(ndOrder).find((k) => k.startsWith(S.labels.groupsKeyPrefix));
                 const firstGroup = groupsKey ? ndOrder[groupsKey]?.[0] : null;
                 const addrStr = firstGroup?.deliveryAddress?.address;
                 if (addrStr?.addressString) address = String(addrStr.addressString);
@@ -340,14 +675,14 @@
             }
           }
           if (!address) {
-            const addrEl = doc.querySelector('[data-automation-id*="shipping-address"], [class*="shipping-address"], [class*="shippingAddress"]');
+            const addrEl = doc.querySelector(S.selectors.detailAddress);
             address = (addrEl?.textContent ?? "").replace(/\s+/g, " ").trim();
           }
           const numbers = /* @__PURE__ */ new Set();
           const trackPatterns = [
-            ["trackingNumber-field", /trackingNumber["\s:]+["']?([A-Z0-9]{10,25})/g],
-            ["ups-1Z", /\b(1Z[A-Z0-9]{16})\b/g],
-            ["digits-20-22", /\b([0-9]{20,22})\b/g]
+            ["trackingNumber-field", rx("trackingField", "g")],
+            ["ups-1Z", rx("trackingUps", "g")],
+            ["digits-20-22", rx("trackingDigits", "g")]
           ];
           const numberOrigins = /* @__PURE__ */ new Map();
           for (const [name, pat] of trackPatterns) {
@@ -368,7 +703,7 @@
               Array.from(numbers).map((n) => `${n}[${numberOrigins.get(n)}]`).join(", ") || "(none)"
             );
           }
-          const isWalmartInternal = (n) => /^555\d{15,}$/.test(n);
+          const isWalmartInternal = (n) => rx("internalTracking").test(n);
           let hadInternalTracking = false;
           for (const n of [...numbers]) {
             if (isWalmartInternal(n)) {
@@ -383,7 +718,8 @@
           let orderDate = null;
           let cost = null;
           let itemDescription = null;
-          const scriptMatches = html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g);
+          const scriptMatches = html.matchAll(rx("scriptBlock", "g"));
+          const jsonDatePats = () => [rx("jsonOrderDate"), rx("jsonPlacedDate"), rx("jsonOrderPlacedDate"), rx("jsonCreatedDate")];
           for (const sm of scriptMatches) {
             const s = sm[1];
             if (!s.includes("orderDate") && !s.includes("placedDate") && !s.includes("totalAmount") && !s.includes("financeTotal")) continue;
@@ -391,7 +727,7 @@
               const parsed = JSON.parse(s);
               const str = JSON.stringify(parsed);
               if (!orderDate) {
-                for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
+                for (const pat of jsonDatePats()) {
                   const m = str.match(pat);
                   if (m) {
                     orderDate = m[1];
@@ -400,12 +736,12 @@
                 }
               }
               if (cost == null) {
-                const m = str.match(/"(?:totalAmount|financeTotal|orderTotal|grandTotal|chargeTotal|estimatedTotal|totalCharges|orderTotalAmount|total)"\s*:\s*([\d.]+)/);
+                const m = str.match(rx("jsonCost"));
                 if (m) cost = parseFloat(m[1]);
               }
               if (!itemDescription) {
-                const m = str.match(/"(?:productName|itemDescription)"\s*:\s*"([^"]{5,120})"/);
-                if (m && !/^(Walmart\.com|Walmart|Loading)$/i.test(m[1])) itemDescription = m[1];
+                const m = str.match(rx("jsonProductName"));
+                if (m && !rx("genericTitleJson", "i").test(m[1])) itemDescription = m[1];
               }
             } catch {
             }
@@ -416,7 +752,7 @@
               if (gt?.value != null) cost = Number(gt.value);
             }
             if (!itemDescription) {
-              const groupsKey = Object.keys(ndOrder).find((k) => k.startsWith("groups_"));
+              const groupsKey = Object.keys(ndOrder).find((k) => k.startsWith(S.labels.groupsKeyPrefix));
               const firstGroup = groupsKey ? ndOrder[groupsKey]?.[0] : null;
               const firstItem = firstGroup?.items?.[0];
               const name = firstItem?.productInfo?.name;
@@ -424,7 +760,7 @@
             }
             if (!orderDate) {
               const str = JSON.stringify(ndOrder);
-              for (const pat of [/"orderDate":"([^"]+)"/, /"placedDate":"([^"]+)"/, /"orderPlacedDate":"([^"]+)"/, /"createdDate":"([^"]+)"/]) {
+              for (const pat of jsonDatePats()) {
                 const m = str.match(pat);
                 if (m) {
                   orderDate = m[1];
@@ -434,34 +770,34 @@
             }
           }
           if (cost == null) {
-            const m = html.match(/(?:order\s+)?total[^$\d]{0,30}\$\s*([\d,]+\.?\d*)/i);
+            const m = html.match(rx("htmlTotal", "i"));
             if (m) cost = parseMoney(m[1]);
           }
           if (!orderDate) {
-            const m = html.match(/[Pp]laced[^<]{0,80}?(\d{4}-\d{2}-\d{2})/);
+            const m = html.match(rx("htmlPlaced"));
             if (m) orderDate = m[1];
           }
           if (cost == null) {
-            const totalEl = doc.querySelector('[data-automation-id*="order-total"], [class*="orderTotal"], [class*="order-total"]');
+            const totalEl = doc.querySelector(S.selectors.detailTotal);
             if (totalEl) cost = parseMoney(totalEl.textContent ?? "");
           }
           if (!itemDescription) {
-            const itemEl = doc.querySelector('[data-automation-id*="product-title"], [class*="product-title"], h2[class*="item"]');
+            const itemEl = doc.querySelector(S.selectors.detailItem);
             if (itemEl) itemDescription = (itemEl.textContent ?? "").trim().slice(0, 120) || null;
           }
-          if (itemDescription && /^(Walmart\.com|Walmart|Loading|—|—\s*—)$/i.test(itemDescription.trim())) {
+          if (itemDescription && rx("genericTitle", "i").test(itemDescription.trim())) {
             console.log("[WM] rejecting generic detail item description:", itemDescription);
             itemDescription = null;
           }
           let paymentLast4;
           let last4Source = "none";
           const jsonFieldPats = [
-            ["lastFour", /"lastFour"\s*:\s*"?(\d{4})"?/],
-            ["lastFourDigits", /"lastFourDigits"\s*:\s*"?(\d{4})"?/],
-            ["cardLast4", /"cardLast4"\s*:\s*"?(\d{4})"?/],
-            ["last4", /"last4"\s*:\s*"?(\d{4})"?/],
-            ["cardNumberLast4", /"cardNumberLast4"\s*:\s*"?(\d{4})"?/],
-            ["accountNumberLast4", /"accountNumberLast4"\s*:\s*"?(\d{4})"?/]
+            ["lastFour", rx("jsonLastFour")],
+            ["lastFourDigits", rx("jsonLastFourDigits")],
+            ["cardLast4", rx("jsonCardLast4")],
+            ["last4", rx("jsonLast4")],
+            ["cardNumberLast4", rx("jsonCardNumberLast4")],
+            ["accountNumberLast4", rx("jsonAccountNumberLast4")]
           ];
           for (const [name, pat] of jsonFieldPats) {
             const m = html.match(pat);
@@ -473,12 +809,12 @@
           }
           if (!paymentLast4) {
             const textPats = [
-              ["ending-in", /\bending\s+in\s+(\d{4})\b/i],
-              ["ending", /\bending\s+(\d{4})\b/i],
-              ["asterisks", /\*{2,}\s*(\d{4})\b/],
-              ["xs", /\bx{4,}\s*(\d{4})\b/i],
-              ["bullets", /[•·․⋅●]{2,}\s*(\d{4})\b/],
-              ["html-bullet", /(?:&bull;|&middot;|&#x2022;|&#8226;){2,}\s*(\d{4})\b/i]
+              ["ending-in", rx("textEndingIn", "i")],
+              ["ending", rx("textEnding", "i")],
+              ["asterisks", rx("textAsterisks")],
+              ["xs", rx("textXs", "i")],
+              ["bullets", rx("textBullets")],
+              ["html-bullet", rx("textHtmlBullet", "i")]
             ];
             for (const [name, pat] of textPats) {
               const m = html.match(pat);
@@ -492,9 +828,9 @@
           let deliveryPhotoUrl;
           let deliveryPhotoBase64;
           let deliveryPhotoMime;
-          const photoImg = doc.querySelector('img[alt="Proof of delivery location"], img[src*="/delivery-photo/"]');
+          const photoImg = doc.querySelector(S.selectors.deliveryPhoto);
           const photoSrc = photoImg?.getAttribute("src") || "";
-          if (photoSrc && /^https?:\/\//i.test(photoSrc)) {
+          if (photoSrc && rx("httpUrl", "i").test(photoSrc)) {
             deliveryPhotoUrl = photoSrc;
             try {
               const r = await chrome.runtime.sendMessage({ type: "FETCH_IMAGE_BYTES", url: photoSrc });
@@ -517,17 +853,19 @@
       }
       var syncing = false;
       function getFirstBlockFingerprint() {
-        const block = document.querySelector('[data-testid*="orderGroup"], [data-testid*="order-card"], [data-testid*="orderCard"]');
+        const sel = getScrape("walmart").selectors;
+        const block = document.querySelector(sel.orderBlocks);
         if (!block) return "";
-        const caption = block.querySelector('[id^="caption-"]');
+        const caption = block.querySelector(sel.orderCaption);
         if (caption?.id) return caption.id;
         return (block.textContent ?? "").replace(/\s+/g, " ").slice(0, 80);
       }
-      function waitForOrdersToLoad(previousFingerprint = "", timeoutMs = 12e3) {
+      function waitForOrdersToLoad(previousFingerprint = "", timeoutMs = getScrape("walmart").timeoutsMs.pageLoadMs) {
         return new Promise((resolve) => {
           const start = Date.now();
+          const T = getScrape("walmart");
           function check() {
-            const blocks = document.querySelectorAll('[data-testid*="orderGroup"], [data-testid*="order-card"], [data-testid*="orderCard"]');
+            const blocks = document.querySelectorAll(T.selectors.orderBlocks);
             if (blocks.length > 0 && (blocks[0].textContent ?? "").length > 100) {
               const fp = getFirstBlockFingerprint();
               if (!previousFingerprint || fp !== previousFingerprint) {
@@ -539,15 +877,13 @@
               resolve();
               return;
             }
-            setTimeout(check, 400);
+            setTimeout(check, T.timeoutsMs.loadPollMs);
           }
           check();
         });
       }
       function clickNextPage() {
-        const btn = document.querySelector(
-          '[aria-label="Next page"]:not([disabled]), [data-automation-id*="next-page"]:not([disabled]), button[aria-label*="next" i]:not([disabled])'
-        );
+        const btn = document.querySelector(getScrape("walmart").selectors.nextClick);
         if (btn) {
           btn.click();
           return true;
@@ -558,6 +894,8 @@
         console.log("[WM] startSync called, syncing:", syncing, "url:", location.href);
         if (syncing) return;
         syncing = true;
+        await initScrapeConfig();
+        const W = getScrape("walmart");
         const settings = await getSettings();
         if (!settings.trackerUrl || !settings.userId) {
           sendMessage({ type: "SYNC_ERROR", platform: "Walmart", error: "Tracker URL or user not configured \u2014 open Settings." });
@@ -569,16 +907,16 @@
         console.log("[WM] sinceDate:", sinceDate.toISOString(), "walmartLastSync:", settings.walmartLastSync);
         setBadge("\u2026");
         sendMessage({ type: "SYNC_STARTED", platform: "Walmart" });
-        const isOrdersPage = location.pathname.includes("/orders") || location.pathname.includes("/account/mypurchases");
+        const isOrdersPage = location.pathname.includes(W.urls.ordersPath) || location.pathname.includes(W.urls.purchasesPath);
         const currentPage = new URL(location.href).searchParams.get("page");
         if (!isOrdersPage || currentPage && parseInt(currentPage) > 1) {
           sessionStorage.setItem("__resell_wm_sync__", "1");
-          window.location.href = "https://www.walmart.com/orders";
+          window.location.href = W.urls.orders;
           syncing = false;
           return;
         }
         try {
-          await waitForOrdersToLoad("", 15e3);
+          await waitForOrdersToLoad("", W.timeoutsMs.firstLoadMs);
           const allOrders = [];
           const seen = /* @__PURE__ */ new Set();
           let page = 1;
@@ -672,7 +1010,7 @@
       }
       if (sessionStorage.getItem("__resell_wm_sync__")) {
         sessionStorage.removeItem("__resell_wm_sync__");
-        setTimeout(() => startSync(), 2e3);
+        initScrapeConfig().then(() => setTimeout(() => startSync(), getScrape("walmart").timeoutsMs.resumeDelayMs));
       }
       chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         if (msg.type === "PING") {
