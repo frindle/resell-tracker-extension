@@ -11,7 +11,28 @@ export const MAX_CARDS = 50;
 /** Fixed failure reasons: the only text a failed run reports. */
 export type EgiftFailure =
   | 'no-link' | 'link-rejected' | 'email-rejected' | 'no-open-button' | 'page-timeout'
-  | 'out-of-sequence' | 'total-mismatch' | 'ended-early' | 'save-failed' | 'run-busy' | 'error';
+  | 'out-of-sequence' | 'total-mismatch' | 'ended-early' | 'save-failed' | 'run-busy' | 'error'
+  | `info-http-${number}` | `error-${EgiftStep}` | `error-${EgiftStep}-${EgiftErrorKind}`;
+
+/** Where a run threw, so a failed run says which step broke instead of a bare "error". */
+export type EgiftStep = 'info' | 'tab' | 'page' | 'email' | 'open' | 'next';
+export type EgiftErrorKind = 'error-page' | 'permission' | 'tab-gone' | 'navigated' | 'network';
+
+/**
+ * A fixed code for an exception thrown at `step`. The error text itself is never reported: Chrome's
+ * messages can carry the delivery link ("Cannot access contents of url ...").
+ */
+export function egiftErrorCode(step: EgiftStep, err: unknown): EgiftFailure {
+  const m = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  const kind: EgiftErrorKind | null =
+    /chrome-error:|error page/i.test(m) ? 'error-page'
+    : /cannot access|permission/i.test(m) ? 'permission'
+    : /no tab with id|tab was closed|tabs cannot be edited/i.test(m) ? 'tab-gone'
+    : /frame with id|frame was removed|navigat/i.test(m) ? 'navigated'
+    : /failed to fetch|networkerror|load failed/i.test(m) ? 'network'
+    : null;
+  return kind ? `error-${step}-${kind}` : `error-${step}`;
+}
 
 export function parseEgiftPayload(raw: string | null, userId: string | undefined): { orderId: number } | { error: string } {
   let p: { userId?: unknown; orderId?: unknown } | null;

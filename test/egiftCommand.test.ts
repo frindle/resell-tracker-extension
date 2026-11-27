@@ -70,3 +70,18 @@ test('report is counts only, never card data, email or link', () => {
   const all = JSON.stringify([ok, ...bad]);
   for (const secret of ['0000', EMAIL, 'example.com', 'memberedelivery', 'abc123', '1234']) assert.ok(!all.includes(secret), secret);
 });
+
+test('a thrown error becomes a fixed step code, never the error text', async () => {
+  const { egiftErrorCode } = await import('../src/lib/egiftCommand.ts');
+  const secret = `Cannot access contents of url "${LINK}". Extension manifest must request permission to access this host.`;
+  assert.equal(egiftErrorCode('email', new Error(secret)), 'error-email-permission');
+  assert.equal(egiftErrorCode('page', new Error('Cannot access contents of url "chrome-error://chromewebdata/".')), 'error-page-error-page');
+  assert.equal(egiftErrorCode('open', new Error('No tab with id: 12.')), 'error-open-tab-gone');
+  assert.equal(egiftErrorCode('next', new Error('Frame with ID 0 was removed.')), 'error-next-navigated');
+  assert.equal(egiftErrorCode('info', new TypeError('Failed to fetch')), 'error-info-network');
+  assert.equal(egiftErrorCode('tab', new Error('something else')), 'error-tab');
+  assert.equal(egiftErrorCode('tab', undefined), 'error-tab');
+  const r = egiftReport(0, 0, egiftErrorCode('email', new Error(secret)));
+  assert.ok(!JSON.stringify(r).includes('memberedelivery'));
+  assert.deepEqual(egiftReport(0, 0, 'info-http-401').result, { cards: 0, saved: 0, error: 'info-http-401' });
+});

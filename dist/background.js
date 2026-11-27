@@ -1306,6 +1306,11 @@
   });
 
   // src/lib/egiftCommand.ts
+  function egiftErrorCode(step, err) {
+    const m = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+    const kind = /chrome-error:|error page/i.test(m) ? "error-page" : /cannot access|permission/i.test(m) ? "permission" : /no tab with id|tab was closed|tabs cannot be edited/i.test(m) ? "tab-gone" : /frame with id|frame was removed|navigat/i.test(m) ? "navigated" : /failed to fetch|networkerror|load failed/i.test(m) ? "network" : null;
+    return kind ? `error-${step}-${kind}` : `error-${step}`;
+  }
   function parseEgiftPayload(raw, userId) {
     let p;
     try {
@@ -1437,25 +1442,31 @@
     let cards = 0;
     let saved = 0;
     let failure = null;
+    let step = "info";
     try {
       const res = await doFetch(`${base}/api/extension/egift?orderId=${orderId}`, { headers, cache: "no-store" });
-      if (!res.ok) return egiftReport(0, 0, "error");
+      if (!res.ok) return egiftReport(0, 0, `info-http-${res.status}`);
       const info = parseEgiftInfo(await res.json().catch(() => null));
       if (!info) return egiftReport(0, 0, "no-link");
       if (!isAllowedEgiftLink(info.link)) return egiftReport(0, 0, "link-rejected");
+      step = "tab";
       const tab = await chrome.tabs.create({ url: info.link, active: false });
       tabId = tab.id;
-      if (tabId == null) return egiftReport(0, 0, "error");
+      if (tabId == null) return egiftReport(0, 0, "error-tab");
+      step = "page";
       const first = await waitFor(tabId, (s) => s.hasEmail || s.hasOpen || s.alert);
       if (!first) return egiftReport(0, 0, "page-timeout");
       if (first.hasEmail && !first.hasOpen) {
+        step = "email";
         await chrome.scripting.executeScript({ target: { tabId }, func: enterEmail, args: [info.email] });
       }
+      step = "page";
       const list = await waitFor(tabId, (s) => s.hasOpen || s.alert && !s.hasEmail || !!parseCardText(s.text));
       if (!list) return egiftReport(0, 0, "page-timeout");
       if (list.alert && !list.hasOpen) return egiftReport(0, 0, "email-rejected");
       if (!list.hasOpen && !parseCardText(list.text)) return egiftReport(0, 0, "no-open-button");
       if (list.hasOpen) {
+        step = "open";
         await sleep2(STEP_DELAY_MS);
         await chrome.scripting.executeScript({ target: { tabId }, func: clickLabel, args: [OPEN_LABEL, true] });
       }
@@ -1463,6 +1474,7 @@
       let total = 0;
       let lastCode = "";
       while (cards < MAX_CARDS) {
+        step = "page";
         const s = await waitFor(tabId, (st) => {
           const c = parseCardText(st.text);
           return !!c && c.code !== lastCode;
@@ -1503,6 +1515,7 @@
           if (card.index !== total) failure = "ended-early";
           break;
         }
+        step = "next";
         await sleep2(STEP_DELAY_MS);
         const next = await chrome.scripting.executeScript({ target: { tabId }, func: clickLabel, args: ["next", false] });
         if (!next[0]?.result) {
@@ -1513,8 +1526,8 @@
       }
       if (!failure && cards >= MAX_CARDS && saved < total) failure = "ended-early";
       return egiftReport(cards, saved, failure);
-    } catch {
-      return egiftReport(cards, saved, "error");
+    } catch (e) {
+      return egiftReport(cards, saved, egiftErrorCode(step, e));
     } finally {
       clearInterval(keep);
       if (tabId != null) await chrome.tabs.remove(tabId).catch(() => {
@@ -2747,6 +2760,10 @@
             } else if (cmd.type === "SYNC_WALMART") result = await runSyncCommand("Walmart");
             else if (cmd.type === "SYNC_BIGSKY") result = await runSyncCommand("BigSkyBuyers");
             else if (cmd.type === "SCRAPE_CBM") result = await runScrapeCbm(base, headers, cmd.payload);
+            else {
+              await patchCommand(base, cmd.id, "failed", headers, { error: `unknown command ${String(cmd.type).slice(0, 40)}: reload or update the extension` });
+              continue;
+            }
             await patchCommand(base, cmd.id, "done", headers, result);
           } catch (e) {
             await patchCommand(base, cmd.id, "failed", headers, String(e));

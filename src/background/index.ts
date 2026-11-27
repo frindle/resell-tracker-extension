@@ -932,6 +932,11 @@ async function pollAndExecuteCommands() {
       } else if (cmd.type === 'SYNC_WALMART') result = await runSyncCommand('Walmart');
       else if (cmd.type === 'SYNC_BIGSKY') result = await runSyncCommand('BigSkyBuyers');
       else if (cmd.type === 'SCRAPE_CBM') result = await runScrapeCbm(base, headers, cmd.payload);
+      else {
+        // A type this build does not know (the tracker is newer): say so instead of a blank "done".
+        await patchCommand(base, cmd.id, 'failed', headers, { error: `unknown command ${String(cmd.type).slice(0, 40)}: reload or update the extension` });
+        continue;
+      }
       await patchCommand(base, cmd.id, 'done', headers, result);
     } catch (e) {
       await patchCommand(base, cmd.id, 'failed', headers, String(e));
