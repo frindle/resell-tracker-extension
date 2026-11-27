@@ -11,6 +11,8 @@ import { extensionBrowser } from '../lib/browserTarget';
 import { orderCommandPlan, costcoReport, type CommandReport } from '../lib/costcoCommand';
 import { runCostcoSync, readCostcoOrders, noteCostcoMessage, claimCostcoRun, releaseCostcoRun, closeOrphanCostcoTab } from './costcoRun';
 import { initScrapeConfig, loadScrapeConfig, scrapeConfigIsStale } from '../lib/scrapeConfig';
+import { localPairingStore, stepPairing } from '../lib/pairing';
+import { savePaired } from '../lib/storage';
 
 const ICON_PATHS_CHROME = { 16: 'icons/icon16.png', 32: 'icons/icon32.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' };
 const ICON_PATH_FIREFOX = 'icons/icon.svg';
@@ -81,6 +83,8 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === 'scrapeConfig') refreshScrapeConfig().catch(() => {});
   if (alarm.name === 'pollCommands') {
+    // Finishes a pairing approved after the options page was closed; a no-op when none is waiting.
+    stepPairing(localPairingStore(), savePaired, (url, init) => fetch(url, init), Date.now()).catch(() => {});
     pollAndExecuteCommands().catch(console.error);
     flushQueue().catch(console.error); // retries queued captures against the tracker only
   }

@@ -37,7 +37,7 @@ Then open the Xcode project, build, and enable in Safari → Settings → Extens
 
 ### 3. Configure
 
-Click the extension icon → Settings, then enter your tracker URL (e.g. `http://10.0.12.39:3000`) and test the connection.
+Click the extension icon → Settings, enter your tracker URL (e.g. `http://10.0.12.39:3000`) and click Connect. If the tracker does not accept this browser yet, a tracker tab opens: sign in if asked and click Approve. The extension then receives the tracker's shared secret and the approving user by itself.
 
 ## Development
 
@@ -50,6 +50,10 @@ npm run watch   # rebuilds on file changes
 The `/api/import` endpoint needs to accept a `trackingNumbers` array on each order. This is tracked in the main repo's TODO.
 
 ## Changelog
+
+### 1.4.4
+
+- **Pairing replaces pasting the secret.** Connect checks whether the tracker accepts the saved secret; if not, it opens the tracker's approval page (`/extension/pair`). Approve it there, signed in, and the extension receives the tracker's `EXTENSION_SHARED_SECRET` and the approving user, once. The page waits up to about 10 minutes; if you close Settings first, the background finishes the pairing on its next one-minute poll. The secret is no longer generated or shown in Settings. Needs a tracker with the pairing endpoints.
 
 ### 1.4.3
 

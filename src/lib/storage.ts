@@ -21,6 +21,11 @@ export async function saveSettings(settings: Partial<SyncSettings>): Promise<voi
   await chrome.storage.sync.set(settings);
 }
 
+/** Saves what pairing returned: the tracker's shared secret and the user who approved it. */
+export async function savePaired(p: { secret: string; userId: string; userName: string }): Promise<void> {
+  await saveSettings({ extensionSecret: p.secret, userId: p.userId, userName: p.userName });
+}
+
 export async function setLastSync(platform: 'amazon' | 'walmart' | 'costco' | 'bigsky', date: string): Promise<void> {
   const key = platform === 'amazon' ? 'amazonLastSync' : platform === 'walmart' ? 'walmartLastSync' : platform === 'costco' ? 'costcoLastSync' : 'bigskyLastSync';
   await chrome.storage.sync.set({ [key]: date });

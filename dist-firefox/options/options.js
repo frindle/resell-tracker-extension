@@ -158,6 +158,9 @@
   async function saveSettings(settings) {
     await chrome.storage.sync.set(settings);
   }
+  async function savePaired(p) {
+    await saveSettings({ extensionSecret: p.secret, userId: p.userId, userName: p.userName });
+  }
   var import_browser_polyfill_min, DEFAULTS;
   var init_storage = __esm({
     "src/lib/storage.ts"() {
@@ -524,14 +527,121 @@
     }
   });
 
+  // src/lib/pairing.ts
+  function trackerBase(trackerUrl) {
+    return trackerUrl.trim().replace(/\/+$/, "");
+  }
+  function approvalUrl(trackerUrl, code) {
+    return `${trackerBase(trackerUrl)}/extension/pair?code=${encodeURIComponent(code)}`;
+  }
+  async function beginPairing(trackerUrl, browser, fetchImpl, now) {
+    const base = trackerBase(trackerUrl);
+    const res = await fetchImpl(`${base}/api/extension/pair`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ browser })
+    });
+    if (res.status === 429) throw new Error("Too many pairings waiting on the tracker; try again in a few minutes.");
+    if (!res.ok) throw new Error(`The tracker refused to start pairing (HTTP ${res.status}). Update the tracker?`);
+    const body = await res.json().catch(() => null);
+    if (typeof body?.code !== "string" || typeof body?.claim !== "string" || !body.code || !body.claim) {
+      throw new Error("The tracker sent an unexpected pairing reply.");
+    }
+    return { trackerUrl: base, code: body.code, claim: body.claim, expiresAt: now + PAIRING_TTL_MS };
+  }
+  async function stepPairing(store, save, fetchImpl, now) {
+    const p = await store.get();
+    if (!p) return { state: "none" };
+    if (now >= p.expiresAt) {
+      await store.clear(p.code);
+      return { state: "expired" };
+    }
+    let res;
+    try {
+      res = await fetchImpl(`${p.trackerUrl}/api/extension/pair/claim`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: p.code, claim: p.claim })
+      });
+    } catch {
+      return { state: "error", message: "Could not reach the tracker." };
+    }
+    if (res.status === 404) {
+      await store.clear(p.code);
+      return { state: "unknown" };
+    }
+    if (!res.ok) return { state: "error", message: `Pairing check failed (HTTP ${res.status}).` };
+    const body = await res.json().catch(() => null);
+    if (body?.status === "pending") return { state: "pending", expiresAt: p.expiresAt };
+    if (body?.status !== "approved" || typeof body.secret !== "string" || body.userId == null) {
+      return { state: "error", message: "The tracker sent an unexpected pairing reply." };
+    }
+    const userName = typeof body.userName === "string" ? body.userName : "";
+    await save({ secret: body.secret, userId: String(body.userId), userName });
+    await store.clear(p.code);
+    return { state: "paired", userName };
+  }
+  async function checkSecret(trackerUrl, userId, secret, fetchImpl) {
+    try {
+      const res = await fetchImpl(`${trackerBase(trackerUrl)}/api/extension/scrape-config`, {
+        // The user-id header sends the request down the tracker's extension path; any value does.
+        headers: { "X-Extension-User-Id": userId || "0", "X-Extension-Secret": secret }
+      });
+      if (res.status === 401) return "rejected";
+      return res.ok || res.status === 304 ? "ok" : "unreachable";
+    } catch {
+      return "unreachable";
+    }
+  }
+  function localPairingStore() {
+    return {
+      async get() {
+        const got = await chrome.storage.local.get(PAIRING_KEY).catch(() => ({}));
+        const p = got[PAIRING_KEY];
+        return p && typeof p.code === "string" && typeof p.claim === "string" ? p : null;
+      },
+      async set(p) {
+        await chrome.storage.local.set({ [PAIRING_KEY]: p });
+      },
+      async clear(code) {
+        const got = await chrome.storage.local.get(PAIRING_KEY).catch(() => ({}));
+        if (got[PAIRING_KEY]?.code === code) await chrome.storage.local.remove(PAIRING_KEY);
+      }
+    };
+  }
+  var import_browser_polyfill_min6, PAIRING_KEY, PAIRING_TTL_MS, PAIRING_POLL_MS;
+  var init_pairing = __esm({
+    "src/lib/pairing.ts"() {
+      "use strict";
+      import_browser_polyfill_min6 = __toESM(require_browser_polyfill_min(), 1);
+      PAIRING_KEY = "pendingPairing";
+      PAIRING_TTL_MS = 9.5 * 6e4;
+      PAIRING_POLL_MS = 2e3;
+    }
+  });
+
+  // src/lib/browserTarget.ts
+  function extensionBrowser(extensionBaseUrl) {
+    return extensionBaseUrl.startsWith("moz-extension://") ? "firefox" : "chrome";
+  }
+  var import_browser_polyfill_min7;
+  var init_browserTarget = __esm({
+    "src/lib/browserTarget.ts"() {
+      "use strict";
+      import_browser_polyfill_min7 = __toESM(require_browser_polyfill_min(), 1);
+    }
+  });
+
   // src/options/options.ts
   var require_options = __commonJS({
     "src/options/options.ts"() {
-      var import_browser_polyfill_min6 = __toESM(require_browser_polyfill_min());
+      var import_browser_polyfill_min8 = __toESM(require_browser_polyfill_min());
       init_storage();
       init_api();
       init_tracker_script();
       init_scrapeConfig();
+      init_pairing();
+      init_browserTarget();
       async function showScrapeConfig() {
         const el = document.getElementById("scrapeConfigLabel");
         if (!el) return;
@@ -540,6 +650,72 @@
       }
       showScrapeConfig();
       var users = [];
+      var http = (url, init2) => fetch(url, init2);
+      function setPairStatus(text, kind = "") {
+        const el = document.getElementById("pairStatus");
+        el.textContent = text;
+        el.className = `status${kind ? " " + kind : ""}`;
+      }
+      async function showUsers(trackerUrl) {
+        await loadUsers(trackerUrl);
+        const { userId } = await getSettings();
+        if (userId) document.getElementById("userSelect").value = userId;
+      }
+      var pairTimer;
+      function watchPairing(trackerUrl) {
+        clearInterval(pairTimer);
+        let busy = false;
+        const stop = () => {
+          clearInterval(pairTimer);
+          pairTimer = void 0;
+        };
+        pairTimer = setInterval(async () => {
+          if (busy) return;
+          busy = true;
+          try {
+            const r = await stepPairing(localPairingStore(), savePaired, http, Date.now());
+            if (r.state === "pending") return;
+            if (r.state === "error") {
+              setPairStatus(`${r.message} Still trying\u2026`, "fail");
+              return;
+            }
+            stop();
+            if (r.state === "paired") {
+              setPairStatus(`Paired as ${r.userName || "your tracker user"}.`, "ok");
+              await showUsers(trackerUrl);
+            } else if (r.state === "expired") {
+              setPairStatus("Pairing timed out. Click Connect to try again.", "fail");
+            } else {
+              await showPairState(trackerUrl, "Pairing ended without approval. Click Connect to try again.");
+            }
+          } finally {
+            busy = false;
+          }
+        }, PAIRING_POLL_MS);
+      }
+      async function showPairState(trackerUrl, notPaired = "Not paired. Click Connect to pair this browser.") {
+        const s = await getSettings();
+        const check = await checkSecret(trackerUrl, s.userId, s.extensionSecret, http);
+        if (check === "ok") {
+          setPairStatus(s.userName ? `Paired as ${s.userName}.` : "Paired.", "ok");
+          await showUsers(trackerUrl);
+          return check;
+        }
+        setPairStatus(check === "rejected" ? notPaired : "Could not reach the tracker.", "fail");
+        return check;
+      }
+      async function startPairing(trackerUrl) {
+        setPairStatus("Starting pairing\u2026");
+        try {
+          const p = await beginPairing(trackerUrl, extensionBrowser(chrome.runtime.getURL("")), http, Date.now());
+          await localPairingStore().set(p);
+          await chrome.tabs.create({ url: approvalUrl(p.trackerUrl, p.code) });
+          setPairStatus("Approve this browser in the tracker tab that just opened (sign in if asked). Waiting\u2026");
+          watchPairing(p.trackerUrl);
+        } catch (err) {
+          setPairStatus(err instanceof Error ? err.message : String(err), "fail");
+        }
+      }
       async function loadUsers(trackerUrl) {
         const select = document.getElementById("userSelect");
         const userSection = document.getElementById("userSection");
@@ -559,30 +735,28 @@
       async function init() {
         const settings = await getSettings();
         document.getElementById("trackerUrl").value = settings.trackerUrl;
-        let secret = settings.extensionSecret;
-        if (!secret) {
-          const bytes = crypto.getRandomValues(new Uint8Array(32));
-          secret = Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
-          await saveSettings({ extensionSecret: secret });
-        }
-        document.getElementById("extensionSecret").value = secret;
         document.getElementById("amazonLastSync").value = settings.amazonLastSync;
         document.getElementById("walmartLastSync").value = settings.walmartLastSync;
         document.getElementById("costcoLastSync").value = settings.costcoLastSync;
-        const userSection = document.getElementById("userSection");
         const select = document.getElementById("userSelect");
         if (settings.trackerUrl) {
-          await loadUsers(settings.trackerUrl);
-          if (settings.userId) select.value = settings.userId;
+          const waiting = await localPairingStore().get();
+          if (waiting && waiting.trackerUrl === trackerBase(settings.trackerUrl)) {
+            setPairStatus("Waiting for approval in the tracker tab\u2026");
+            watchPairing(waiting.trackerUrl);
+            await showUsers(settings.trackerUrl);
+          } else {
+            await showPairState(settings.trackerUrl);
+          }
           await ensureTrackerScriptRegistered(settings.trackerUrl);
         }
         document.getElementById("connect").addEventListener("click", async () => {
-          const trackerUrl = document.getElementById("trackerUrl").value.trim();
+          const trackerUrl = trackerBase(document.getElementById("trackerUrl").value);
           if (!trackerUrl) return;
           const granting = grantTrackerAccess(trackerUrl).catch(() => false);
           await saveSettings({ trackerUrl });
           await granting;
-          await loadUsers(trackerUrl);
+          if (await showPairState(trackerUrl) === "rejected") await startPairing(trackerUrl);
         });
         document.getElementById("saveUser").addEventListener("click", async () => {
           const userId = select.value;
