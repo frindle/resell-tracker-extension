@@ -8,7 +8,9 @@ import { saveRun, reportRun, fetchVisitPlan } from './amazonCapture';
 import type { Visit } from '../lib/syncRun';
 import { createPokeJudge, shouldForce, shouldForceAny, isStaleOutcome, POKE_FIRST_MS, POKE_EVERY_MS } from '../lib/capturePoke';
 
-const WAIT_MS = 30000;
+import { getScrape } from '../lib/scrapeConfig';
+
+const waitMs = () => getScrape('amazon').timeoutsMs.runWaitMs;
 const pending = new Map<number, (o: PageOutcome, pageId?: string) => void>();
 const early = new Map<number, { outcome: PageOutcome; pageId?: string }>();
 let runTabId: number | null = null;
@@ -79,7 +81,7 @@ function expect(tabId: number): Promise<PageOutcome> {
       chrome.tabs.get(tabId)
         .then(tab => done({ kind: 'timeout', note: tab.status === 'loading' ? 'the tab was still loading' : judge.note() }))
         .catch(() => done({ kind: 'timeout', note: judge.note() }));
-    }, WAIT_MS);
+    }, waitMs());
     const ask = async () => {
       poke = null;
       let answer: unknown = null;

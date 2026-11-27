@@ -2,6 +2,7 @@ import {
   COSTCO_APP_ID, COSTCO_SIGN_IN_MESSAGE, COSTCO_TIMEOUT_MESSAGE, isCostcoUrl, judgeDeadline, judgeTab, mapOrderDetails, noDetailsMessage,
   type CostcoOrderDetails, type CostcoOrderRow, type CostcoOutcome, type TabLook,
 } from '../lib/costcoCommand';
+import { getScrape } from '../lib/scrapeConfig';
 
 // Costco commands that run with nobody at the browser. Each run opens its own
 // background tab, always closes it, never waits without a limit, and says so
@@ -12,17 +13,20 @@ import {
 // build ourselves is refused), so both commands let the page make its calls and
 // read what the interceptor (content/costco-interceptor.ts) kept on `window`.
 
-const ORDERS_URL = 'https://www.costco.com/myaccount/';
+// Addresses and waits come from the scrape config (lib/scrapeConfig.ts), read
+// at the moment they are used so a newer config applies to the next run.
+const S = () => getScrape('costco');
+const ordersUrl = () => S().urls.orders;
 /** How long the page gets to show it is signed in before the run gives up. */
-const READY_WAIT_MS = 45_000;
+const readyWaitMs = () => S().timeoutsMs.readyWaitMs;
 /** The whole list sync, from tab open to report. */
-const SYNC_TIMEOUT_MS = 4 * 60_000;
+const syncTimeoutMs = () => S().timeoutsMs.syncTimeoutMs;
 /** One order's details page. */
-const DETAIL_WAIT_MS = 20_000;
+const detailWaitMs = () => S().timeoutsMs.detailWaitMs;
 /** All order lookups in one command. */
-const ORDERS_TIMEOUT_MS = 5 * 60_000;
-const DETAIL_DELAY_MS = 500;
-const POLL_MS = 500;
+const ordersTimeoutMs = () => S().timeoutsMs.ordersTimeoutMs;
+const detailDelayMs = () => S().timeoutsMs.detailDelayMs;
+const pollMs = () => S().timeoutsMs.pollMs;
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 const MAIN = 'MAIN' as const;
@@ -92,7 +96,7 @@ export async function closeOrphanCostcoTab(): Promise<number | null> {
 
 async function openTab(): Promise<number> {
   // Not active and no window of its own: it should not pull focus from whatever is open.
-  const tab = await chrome.tabs.create({ url: ORDERS_URL, active: false });
+  const tab = await chrome.tabs.create({ url: ordersUrl(), active: false });
   if (tab.id == null) throw new Error('could not open a tab');
   await rememberRunTab(tab.id);
   return tab.id;
@@ -128,12 +132,12 @@ async function look(tabId: number): Promise<TabLook> {
  * which may be empty). Past the deadline only a sign-in address means signed
  * out; any other page is just slow, which must not make the tracker back off.
  */
-async function waitReady(tabId: number, timeoutMs = READY_WAIT_MS): Promise<'ready' | 'signed-out' | 'timeout'> {
+async function waitReady(tabId: number, timeoutMs = readyWaitMs()): Promise<'ready' | 'signed-out' | 'timeout'> {
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {
     const verdict = judgeTab(await look(tabId));
     if (verdict !== 'wait') return verdict;
-    await sleep(POLL_MS);
+    await sleep(pollMs());
   }
   const last = await look(tabId);
   // The list may have arrived during that last look.
@@ -181,7 +185,7 @@ async function syncOnce(): Promise<CostcoOutcome> {
     const ready = await waitReady(tabId);
     if (ready === 'timeout') return { kind: 'timeout', message: COSTCO_TIMEOUT_MESSAGE };
     if (ready !== 'ready') return { kind: 'error', message: COSTCO_SIGN_IN_MESSAGE };
-    const report = expectReport(tabId, SYNC_TIMEOUT_MS);
+    const report = expectReport(tabId, syncTimeoutMs());
     const alive = await chrome.tabs.sendMessage(tabId, { type: 'PING' }).catch(() => null);
     if (!alive) await chrome.scripting.executeScript({ target: { tabId }, files: ['content/costco.js'] });
     await chrome.tabs.sendMessage(tabId, { type: 'START_SYNC', platform: 'Costco' });
@@ -216,12 +220,13 @@ async function readOnce(orderNumbers: readonly string[]): Promise<OrdersRead> {
     const ready = await waitReady(tabId);
     if (ready === 'timeout') return { kind: 'error', message: COSTCO_TIMEOUT_MESSAGE };
     if (ready !== 'ready') return { kind: 'error', message: COSTCO_SIGN_IN_MESSAGE };
-    const appId = (await inPage(tabId, () => {
-      const m = /^#\/app\/([^/]+)\//.exec(location.hash || '');
+    // Runs in the page: the pattern's source goes in as an argument (nothing is closed over).
+    const appId = (await inPage(tabId, ((src: string) => {
+      const m = new RegExp(src).exec(location.hash || '');
       return m ? m[1] : null;
-    })) || COSTCO_APP_ID;
+    }) as never, [S().patterns.appIdHash])) || COSTCO_APP_ID;
 
-    const deadline = Date.now() + ORDERS_TIMEOUT_MS;
+    const deadline = Date.now() + ordersTimeoutMs();
     const rows: CostcoOrderRow[] = [];
     let timedOut = 0;
     let skipped = 0;
@@ -229,9 +234,9 @@ async function readOnce(orderNumbers: readonly string[]): Promise<OrdersRead> {
     let deferred = 0;
     for (let i = 0; i < orderNumbers.length; i++) {
       if (Date.now() >= deadline) { deferred = orderNumbers.length - i; break; }
-      if (i > 0) await sleep(DETAIL_DELAY_MS);
+      if (i > 0) await sleep(detailDelayMs());
       const n = orderNumbers[i];
-      await inPage(tabId, ((h: string) => { location.hash = h; }) as never, [`#/app/${appId}/orderdetails/${n}`]);
+      await inPage(tabId, ((h: string) => { location.hash = h; }) as never, [S().urls.orderDetailHash.replace('{appId}', () => String(appId)).replace('{orderNumber}', () => n)]);
       const found = await waitForDetails(tabId, n);
       if (found === 'signed-out') return { kind: 'error', message: COSTCO_SIGN_IN_MESSAGE };
       if (!found) { timedOut++; continue; }
@@ -248,12 +253,12 @@ async function readOnce(orderNumbers: readonly string[]): Promise<OrdersRead> {
 }
 
 async function waitForDetails(tabId: number, orderNumber: string): Promise<CostcoOrderDetails | 'signed-out' | null> {
-  const end = Date.now() + DETAIL_WAIT_MS;
+  const end = Date.now() + detailWaitMs();
   while (Date.now() < end) {
     const o = await inPage(tabId, ((k: string) => ((window as unknown as Record<string, Record<string, unknown>>).__costcoOrderDetails ?? {})[k] ?? null) as never, [orderNumber]);
     if (o) return o as CostcoOrderDetails;
     if (judgeTab(await look(tabId)) === 'signed-out') return 'signed-out';
-    await sleep(POLL_MS);
+    await sleep(pollMs());
   }
   return null;
 }

@@ -8,6 +8,7 @@
     "types": ["chrome"],
     "outDir": "dist",
     "noEmit": true,
+    "resolveJsonModule": true,
     "allowImportingTsExtensions": true
   },
   "include": ["src/**/*"]

@@ -5,6 +5,8 @@
 // Nothing in this file (or the content script that calls it) fetches, opens,
 // navigates or clicks anything.
 
+import { getScrape } from './scrapeConfig.ts';
+
 export type AmazonPageKind = 'orders' | 'detail' | 'tracking';
 
 export const MAX_CLEAN_BYTES = 1_500_000;
@@ -15,30 +17,28 @@ export const QUEUE_MAX_BYTES = 6_000_000;
 export function classifyAmazonUrl(rawUrl: string): AmazonPageKind | null {
   let u: URL;
   try { u = new URL(rawUrl); } catch { return null; }
-  if (u.protocol !== 'https:' || u.hostname !== 'www.amazon.com') return null;
+  const S = getScrape('amazon');
+  if (u.protocol !== 'https:' || u.hostname !== S.urls.host) return null;
   // Amazon often appends a /ref=... segment to the same page.
-  const p = u.pathname.replace(/\/ref=[^/]*\/?$/, '').replace(/\/+$/, '');
-  if (p === '/your-orders/orders' || p === '/gp/css/order-history' || p === '/gp/your-account/order-history') return 'orders';
-  if (p === '/gp/your-account/order-details' || p === '/your-orders/order-details' || p === '/gp/css/order-details' || p === '/gp/css/summary/edit.html') return 'detail';
-  if (p === '/progress-tracker/package' || p.startsWith('/progress-tracker/package/') || p === '/gp/your-account/ship-track' || p === '/gp/css/shiptrack/view.html') return 'tracking';
+  const p = u.pathname.replace(S.regex('refSuffix'), '').replace(/\/+$/, '');
+  if (S.regex('ordersPath').test(p)) return 'orders';
+  if (S.regex('detailPath').test(p)) return 'detail';
+  if (S.regex('trackingPath').test(p)) return 'tracking';
   return null;
 }
-
-const AGENT_BLOCK_RE = /unauthorized AI agent|violates Amazon'?s Conditions of Use|automated access/i;
 
 /** True for sign-in pages, CAPTCHA pages and the agent-block interstitial. Nothing is sent for these. */
 export function isBlockedPage(doc: Document): boolean {
   // Every signed-in Amazon page carries a hidden <form id="ap_navbar_form"
   // name="signIn"> in the top nav (the account flyout). It is not a sign-in
   // page, and counting it blocked every Sync now on page 1 (2026-11-20).
-  if (doc.querySelector('form[name="signIn"]:not(#ap_navbar_form), #ap_email, #ap_password, input[name="password"][type="password"]')) return true;
-  if (doc.querySelector('form[action*="validateCaptcha"], #captchacharacters, img[src*="captcha"]')) return true;
+  const S = getScrape('amazon');
+  if (doc.querySelector(S.selectors.blockedSignIn)) return true;
+  if (doc.querySelector(S.selectors.blockedCaptcha)) return true;
   const text = doc.documentElement?.textContent ?? '';
-  if (AGENT_BLOCK_RE.test(text.slice(0, 20000))) return true;
+  if (S.regex('agentBlock', 'i').test(text.slice(0, 20000))) return true;
   return false;
 }
-
-const STRIP_SELECTOR = 'script, noscript, style, link, meta, iframe, svg, template, input[type="hidden"], [id^="shipToData-"]';
 
 /**
  * Returns a cleaned HTML string for the document: scripts/styles/svg/etc.
@@ -47,7 +47,7 @@ const STRIP_SELECTOR = 'script, noscript, style, link, meta, iframe, svg, templa
  */
 export function cleanDocumentHtml(doc: Document): string {
   const root = doc.documentElement.cloneNode(true) as HTMLElement;
-  root.querySelectorAll(STRIP_SELECTOR).forEach(el => el.remove());
+  root.querySelectorAll(getScrape('amazon').selectors.stripElements).forEach(el => el.remove());
   const all = root.querySelectorAll('*');
   all.forEach(el => {
     for (const attr of Array.from(el.attributes)) {

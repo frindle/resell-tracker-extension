@@ -10,10 +10,16 @@
 // the timer below could fire after the run had given up on the page.
 import { classifyAmazonUrl, cleanDocumentHtml, hashString, isBlockedPage, byteLength, MAX_CLEAN_BYTES } from '../lib/amazonCapture';
 import { mayReadNow, type CaptureState, type PokeReply } from '../lib/capturePoke';
+import { getScrape, initScrapeConfig } from '../lib/scrapeConfig';
 
-const QUIET_MS = 1500;      // wait for the DOM to stop changing
-const MAX_WAIT_MS = 15000;  // give up waiting for late rendering
+const quietMs = () => getScrape('amazon').timeoutsMs.quietMs;       // wait for the DOM to stop changing
+const maxWaitMs = () => getScrape('amazon').timeoutsMs.maxWaitMs;   // give up waiting for late rendering
+const urlPollMs = () => getScrape('amazon').timeoutsMs.urlPollMs;
 const MAX_RESENDS = 2;      // tries again when the worker did not get the page
+
+// The scrape config (selectors, patterns, timeouts) is read once from storage
+// before the first page is looked at; until then the page is left alone.
+let cfgReady = false;
 
 // One per loaded document, so the worker can tell this page from the one before it.
 const PAGE_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -68,12 +74,13 @@ function handleNow(): CaptureState {
 }
 
 function schedule() {
+  if (!cfgReady) return;
   const url = location.href;
   if (url === lastHandledUrl) return;
-  if (!deadline) deadline = Date.now() + MAX_WAIT_MS;
+  if (!deadline) deadline = Date.now() + maxWaitMs();
   if (timer) clearTimeout(timer);
   const remaining = Math.max(0, deadline - Date.now());
-  timer = setTimeout(handleNow, Math.min(QUIET_MS, remaining));
+  timer = setTimeout(handleNow, Math.min(quietMs(), remaining));
 }
 
 function onUrlMaybeChanged() {
@@ -91,8 +98,11 @@ observer.observe(document.documentElement, { childList: true, subtree: true });
 window.addEventListener('popstate', onUrlMaybeChanged);
 window.addEventListener('hashchange', onUrlMaybeChanged);
 // SPA soft navigation that mutates nothing observable still changes the URL.
-setInterval(onUrlMaybeChanged, 2000);
-schedule();
+initScrapeConfig().then(() => {
+  cfgReady = true;
+  setInterval(onUrlMaybeChanged, urlPollMs());
+  schedule();
+});
 
 // The worker's ask during a run. Answers at once; the page itself is sent the
 // usual way (AMAZON_PAGE_CAPTURE). Only the worker can send this.
@@ -100,7 +110,8 @@ chrome.runtime.onMessage.addListener((msg: { type?: string; force?: boolean; for
   if (msg?.type !== 'AMAZON_CAPTURE_NOW') return undefined;
   const reply = (state: PokeReply['state']): PokeReply => ({ state, pageId: PAGE_ID, path: location.pathname });
   if (location.href === lastHandledUrl && lastState) { sendResponse(reply(lastState)); return undefined; }
-  const ready = mayReadNow({ readyState: document.readyState, quietForMs: Date.now() - lastMutationAt, quietMs: QUIET_MS, force: msg.force, forceAny: msg.forceAny });
+  if (!cfgReady) { sendResponse(reply('busy')); return undefined; }
+  const ready = mayReadNow({ readyState: document.readyState, quietForMs: Date.now() - lastMutationAt, quietMs: quietMs(), force: msg.force, forceAny: msg.forceAny });
   if (!ready) { sendResponse(reply('busy')); return undefined; }
   sendResponse(reply(handleNow()));
   return undefined;

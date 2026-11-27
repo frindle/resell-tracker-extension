@@ -2,6 +2,15 @@ import { getSettings } from '../lib/storage';
 import { originsFor, missingOrigins, requestGrant } from '../lib/access';
 import type { ApiLogEntry } from '../lib/types';
 import { isNewerVersion } from '../lib/version';
+import { describeScrapeStatus, SCRAPE_STATUS_KEY } from '../lib/scrapeConfig';
+
+async function showScrapeConfig() {
+  const el = document.getElementById('scrapeConfigLabel');
+  if (!el) return;
+  const got = await chrome.storage.local.get(SCRAPE_STATUS_KEY).catch(() => ({} as Record<string, unknown>));
+  el.textContent = describeScrapeStatus(got[SCRAPE_STATUS_KEY] as Parameters<typeof describeScrapeStatus>[0]);
+}
+showScrapeConfig();
 
 async function checkVersions(trackerUrl: string | undefined) {
   const manifest = chrome.runtime.getManifest();
