@@ -267,6 +267,11 @@
   function hostIs(host, domain) {
     return host === domain || host.endsWith("." + domain);
   }
+  function isDealHost(host, trackerHost) {
+    if (trackerHost && host === trackerHost.toLowerCase()) return false;
+    if (GROUP_SITES.some((s) => hostIs(host, s.domain))) return false;
+    return !NON_DEAL_DOMAINS.some((d) => hostIs(host, d));
+  }
   function isOutboundDealLink(href, site, trackerHost) {
     let u;
     try {
@@ -276,11 +281,16 @@
     }
     if (u.protocol !== "https:" && u.protocol !== "http:") return false;
     const host = u.hostname.toLowerCase();
-    if (hostIs(host, site.domain)) return false;
-    if (trackerHost && host === trackerHost.toLowerCase()) return false;
-    if (GROUP_SITES.some((s) => hostIs(host, s.domain))) return false;
-    if (NON_DEAL_DOMAINS.some((d) => hostIs(host, d))) return false;
-    return true;
+    if (hostIs(host, site.domain)) {
+      const dest = extractDestParam(u);
+      if (!dest) return false;
+      try {
+        return isDealHost(new URL(dest).hostname.toLowerCase(), trackerHost);
+      } catch {
+        return false;
+      }
+    }
+    return isDealHost(host, trackerHost);
   }
   function buildGoUrl(trackerBase, href, src) {
     const base = trackerBase.trim().replace(/\/+$/, "");
@@ -317,8 +327,6 @@
         "t.me",
         "telegram.org",
         "reddit.com",
-        "google.com",
-        "apple.com",
         "paypal.com",
         "stripe.com",
         "zendesk.com",

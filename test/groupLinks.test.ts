@@ -33,6 +33,25 @@ test('isOutboundDealLink', () => {
   assert.equal(isOutboundDealLink('https://tracker.lan/go', bfmr, 'tracker.lan'), false);
 });
 
+test('apple and google store product links are intercepted', () => {
+  assert.equal(isOutboundDealLink('https://www.apple.com/shop/buy-iphone/iphone-16', bfmr), true);
+  assert.equal(isOutboundDealLink('https://store.google.com/product/pixel_9', bfmr), true);
+});
+
+test('same-site redirect wrapping a retailer URL is intercepted, original href kept', () => {
+  const wrapped = 'https://www.bfmr.com/out?url=' + encodeURIComponent('https://www.bestbuy.com/site/x/1.p');
+  assert.equal(isOutboundDealLink(wrapped, bfmr), true);
+  assert.match(destinationFor(wrapped, 'bfmr', { trackerUrl: 'http://t.lan', extensionSecret: 's' }),
+    new RegExp('url=' + encodeURIComponent(wrapped).replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')));
+});
+
+test('same-site links with no dest, a same-site dest, or a non-http dest are left alone', () => {
+  assert.equal(isOutboundDealLink('https://www.bfmr.com/deals?page=2', bfmr), false);
+  assert.equal(isOutboundDealLink('https://www.bfmr.com/out?url=' + encodeURIComponent('https://www.bfmr.com/deals/1'), bfmr), false);
+  assert.equal(isOutboundDealLink('https://www.bfmr.com/out?url=' + encodeURIComponent('https://discord.gg/x'), bfmr), false);
+  assert.equal(isOutboundDealLink('https://www.bfmr.com/out?url=javascript:alert(1)', bfmr), false);
+});
+
 test('siteForHost', () => {
   assert.equal(siteForHost('www.bigskybuyers.com')?.key, 'bigsky');
   assert.equal(siteForHost('thecashoutkings.com')?.key, 'cok');

@@ -23,7 +23,7 @@ const DEST_PARAMS = ['url', 'dest', 'destination', 'u', 'r', 'redirect', 'to', '
 
 const bare = (host: string) => host.replace(/^www\./, '');
 
-function extractDestParam(u: URL): string | null {
+export function extractDestParam(u: URL): string | null {
   for (const p of DEST_PARAMS) {
     const v = u.searchParams.get(p);
     if (v && (v.startsWith('https://') || v.startsWith('http://'))) return v;
