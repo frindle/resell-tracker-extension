@@ -4,6 +4,7 @@ import { handleCapture, flushQueue, getCaptureStatus, getLastRun } from './amazo
 import { startAmazonRun, startTrackingRun, startVisitRun, closeOrphanRunTab, notifyOutcome, notePage, isRunTab, isTrackRunTab, amazonRunActive } from './amazonRun';
 import { runCarrierItems, parseCarrierPayload, carrierRunActive } from './carrierRun';
 import { runEgiftOrder, egiftRunActive } from './egiftRun';
+import { runEgiftPlan } from './egiftPlan';
 import { parseEgiftPayload } from '../lib/egiftCommand';
 import { trackCommandPlan } from '../lib/trackCommand';
 import { visitCommandPlan } from '../lib/visitCommand';
@@ -913,7 +914,9 @@ async function pollAndExecuteCommands() {
       const plan = parseEgiftPayload(cmd.payload, userId);
       if ('error' in plan) { await patchCommand(base, cmd.id, 'failed', headers, { error: plan.error }); continue; }
       try {
-        const report = await runEgiftOrder(base, headers, plan.orderId);
+        const report = plan.runner === 'plan'
+          ? await runEgiftPlan(base, headers, plan.orderId, { dryRun: plan.dryRun })
+          : await runEgiftOrder(base, headers, plan.orderId);
         await patchCommand(base, cmd.id, report.status, headers, report.result);
       } catch {
         await patchCommand(base, cmd.id, 'failed', headers, { error: 'error' });

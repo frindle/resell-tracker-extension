@@ -19,6 +19,9 @@ const KEEPALIVE_MS = 20_000;
 
 let running = false;
 export function egiftRunActive(): boolean { return running; }
+/** The plan runner (egiftPlan.ts) shares the one-run-at-a-time flag. False when a run is already going. */
+export function claimEgiftRun(): boolean { if (running) return false; running = true; return true; }
+export function releaseEgiftRun(): void { running = false; }
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 

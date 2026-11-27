@@ -12,6 +12,7 @@ export const MAX_CARDS = 50;
 export type EgiftFailure =
   | 'no-link' | 'link-rejected' | 'email-rejected' | 'email-no-response' | 'no-open-button' | 'page-timeout' | 'bot-check'
   | 'out-of-sequence' | 'total-mismatch' | 'ended-early' | 'save-failed' | 'run-busy' | 'error'
+  | 'click-denied' | 'plan-failed' | 'plan-error' | `plan-error-${EgiftErrorKind}`
   | `info-http-${number}` | `error-${EgiftStep}` | `error-${EgiftStep}-${EgiftErrorKind}`;
 
 /** Where a run threw, so a failed run says which step broke instead of a bare "error". */
@@ -34,14 +35,21 @@ export function egiftErrorCode(step: EgiftStep, err: unknown): EgiftFailure {
   return kind ? `error-${step}-${kind}` : `error-${step}`;
 }
 
-export function parseEgiftPayload(raw: string | null, userId: string | undefined): { orderId: number } | { error: string } {
-  let p: { userId?: unknown; orderId?: unknown } | null;
+/** `runner: 'plan'` opts into the step-plan runner (bundled plan); `dryRun` is for the plan runner only. */
+export type EgiftPayload = { orderId: number; runner?: 'plan'; dryRun?: true };
+
+export function parseEgiftPayload(raw: string | null, userId: string | undefined): EgiftPayload | { error: string } {
+  let p: { userId?: unknown; orderId?: unknown; runner?: unknown; dryRun?: unknown } | null;
   try { p = JSON.parse(raw ?? 'null') as typeof p; } catch { return { error: 'bad payload' }; }
   if (!p || typeof p !== 'object') return { error: 'bad payload' };
   if (userId && p.userId != null && String(p.userId) !== String(userId)) return { error: 'command is for another user' };
   const orderId = Number(p.orderId);
   if (typeof p.orderId === 'boolean' || p.orderId === null || !Number.isInteger(orderId) || orderId <= 0) return { error: 'bad payload' };
-  return { orderId };
+  if (p.runner != null && p.runner !== 'plan' && p.runner !== 'builtin') return { error: 'bad payload' };
+  if (p.dryRun != null && typeof p.dryRun !== 'boolean') return { error: 'bad payload' };
+  const plan = p.runner === 'plan';
+  if (p.dryRun === true && !plan) return { error: 'dryRun needs the plan runner' };
+  return { orderId, ...(plan ? { runner: 'plan' as const } : {}), ...(plan && p.dryRun === true ? { dryRun: true as const } : {}) };
 }
 
 /** Same rules as the tracker's parseCostcoDeliveryLink: https, exact host, no credentials, a login token. */

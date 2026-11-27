@@ -134,3 +134,14 @@ test('report: photo and naming counts ride with the result, never a code', () =>
   const r = egiftReport(2, 2, null, 'new-tab', { images: 2, named: 2, mismatched: 0 });
   assert.deepEqual(r, { status: 'done', result: { cards: 2, saved: 2, opened: 'new-tab', images: 2, named: 2, mismatched: 0 } });
 });
+
+test('payload: runner plan and dryRun', () => {
+  assert.deepEqual(parseEgiftPayload(JSON.stringify({ orderId: 7, runner: 'plan' }), '1'), { orderId: 7, runner: 'plan' });
+  assert.deepEqual(parseEgiftPayload(JSON.stringify({ orderId: 7, runner: 'plan', dryRun: true }), '1'), { orderId: 7, runner: 'plan', dryRun: true });
+  assert.deepEqual(parseEgiftPayload(JSON.stringify({ orderId: 7, runner: 'plan', dryRun: false }), '1'), { orderId: 7, runner: 'plan' });
+  assert.deepEqual(parseEgiftPayload(JSON.stringify({ orderId: 7, runner: 'builtin' }), '1'), { orderId: 7 });
+  assert.ok('error' in parseEgiftPayload(JSON.stringify({ orderId: 7, dryRun: true }), '1'));
+  assert.ok('error' in parseEgiftPayload(JSON.stringify({ orderId: 7, runner: 'builtin', dryRun: true }), '1'));
+  assert.ok('error' in parseEgiftPayload(JSON.stringify({ orderId: 7, runner: 'other' }), '1'));
+  assert.ok('error' in parseEgiftPayload(JSON.stringify({ orderId: 7, runner: 'plan', dryRun: 'yes' }), '1'));
+});

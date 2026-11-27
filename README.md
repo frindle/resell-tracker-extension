@@ -51,6 +51,10 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.5.0
+
+- **Step plans (phase 1).** A bundled `costcoEgift` plan (data: steps, selectors, labels) and an interpreter that runs it, with a validator, a host allowlist, a click denylist and caps on steps, loops, time and tabs. Opt in per command with `runner: "plan"` in the `SCRAPE_EGIFT` payload; the built-in runner stays the default and the fallback. `dryRun: true` (plan runner only) skips typing, saving and photos and reports the step trace. The report says `runner: "plan v1"` and carries a trace of step ids and timings, never values. See `docs/step-plans.md`.
+
 ### 1.4.4
 
 - **Pairing replaces pasting the secret.** Connect checks whether the tracker accepts the saved secret; if not, it opens the tracker's approval page (`/extension/pair`). Approve it there, signed in, and the extension receives the tracker's `EXTENSION_SHARED_SECRET` and the approving user, once. The page waits up to about 10 minutes; if you close Settings first, the background finishes the pairing on its next one-minute poll. The secret is no longer generated or shown in Settings. Needs a tracker with the pairing endpoints.
