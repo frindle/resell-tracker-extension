@@ -16,6 +16,8 @@ function configV(version: number, edit?: (c: ScrapeConfig) => void): ScrapeConfi
   edit?.(c);
   return c;
 }
+// Versions relative to the bundled config, so a config bump never turns a "newer" fixture into an older one.
+const B = BUNDLED_SCRAPE_CONFIG.version;
 
 function fakeStore(initial?: unknown) {
   const s = { cache: initial as unknown, status: null as ScrapeStatus | null, puts: 0 };
@@ -74,12 +76,12 @@ test('with no cache and no tracker, the bundled defaults are in effect', async (
 });
 
 test('fallback order: remote beats cache beats bundled', async () => {
-  const cacheCfg = configV(3, c => { c.sites.walmart.selectors.orderBlocks = 'cache-marker'; });
+  const cacheCfg = configV(B + 1, c => { c.sites.walmart.selectors.orderBlocks = 'cache-marker'; });
   const { s, store } = fakeStore({ config: cacheCfg, etag: '"3-x"', fetchedAt: 1 });
 
   // cache beats bundled
   await initScrapeConfig(store);
-  assert.deepEqual(getScrapeInfo(), { version: 3, source: 'cache' });
+  assert.deepEqual(getScrapeInfo(), { version: B + 1, source: 'cache' });
   assert.equal(getScrape('walmart').selectors.orderBlocks, 'cache-marker');
 
   // tracker unreachable: cache stays
@@ -92,19 +94,19 @@ test('fallback order: remote beats cache beats bundled', async () => {
   assert.equal(down.calls[0].headers['X-Extension-Secret'], 'synthetic');
 
   // remote beats cache
-  const remoteCfg = configV(4, c => { c.sites.walmart.selectors.orderBlocks = 'remote-marker'; });
+  const remoteCfg = configV(B + 2, c => { c.sites.walmart.selectors.orderBlocks = 'remote-marker'; });
   const up = fakeFetch({ body: remoteCfg, etag: '"4-y"' });
   const r2 = await loadScrapeConfig(TRACKER, { fetch: up.f, store, now: () => 99 });
   assert.equal(r2.updated, true);
-  assert.deepEqual(getScrapeInfo(), { version: 4, source: 'remote' });
+  assert.deepEqual(getScrapeInfo(), { version: B + 2, source: 'remote' });
   assert.equal(getScrape('walmart').selectors.orderBlocks, 'remote-marker');
   assert.equal((s.cache as StoredScrape).etag, '"4-y"');
   assert.equal((s.cache as StoredScrape).fetchedAt, 99);
-  assert.deepEqual(s.status && { version: s.status.version, source: s.status.source }, { version: 4, source: 'remote' });
+  assert.deepEqual(s.status && { version: s.status.version, source: s.status.source }, { version: B + 2, source: 'remote' });
 });
 
 test('a 304 confirms the cached config as remote and stores nothing new', async () => {
-  const cacheCfg = configV(3);
+  const cacheCfg = configV(B + 1);
   const { s, store } = fakeStore({ config: cacheCfg, etag: '"3-x"', fetchedAt: 1 });
   const f = fakeFetch({ status: 304 });
   const r = await loadScrapeConfig(TRACKER, { fetch: f.f, store });
@@ -118,7 +120,7 @@ test('an invalid remote is ignored', async () => {
   const bad: unknown[] = [
     { version: 9 },
     { version: 9, sites: { walmart: { selectors: { a: 5 }, labels: {}, patterns: {}, urls: {}, timeoutsMs: {} } } },
-    configV(9, c => { c.sites.walmart.patterns.orderTotal = '(unclosed'; }),
+    configV(B + 7, c => { c.sites.walmart.patterns.orderTotal = '(unclosed'; }),
     'not an object',
   ];
   for (const body of bad) {
@@ -137,9 +139,9 @@ test('an invalid remote is ignored', async () => {
 });
 
 test('a lower-version remote is ignored', async () => {
-  const cacheCfg = configV(5, c => { c.sites.walmart.selectors.orderBlocks = 'cache-marker'; });
+  const cacheCfg = configV(B + 3, c => { c.sites.walmart.selectors.orderBlocks = 'cache-marker'; });
   const { s, store } = fakeStore({ config: cacheCfg, etag: '"5-x"', fetchedAt: 1 });
-  const older = configV(4, c => { c.sites.walmart.selectors.orderBlocks = 'older-marker'; });
+  const older = configV(B + 2, c => { c.sites.walmart.selectors.orderBlocks = 'older-marker'; });
   const f = fakeFetch({ body: older, etag: '"4-y"' });
   const r = await loadScrapeConfig(TRACKER, { fetch: f.f, store });
   assert.equal(r.updated, false);
@@ -163,7 +165,7 @@ test('a corrupt cache falls back to bundled', async () => {
 });
 
 test('a bad regex falls back per entry, other entries keep the remote value', async () => {
-  const remote = configV(2, c => {
+  const remote = configV(B, c => {
     c.sites.walmart.patterns.orderTotal = '\\-'; // valid without flags, throws with the u flag
     c.sites.walmart.patterns.cardLast4 = 'remote-last4-(\\d{4})';
   });
@@ -190,7 +192,7 @@ test('regex() returns a fresh object each call, so g-flag state is not shared', 
 });
 
 test('getScrape on a missing site returns the default, and an unknown site is empty', async () => {
-  const remote = configV(2);
+  const remote = configV(B);
   delete (remote.sites as Record<string, unknown>).costco;
   const { store } = fakeStore();
   await loadScrapeConfig(TRACKER, { fetch: fakeFetch({ body: remote }).f, store });
@@ -203,7 +205,7 @@ test('getScrape on a missing site returns the default, and an unknown site is em
 });
 
 test('a remote missing one entry keeps the default for that entry', async () => {
-  const remote = configV(2, c => {
+  const remote = configV(B, c => {
     c.sites.walmart.selectors = { orderBlocks: MARK };
   });
   const { store } = fakeStore();
