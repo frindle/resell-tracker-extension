@@ -3199,9 +3199,150 @@
     }
   });
 
+  // src/lib/planKey.ts
+  var PLAN_PUBLIC_KEY_B64;
+  var init_planKey = __esm({
+    "src/lib/planKey.ts"() {
+      "use strict";
+      PLAN_PUBLIC_KEY_B64 = "xbcWJk6x2SGxbnBbVtOmBpuMp59DiRTQrb/fAGLNtEs=";
+    }
+  });
+
+  // src/lib/planRemote.ts
+  function chromeStore2() {
+    return {
+      async get() {
+        return (await chrome.storage.local.get(PLAN_STORAGE_KEY))[PLAN_STORAGE_KEY];
+      },
+      async put(v) {
+        await chrome.storage.local.set({ [PLAN_STORAGE_KEY]: v });
+      },
+      async putStatus(s) {
+        await chrome.storage.local.set({ [PLAN_STATUS_KEY]: s });
+      }
+    };
+  }
+  function b64ToBytes(s) {
+    const bin = atob(s);
+    const out = new Uint8Array(new ArrayBuffer(bin.length));
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  async function verifyPlans(plans, sig, deps2 = {}) {
+    const keyB64 = deps2.publicKeyB64 ?? PLAN_PUBLIC_KEY_B64;
+    if (!keyB64) return { ok: false, code: "no-key" };
+    if (typeof sig !== "string" || !sig) return { ok: false, code: "no-sig" };
+    if (typeof plans !== "string" || !plans) return { ok: false, code: "invalid" };
+    const subtle = deps2.subtle ?? (typeof crypto !== "undefined" ? crypto.subtle : void 0);
+    if (!subtle) return { ok: false, code: "no-webcrypto" };
+    let good = false;
+    try {
+      const key = await subtle.importKey("raw", b64ToBytes(keyB64), { name: "Ed25519" }, false, ["verify"]);
+      good = await subtle.verify({ name: "Ed25519" }, key, b64ToBytes(sig), new TextEncoder().encode(plans));
+    } catch (e) {
+      const name = e?.name;
+      return { ok: false, code: name === "NotSupportedError" ? "no-webcrypto" : "bad-sig" };
+    }
+    if (!good) return { ok: false, code: "bad-sig" };
+    let parsed;
+    try {
+      parsed = JSON.parse(plans);
+    } catch {
+      return { ok: false, code: "invalid" };
+    }
+    const v = validatePlanFile(parsed);
+    return v.ok ? { ok: true, file: v.file } : { ok: false, code: "invalid" };
+  }
+  function readStored2(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const r = raw;
+    if (typeof r.plans !== "string" || typeof r.sig !== "string") return null;
+    return { plans: r.plans, sig: r.sig, etag: typeof r.etag === "string" ? r.etag : null, fetchedAt: typeof r.fetchedAt === "number" ? r.fetchedAt : 0 };
+  }
+  async function verifiedStored(store3, deps2) {
+    let raw;
+    try {
+      raw = await store3.get();
+    } catch {
+      return null;
+    }
+    const stored = readStored2(raw);
+    if (!stored) return null;
+    const v = await verifyPlans(stored.plans, stored.sig, deps2);
+    return v.ok ? { file: v.file, stored } : null;
+  }
+  async function selectPlans(deps2 = {}) {
+    const bundled = deps2.bundled === void 0 ? BUNDLED_PLANS : deps2.bundled;
+    try {
+      const hit = await verifiedStored(deps2.store ?? chromeStore2(), deps2);
+      if (hit && (!bundled || hit.file.version >= bundled.version)) return { file: hit.file, source: "remote" };
+    } catch {
+    }
+    return { file: bundled, source: "bundled" };
+  }
+  async function loadRemotePlans(tracker, deps2 = {}) {
+    const store3 = deps2.store ?? chromeStore2();
+    const now = deps2.now ?? Date.now;
+    const bundled = deps2.bundled === void 0 ? BUNDLED_PLANS : deps2.bundled;
+    let code2 = "no-tracker";
+    let updated = false;
+    try {
+      const current = await verifiedStored(store3, deps2);
+      const keyB64 = deps2.publicKeyB64 ?? PLAN_PUBLIC_KEY_B64;
+      if (!keyB64) {
+        code2 = "no-key";
+      } else if (tracker) {
+        const headers = { ...tracker.headers };
+        if (current?.stored.etag) headers["If-None-Match"] = current.stored.etag;
+        const res = await (deps2.fetch ?? fetch)(`${tracker.base.replace(/\/$/, "")}/api/extension/plans`, { headers, cache: "no-store" });
+        if (res.status === 304 && current) {
+          code2 = "not-modified";
+        } else if (!res.ok) {
+          code2 = `http-${res.status}`;
+        } else {
+          let body = null;
+          try {
+            body = JSON.parse(await res.text());
+          } catch {
+          }
+          const b = body && typeof body === "object" ? body : {};
+          const v = await verifyPlans(b.plans, b.sig, deps2);
+          if (!v.ok) code2 = v.code;
+          else if (v.file.version < Math.max(bundled?.version ?? 0, current?.file.version ?? 0)) code2 = "older";
+          else {
+            await store3.put({ plans: b.plans, sig: b.sig, etag: res.headers.get("ETag"), fetchedAt: now() });
+            code2 = "ok";
+            updated = true;
+          }
+        }
+      }
+    } catch {
+      code2 = "fetch-error";
+    }
+    const sel = await selectPlans(deps2);
+    const out = { source: sel.source, version: sel.file?.version ?? 0, code: code2, updated };
+    try {
+      await store3.putStatus({ source: out.source, version: out.version, code: code2, ts: now() });
+    } catch {
+    }
+    return out;
+  }
+  var PLAN_STORAGE_KEY, PLAN_STATUS_KEY;
+  var init_planRemote = __esm({
+    "src/lib/planRemote.ts"() {
+      "use strict";
+      init_stepPlan();
+      init_planKey();
+      PLAN_STORAGE_KEY = "remotePlans";
+      PLAN_STATUS_KEY = "remotePlansStatus";
+    }
+  });
+
   // src/background/egiftPlan.ts
   async function runEgiftPlan(base, headers, orderId, opts = {}, doFetch = fetch) {
-    const bundled = BUNDLED_PLANS;
+    const sel = await selectPlans();
+    const withPlan = sel.file?.plans[PLAN_NAME] ? sel : { file: BUNDLED_PLANS, source: "bundled" };
+    const bundled = withPlan.file;
     const plan = bundled?.plans[PLAN_NAME];
     if (!bundled || !plan) {
       if (opts.dryRun) return { ...egiftReport(0, 0, "plan-failed"), result: { ...egiftReport(0, 0, "plan-failed").result, runner: "plan-invalid" } };
@@ -3231,6 +3372,7 @@
       init_egiftCommand();
       init_egiftRun();
       init_planDriver();
+      init_planRemote();
       PLAN_NAME = "costcoEgift";
     }
   });
@@ -3657,6 +3799,65 @@
     }
   });
 
+  // src/lib/scrubLink.ts
+  var init_scrubLink = __esm({
+    "src/lib/scrubLink.ts"() {
+      "use strict";
+    }
+  });
+
+  // src/lib/groupLinks.ts
+  function isGroupEnabled(s, key) {
+    return s?.[key] === true;
+  }
+  function originsForGroup(site) {
+    return [`https://*.${site.domain}/*`, `https://${site.domain}/*`];
+  }
+  var GROUP_SITES, GROUP_LINKS_KEY;
+  var init_groupLinks = __esm({
+    "src/lib/groupLinks.ts"() {
+      "use strict";
+      init_scrubLink();
+      GROUP_SITES = [
+        { key: "bfmr", label: "BFMR", domain: "bfmr.com" },
+        { key: "bg", label: "BuyingGroup", domain: "buyinggroup.com" },
+        { key: "bigsky", label: "Big Sky Buyers", domain: "bigskybuyers.com" },
+        { key: "cok", label: "Cash Out Kings", domain: "thecashoutkings.com", note: "Only redirects your clicks; reads and sends nothing from the page." }
+      ];
+      GROUP_LINKS_KEY = "groupLinkSites";
+    }
+  });
+
+  // src/lib/groupLinkScripts.ts
+  async function syncGroupLinkScripts() {
+    const got = await chrome.storage.sync.get(GROUP_LINKS_KEY).catch(() => ({}));
+    const settings2 = got[GROUP_LINKS_KEY];
+    for (const site of GROUP_SITES) {
+      try {
+        await chrome.scripting.unregisterContentScripts({ ids: [idFor(site)] });
+      } catch {
+      }
+      if (!isGroupEnabled(settings2, site.key)) continue;
+      const origins = originsForGroup(site);
+      if (!await chrome.permissions.contains({ origins }).catch(() => false)) continue;
+      await chrome.scripting.registerContentScripts([{
+        id: idFor(site),
+        matches: origins,
+        js: ["content/group-links.js"],
+        runAt: "document_start"
+      }]).catch(() => {
+      });
+    }
+  }
+  var idFor;
+  var init_groupLinkScripts = __esm({
+    "src/lib/groupLinkScripts.ts"() {
+      "use strict";
+      init_groupLinks();
+      idFor = (s) => `group-links-${s.key}`;
+    }
+  });
+
   // src/background/index.ts
   var require_background = __commonJS({
     "src/background/index.ts"() {
@@ -3672,9 +3873,11 @@
       init_browserTarget();
       init_costcoCommand();
       init_costcoRun();
+      init_planRemote();
       init_scrapeConfig();
       init_pairing();
       init_storage();
+      init_groupLinkScripts();
       var ICON_PATHS_CHROME = { 16: "icons/icon16.png", 32: "icons/icon32.png", 48: "icons/icon48.png", 128: "icons/icon128.png" };
       var ICON_PATH_FIREFOX = "icons/icon.svg";
       var _browser = globalThis.browser;
@@ -3703,6 +3906,7 @@
           const { trackerUrl, apiKey, extensionSecret, userId } = await Promise.resolve().then(() => (init_storage(), storage_exports)).then((m) => m.getSettings());
           if (!trackerUrl) {
             await loadScrapeConfig(null);
+            await loadRemotePlans(null);
             return;
           }
           const headers = {};
@@ -3711,6 +3915,7 @@
           if (userId) headers["X-Extension-User-Id"] = userId;
           headers["X-Extension-Browser"] = isFirefox ? "firefox" : "chrome";
           await loadScrapeConfig({ base: upgradeUrl2(trackerUrl), headers });
+          await loadRemotePlans({ base: upgradeUrl2(trackerUrl), headers });
         } catch {
         }
       }
@@ -3725,6 +3930,8 @@
         chrome.alarms.create("pollCommands", { when: Date.now() + 2e3, periodInMinutes: 1 });
         pollAndExecuteCommands().catch(console.error);
         reregisterTrackerScript();
+        syncGroupLinkScripts().catch(() => {
+        });
       });
       chrome.runtime.onStartup.addListener(() => {
         setToolbarIcon();
@@ -3734,6 +3941,8 @@
         chrome.alarms.create("pollCommands", { when: Date.now() + 2e3, periodInMinutes: 1 });
         pollAndExecuteCommands().catch(console.error);
         reregisterTrackerScript();
+        syncGroupLinkScripts().catch(() => {
+        });
       });
       chrome.alarms.onAlarm.addListener((alarm) => {
         if (alarm.name === "scrapeConfig") refreshScrapeConfig().catch(() => {
@@ -3864,6 +4073,16 @@
         });
       });
       chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message.type === "OPEN_GROUP_LINK") {
+          try {
+            const u = new URL(String(message.url));
+            if (sender.tab && (u.protocol === "https:" || u.protocol === "http:")) {
+              chrome.tabs.create({ url: u.toString(), active: !message.background, openerTabId: sender.tab.id, index: sender.tab.index + 1 });
+            }
+          } catch {
+          }
+          return;
+        }
         if (message.type === "PING") {
           sendResponse({ ok: true });
           return;
