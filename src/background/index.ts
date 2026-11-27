@@ -2,6 +2,7 @@ import type { ScrapedOrder } from '../lib/types';
 import { ensureTrackerScriptRegistered } from '../lib/tracker-script';
 import { handleCapture, flushQueue, getCaptureStatus, getLastRun } from './amazonCapture';
 import { startAmazonRun, startTrackingRun, startVisitRun, closeOrphanRunTab, notifyOutcome, notePage, isRunTab, isTrackRunTab, amazonRunActive } from './amazonRun';
+import { runCarrierItems, parseCarrierPayload, carrierRunActive } from './carrierRun';
 import { trackCommandPlan } from '../lib/trackCommand';
 import { visitCommandPlan } from '../lib/visitCommand';
 import { extensionBrowser } from '../lib/browserTarget';
@@ -849,6 +850,24 @@ async function pollAndExecuteCommands() {
         await patchCommand(base, cmd.id, report.status, headers, report.result);
       } finally {
         releaseCostcoRun();
+      }
+      continue;
+    }
+    if (cmd.type === 'TRACK_CARRIER') {
+      // FedEx / UPS tracking pages for BG-bound shipments; left pending while a carrier run is going.
+      if (carrierRunActive()) continue;
+      await patchCommand(base, cmd.id, 'running', headers);
+      const plan = parseCarrierPayload(cmd.payload, userId);
+      if ('error' in plan) { await patchCommand(base, cmd.id, 'failed', headers, { error: plan.error }); continue; }
+      try {
+        const post = async (body: Record<string, unknown>) => {
+          const r = await fetch(`${base}/api/extension/carrier-page`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+          return r.ok;
+        };
+        const out = await runCarrierItems(plan.items, post, plan.statusWords);
+        await patchCommand(base, cmd.id, out.ok ? 'done' : 'failed', headers, out.ok ? out : { ...out, error: 'no page could be read' });
+      } catch (e) {
+        await patchCommand(base, cmd.id, 'failed', headers, { error: String(e) });
       }
       continue;
     }
