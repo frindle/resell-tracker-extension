@@ -1322,10 +1322,10 @@
   });
 
   // src/lib/egiftCommand.ts
-  function egiftErrorCode(step, err) {
+  function egiftErrorCode(step2, err) {
     const m = err instanceof Error ? err.message : typeof err === "string" ? err : "";
     const kind = /chrome-error:|error page/i.test(m) ? "error-page" : /cannot access|permission/i.test(m) ? "permission" : /no tab with id|tab was closed|tabs cannot be edited/i.test(m) ? "tab-gone" : /frame with id|frame was removed|navigat/i.test(m) ? "navigated" : /failed to fetch|networkerror|load failed/i.test(m) ? "network" : null;
-    return kind ? `error-${step}-${kind}` : `error-${step}`;
+    return kind ? `error-${step2}-${kind}` : `error-${step2}`;
   }
   function parseEgiftPayload(raw, userId) {
     let p;
@@ -1338,7 +1338,11 @@
     if (userId && p.userId != null && String(p.userId) !== String(userId)) return { error: "command is for another user" };
     const orderId = Number(p.orderId);
     if (typeof p.orderId === "boolean" || p.orderId === null || !Number.isInteger(orderId) || orderId <= 0) return { error: "bad payload" };
-    return { orderId };
+    if (p.runner != null && p.runner !== "plan" && p.runner !== "builtin") return { error: "bad payload" };
+    if (p.dryRun != null && typeof p.dryRun !== "boolean") return { error: "bad payload" };
+    const plan = p.runner === "plan";
+    if (p.dryRun === true && !plan) return { error: "dryRun needs the plan runner" };
+    return { orderId, ...plan ? { runner: "plan" } : {}, ...plan && p.dryRun === true ? { dryRun: true } : {} };
   }
   function isAllowedEgiftLink(raw) {
     if (typeof raw !== "string") return false;
@@ -1368,14 +1372,14 @@
       const t = (v ?? "").trim().replace(/\s+/g, " ");
       return t && ok.test(t) ? t : null;
     };
-    const code = cell(page.code, p.codeValue) ?? p.code.exec(text)?.[1] ?? null;
-    if (!code) return null;
+    const code2 = cell(page.code, p.codeValue) ?? p.code.exec(text)?.[1] ?? null;
+    if (!code2) return null;
     const pin = cell(page.pin, p.pinValue) ?? p.pin.exec(text)?.[1] ?? null;
     const seq = p.sequence.exec(page.counter ?? "") ?? p.sequence.exec(text);
     return {
       index: seq ? Number(seq[1]) : 1,
       total: seq ? Number(seq[2]) : 1,
-      code,
+      code: code2,
       pin,
       value: amountOf(text, p.amount)
     };
@@ -1486,7 +1490,7 @@
     };
   }
   function pageText(c) {
-    const rx = (src, flags) => {
+    const rx2 = (src, flags) => {
       try {
         return src ? new RegExp(src, flags) : null;
       } catch {
@@ -1505,9 +1509,9 @@
     const label = (e) => (e.value || e.textContent || "").trim();
     const clickables = qa(c.clickables);
     const open = c.openLabel.toLowerCase();
-    const nextRe = rx(c.nextText, "i");
-    const alertRe = rx(c.alertText, "i");
-    const botRe = rx(c.botCheckText, "i");
+    const nextRe = rx2(c.nextText, "i");
+    const alertRe = rx2(c.alertText, "i");
+    const botRe = rx2(c.botCheckText, "i");
     const labelled = (want) => {
       const w = want.trim().toLowerCase();
       if (!w) return null;
@@ -1749,6 +1753,14 @@
   function egiftRunActive() {
     return running2;
   }
+  function claimEgiftRun() {
+    if (running2) return false;
+    running2 = true;
+    return true;
+  }
+  function releaseEgiftRun() {
+    running2 = false;
+  }
   async function read(tabId, c) {
     const res = await chrome.scripting.executeScript({ target: { tabId }, func: pageText, args: [c] });
     return res[0]?.result ?? null;
@@ -1814,7 +1826,7 @@
     let opened;
     let camera = null;
     const counts = { images: 0, named: 0, mismatched: 0 };
-    let step = "info";
+    let step2 = "info";
     const card = (s) => readCard(s, cfg.pats);
     try {
       const res = await doFetch(`${base}/api/extension/egift?orderId=${orderId}`, { headers, cache: "no-store" });
@@ -1822,33 +1834,33 @@
       const info = parseEgiftInfo(await res.json().catch(() => null));
       if (!info) return egiftReport(0, 0, "no-link");
       if (!isAllowedEgiftLink(info.link)) return egiftReport(0, 0, "link-rejected");
-      step = "tab";
+      step2 = "tab";
       const tab = await chrome.tabs.create({ url: info.link, active: false });
       tabId = tab.id;
       if (tabId == null) return egiftReport(0, 0, "error-tab");
-      step = "page";
+      step2 = "page";
       const first = await waitFor(tabId, cfg, (s) => s.hasEmail || s.hasOpen || s.alert || !!card(s));
       if (!first.hit) return egiftReport(0, 0, timedOut(first.last, "page-timeout"));
       if (first.hit.hasEmail && !first.hit.hasOpen && !card(first.hit)) {
-        step = "email";
+        step2 = "email";
         await chrome.scripting.executeScript({ target: { tabId }, func: enterEmail, args: [info.email, cfg.submit] });
         await sleep3(cfg.stepDelayMs);
       }
-      step = "page";
+      step2 = "page";
       const list = await waitFor(tabId, cfg, (s) => s.hasOpen || s.alert || !!card(s));
       if (!list.hit) return egiftReport(0, 0, timedOut(list.last, list.last?.hasEmail ? "email-no-response" : "page-timeout"));
       if (list.hit.alert && !list.hit.hasOpen && !card(list.hit)) return egiftReport(0, 0, "email-rejected");
       const titles = list.hit.titles ?? [];
       let cardTab = tabId;
       if (!card(list.hit)) {
-        step = "open";
+        step2 = "open";
         tabs = watchNewTabs(tabId);
         for (const attempt of ["new-tab", "kept-in-tab"]) {
           await sleep3(cfg.stepDelayMs);
           if (attempt === "kept-in-tab") await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", func: keepInTab });
           const clicked = await chrome.scripting.executeScript({ target: { tabId }, func: clickOpen, args: [cfg.page] });
           if (!clicked[0]?.result) return egiftReport(0, 0, "no-open-button");
-          step = "card-tab";
+          step2 = "card-tab";
           const deadline = Date.now() + cfg.newTabWaitMs;
           while (Date.now() < deadline) {
             await sleep3(cfg.pollMs);
@@ -1868,7 +1880,7 @@
             }
           }
           if (opened) break;
-          step = "open";
+          step2 = "open";
         }
         if (!opened) {
           const late = (await tabs.portal())[0];
@@ -1884,7 +1896,7 @@
       let total = 0;
       let lastCode = "";
       while (cards < MAX_CARDS) {
-        step = "page";
+        step2 = "page";
         const got = await waitFor(cardTab, cfg, (st) => {
           const c2 = card(st);
           return !!c2 && c2.code !== lastCode;
@@ -1931,7 +1943,7 @@
           if (c.index !== total) failure = "ended-early";
           break;
         }
-        step = "next";
+        step2 = "next";
         await sleep3(cfg.stepDelayMs);
         const next = await chrome.scripting.executeScript({ target: { tabId: cardTab }, func: clickNext, args: [cfg.page] });
         if (!next[0]?.result) {
@@ -1943,7 +1955,7 @@
       if (!failure && cards >= MAX_CARDS && saved < total) failure = "ended-early";
       return egiftReport(cards, saved, failure, opened, counts);
     } catch (e) {
-      return egiftReport(cards, saved, egiftErrorCode(step, e), opened, counts);
+      return egiftReport(cards, saved, egiftErrorCode(step2, e), opened, counts);
     } finally {
       clearInterval(keep);
       if (camera) await camera.close().catch(() => {
@@ -1969,6 +1981,1257 @@
       running2 = false;
       sleep3 = (ms) => new Promise((r) => setTimeout(r, ms));
       timedOut = (last, otherwise) => last?.botCheck ? "bot-check" : otherwise;
+    }
+  });
+
+  // src/lib/plans.default.json
+  var plans_default_default;
+  var init_plans_default = __esm({
+    "src/lib/plans.default.json"() {
+      plans_default_default = {
+        version: 1,
+        plans: {
+          costcoEgift: {
+            hosts: [
+              "www.memberedelivery.com"
+            ],
+            inputs: [
+              "link",
+              "email",
+              "orderId"
+            ],
+            limits: {
+              steps: 600,
+              repeat: 50,
+              runMs: 9e5,
+              tabs: 3
+            },
+            timing: {
+              pollMs: 1500,
+              waitMs: 4e4,
+              newTabWaitMs: 1e4
+            },
+            page: {
+              clickables: 'button, a, [role="button"], input[type="button"], input[type="submit"]',
+              labelCells: "td, th, div, p, li, span, label",
+              alert: 'div.ui-message[role="alert"], [role="alert"], .ui-messages-error, .ui-message-error, .ui-growl-message-error',
+              alertText: "\\b(invalid|not match|incorrect|error|not found|unable|could ?n[o']t|not recogni[sz]ed|try again|not valid|no (?:order|record)s?)\\b",
+              botCheck: 'iframe[src*="_Incapsula_Resource"], iframe[src*="captcha" i], iframe[title*="challenge" i]',
+              botCheckText: "incapsula|incident id|additional security check|verify (?:that )?you are (?:a )?human|are you a robot|press (?:&|and) hold"
+            },
+            patterns: {
+              code: "\\bCode:\\s*([A-Za-z0-9-]{4,64})",
+              codeValue: "^[A-Za-z0-9][A-Za-z0-9 -]{2,62}[A-Za-z0-9]$",
+              pin: "\\bPIN:\\s*([A-Za-z0-9]{2,32})",
+              pinValue: "^[A-Za-z0-9]{2,32}$",
+              sequence: "\\b(\\d{1,3})\\s+of\\s+(\\d{1,3})\\b",
+              amount: "\\$\\s?(\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})?|\\d+(?:\\.\\d{2})?)"
+            },
+            steps: [
+              {
+                id: "open",
+                do: "open",
+                url: "$link"
+              },
+              {
+                id: "first",
+                do: "wait",
+                any: [
+                  {
+                    when: {
+                      clickable: "Access eGift"
+                    },
+                    go: "list"
+                  },
+                  {
+                    when: {
+                      label: "Code:"
+                    },
+                    go: "list"
+                  },
+                  {
+                    when: {
+                      exists: '#p2, input[type="email"], input[placeholder*="mail" i], input[name*="email" i], input[id*="email" i]'
+                    },
+                    go: "email"
+                  }
+                ],
+                timeout: "page-timeout",
+                alert: "email-rejected"
+              },
+              {
+                id: "email",
+                do: "fill",
+                selector: '#p2, input[type="email"], input[placeholder*="mail" i], input[name*="email" i], input[id*="email" i]',
+                value: "$email",
+                submit: true,
+                submitButton: '#submitBtn, button[type="submit"], input[type="submit"]',
+                buttons: "button",
+                submitText: "submit|continue|next|view|access",
+                delayMs: 3e3
+              },
+              {
+                id: "list",
+                do: "wait",
+                any: [
+                  {
+                    when: {
+                      clickable: "Access eGift"
+                    },
+                    go: "titles"
+                  },
+                  {
+                    when: {
+                      label: "Code:"
+                    },
+                    go: "cards",
+                    opened: "same-tab"
+                  }
+                ],
+                timeout: "page-timeout",
+                timeoutAlt: {
+                  when: {
+                    exists: '#p2, input[type="email"], input[placeholder*="mail" i], input[name*="email" i], input[id*="email" i]'
+                  },
+                  code: "email-no-response"
+                },
+                alert: "email-rejected"
+              },
+              {
+                id: "titles",
+                do: "read",
+                into: "titles",
+                all: "section.order-item .order-item-title"
+              },
+              {
+                id: "access",
+                do: "click",
+                clickable: "Access eGift",
+                follow: "new-tab-or-same",
+                landed: {
+                  label: "Code:"
+                },
+                retryKeepInTab: true,
+                delayMs: 3e3,
+                else: "no-open-button"
+              },
+              {
+                id: "cards",
+                do: "repeat",
+                max: 50,
+                onMax: "ended-early",
+                steps: [
+                  {
+                    id: "cardWait",
+                    do: "wait",
+                    until: {
+                      label: "Code:",
+                      changed: true
+                    },
+                    timeout: "ended-early",
+                    timeoutFirst: "page-timeout"
+                  },
+                  {
+                    id: "cardRead",
+                    do: "read",
+                    into: "card",
+                    fields: {
+                      code: {
+                        label: "Code:"
+                      },
+                      pin: {
+                        label: "PIN:"
+                      },
+                      counter: {
+                        selector: "#wdt-page-counter"
+                      },
+                      text: {
+                        selector: "body"
+                      }
+                    },
+                    secret: [
+                      "code",
+                      "pin",
+                      "text"
+                    ],
+                    parse: "card"
+                  },
+                  {
+                    id: "cardShot",
+                    do: "shoot",
+                    selector: "#print-content-section, #body-canvas",
+                    into: "image"
+                  },
+                  {
+                    id: "cardPost",
+                    do: "post",
+                    to: "egift",
+                    body: {
+                      card: "$card",
+                      title: "$title",
+                      image: "$image"
+                    },
+                    else: "save-failed"
+                  },
+                  {
+                    id: "cardEnd",
+                    do: "stopIf",
+                    when: {
+                      counterAtEnd: true
+                    }
+                  },
+                  {
+                    id: "cardNext",
+                    do: "click",
+                    selector: 'input[id$="wdt-nav-next"], button[id$="wdt-nav-next"]',
+                    orText: "^next\\b",
+                    delayMs: 3e3,
+                    else: "ended-early"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      };
+    }
+  });
+
+  // src/lib/stepPlan.ts
+  function effectiveLimits(plan) {
+    const l = plan.limits ?? {};
+    return {
+      steps: Math.min(l.steps ?? PLAN_CAPS.steps, PLAN_CAPS.steps),
+      repeat: Math.min(l.repeat ?? PLAN_CAPS.repeat, PLAN_CAPS.repeat),
+      runMs: Math.min(l.runMs ?? PLAN_CAPS.runMs, PLAN_CAPS.runMs),
+      tabs: Math.min(l.tabs ?? PLAN_CAPS.tabs, PLAN_CAPS.tabs)
+    };
+  }
+  function effectiveTiming(plan) {
+    return { ...DEFAULT_TIMING, ...plan.timing ?? {} };
+  }
+  function isObj(v) {
+    if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+    const p = Object.getPrototypeOf(v);
+    return p === Object.prototype || p === null;
+  }
+  function onlyKeys(o, allowed, where) {
+    for (const k of Object.keys(o)) if (!allowed.includes(k)) bad(`${where}: unknown key "${k}"`);
+  }
+  function str(v, where, max = MAX_STR) {
+    if (typeof v !== "string" || !v || v.length > max) return bad(`${where} must be a non-empty string up to ${max} characters`);
+    return v;
+  }
+  function rx(v, where) {
+    const s = str(v, where, MAX_RX);
+    try {
+      new RegExp(s, "i");
+    } catch {
+      bad(`${where} is not a valid regex`);
+    }
+    return s;
+  }
+  function int(v, where, min, max) {
+    if (typeof v !== "number" || !Number.isInteger(v) || v < min || v > max) return bad(`${where} must be an integer ${min}..${max}`);
+    return v;
+  }
+  function code(v, where) {
+    if (typeof v !== "string" || !PLAN_FAILURE_CODES.includes(v)) bad(`${where} is not a known failure code`);
+  }
+  function cond(v, where, opts = {}) {
+    if (!isObj(v)) return bad(`${where} must be an object`);
+    onlyKeys(v, ["exists", "clickable", "label", "text", "alert", "changed", "counterAtEnd"], where);
+    const kinds = ["exists", "clickable", "label", "text", "alert", "counterAtEnd"].filter((k) => k in v);
+    if (kinds.length !== 1) bad(`${where} needs exactly one of exists, clickable, label, text, alert, counterAtEnd`);
+    if ("exists" in v) str(v.exists, `${where}.exists`);
+    if ("clickable" in v) str(v.clickable, `${where}.clickable`);
+    if ("label" in v) str(v.label, `${where}.label`);
+    if ("text" in v) rx(v.text, `${where}.text`);
+    if ("alert" in v && v.alert !== true) bad(`${where}.alert must be true`);
+    if ("counterAtEnd" in v) {
+      if (v.counterAtEnd !== true) bad(`${where}.counterAtEnd must be true`);
+      if (!opts.counter) bad(`${where}: counterAtEnd is only for stopIf`);
+    }
+    if ("changed" in v && (v.changed !== true || !("label" in v))) bad(`${where}.changed needs a label condition`);
+  }
+  function inputValue(v, where, inputs) {
+    const s = str(v, where);
+    if (s.includes("$")) {
+      const name = /^\$([A-Za-z]+)$/.exec(s)?.[1];
+      if (!name || !VALUE_INPUTS.includes(name)) bad(`${where} may only be $link or $email, never a page read`);
+      if (!inputs.includes(name)) bad(`${where} uses input "${name}" the plan does not declare`);
+    }
+    return s;
+  }
+  function step(raw, ctx, nested, inLoop) {
+    if (!isObj(raw)) return bad("a step must be an object");
+    if (++ctx.count > PLAN_CAPS.steps) bad(`more than ${PLAN_CAPS.steps} steps`);
+    const id = str(raw.id, "step id", 48);
+    if (!ID_RE.test(id)) bad(`bad step id "${id}"`);
+    if (ctx.ids.has(id)) bad(`duplicate step id "${id}"`);
+    ctx.ids.add(id);
+    const w = `step "${id}"`;
+    const d = raw.do;
+    switch (d) {
+      case "open": {
+        onlyKeys(raw, ["id", "do", "url"], w);
+        const url = inputValue(raw.url, `${w}.url`, ctx.inputs);
+        if (!url.startsWith("$")) {
+          let u = null;
+          try {
+            u = new URL(url);
+          } catch {
+          }
+          if (!u || u.protocol !== "https:" || !ctx.hosts.includes(u.hostname.toLowerCase())) bad(`${w}.url must be $link or an https URL on a plan host`);
+        }
+        return;
+      }
+      case "wait": {
+        onlyKeys(raw, ["id", "do", "any", "until", "timeout", "timeoutFirst", "timeoutAlt", "alert", "timeoutMs"], w);
+        if ("any" in raw === "until" in raw) bad(`${w} needs exactly one of any, until`);
+        if ("any" in raw) {
+          if (nested) bad(`${w}: any/go only at the top level`);
+          if (!Array.isArray(raw.any) || !raw.any.length || raw.any.length > 12) bad(`${w}.any must be 1..12 entries`);
+          for (const [i, a] of raw.any.entries()) {
+            if (!isObj(a)) return bad(`${w}.any[${i}] must be an object`);
+            onlyKeys(a, ["when", "go", "opened"], `${w}.any[${i}]`);
+            cond(a.when, `${w}.any[${i}].when`);
+            str(a.go, `${w}.any[${i}].go`, 48);
+            if ("opened" in a && !OPENED.includes(a.opened)) bad(`${w}.any[${i}].opened is not known`);
+          }
+        } else cond(raw.until, `${w}.until`);
+        code(raw.timeout, `${w}.timeout`);
+        if ("timeoutFirst" in raw) code(raw.timeoutFirst, `${w}.timeoutFirst`);
+        if ("alert" in raw) code(raw.alert, `${w}.alert`);
+        if ("timeoutAlt" in raw) {
+          const a = raw.timeoutAlt;
+          if (!isObj(a)) return bad(`${w}.timeoutAlt must be an object`);
+          onlyKeys(a, ["when", "code"], `${w}.timeoutAlt`);
+          cond(a.when, `${w}.timeoutAlt.when`);
+          code(a.code, `${w}.timeoutAlt.code`);
+        }
+        if ("timeoutMs" in raw) int(raw.timeoutMs, `${w}.timeoutMs`, 1, MAX_MS2);
+        return;
+      }
+      case "click": {
+        onlyKeys(raw, ["id", "do", "selector", "clickable", "orText", "follow", "landed", "retryKeepInTab", "delayMs", "else"], w);
+        if (!("selector" in raw || "clickable" in raw || "orText" in raw)) bad(`${w} needs selector, clickable or orText`);
+        if ("selector" in raw) str(raw.selector, `${w}.selector`);
+        if ("clickable" in raw) str(raw.clickable, `${w}.clickable`);
+        if ("orText" in raw) rx(raw.orText, `${w}.orText`);
+        if ("follow" in raw) {
+          if (raw.follow !== "new-tab-or-same") bad(`${w}.follow must be "new-tab-or-same"`);
+          if (nested) bad(`${w}: follow only at the top level`);
+          if (!("landed" in raw)) bad(`${w}.follow needs a landed condition`);
+          cond(raw.landed, `${w}.landed`);
+          const l = raw.landed;
+          if ("changed" in l) bad(`${w}.landed cannot use changed`);
+        } else if ("landed" in raw || "retryKeepInTab" in raw) bad(`${w}: landed and retryKeepInTab need follow`);
+        if ("retryKeepInTab" in raw && typeof raw.retryKeepInTab !== "boolean") bad(`${w}.retryKeepInTab must be a boolean`);
+        if ("delayMs" in raw) int(raw.delayMs, `${w}.delayMs`, 0, MAX_MS2);
+        if ("else" in raw) code(raw.else, `${w}.else`);
+        return;
+      }
+      case "fill": {
+        onlyKeys(raw, ["id", "do", "selector", "value", "submit", "submitButton", "buttons", "submitText", "delayMs", "else"], w);
+        str(raw.selector, `${w}.selector`);
+        if (!str(raw.value, `${w}.value`).startsWith("$")) bad(`${w}.value must be $link or $email`);
+        inputValue(raw.value, `${w}.value`, ctx.inputs);
+        if ("submit" in raw && typeof raw.submit !== "boolean") bad(`${w}.submit must be a boolean`);
+        if ("submitButton" in raw) str(raw.submitButton, `${w}.submitButton`);
+        if ("buttons" in raw) str(raw.buttons, `${w}.buttons`);
+        if ("submitText" in raw) rx(raw.submitText, `${w}.submitText`);
+        if ("delayMs" in raw) int(raw.delayMs, `${w}.delayMs`, 0, MAX_MS2);
+        if ("else" in raw) code(raw.else, `${w}.else`);
+        return;
+      }
+      case "read": {
+        onlyKeys(raw, ["id", "do", "into", "all", "fields", "secret", "parse"], w);
+        const into = str(raw.into, `${w}.into`, 48);
+        if (!ID_RE.test(into)) bad(`${w}.into is not a valid name`);
+        if ("all" in raw === "fields" in raw) bad(`${w} needs exactly one of all, fields`);
+        if ("all" in raw) str(raw.all, `${w}.all`);
+        const names = [];
+        if ("fields" in raw) {
+          if (!isObj(raw.fields) || !Object.keys(raw.fields).length || Object.keys(raw.fields).length > 12) bad(`${w}.fields must hold 1..12 entries`);
+          for (const [k, f] of Object.entries(raw.fields)) {
+            if (!ID_RE.test(k)) bad(`${w}.fields: bad name "${k}"`);
+            if (!isObj(f)) return bad(`${w}.fields.${k} must be an object`);
+            onlyKeys(f, ["label", "selector", "regex"], `${w}.fields.${k}`);
+            if (Object.keys(f).length !== 1) bad(`${w}.fields.${k} needs exactly one of label, selector, regex`);
+            if ("label" in f) str(f.label, `${w}.fields.${k}.label`);
+            if ("selector" in f) str(f.selector, `${w}.fields.${k}.selector`);
+            if ("regex" in f) rx(f.regex, `${w}.fields.${k}.regex`);
+            names.push(k);
+          }
+        }
+        if ("secret" in raw) {
+          if (!Array.isArray(raw.secret) || raw.secret.some((s) => typeof s !== "string" || !names.includes(s))) bad(`${w}.secret must list field names`);
+        }
+        if ("parse" in raw) {
+          if (raw.parse !== "card") bad(`${w}.parse must be "card"`);
+          if (!inLoop) bad(`${w}: parse only inside repeat`);
+        }
+        ctx.vars.add(into);
+        return;
+      }
+      case "shoot": {
+        onlyKeys(raw, ["id", "do", "selector", "into"], w);
+        str(raw.selector, `${w}.selector`);
+        const into = str(raw.into, `${w}.into`, 48);
+        if (!ID_RE.test(into)) bad(`${w}.into is not a valid name`);
+        ctx.vars.add(into);
+        return;
+      }
+      case "post": {
+        onlyKeys(raw, ["id", "do", "to", "body", "else"], w);
+        const to = str(raw.to, `${w}.to`, 48);
+        if (!Object.prototype.hasOwnProperty.call(PLAN_ENDPOINTS, to)) bad(`${w}.to "${to}" is not a known endpoint`);
+        if (!isObj(raw.body) || Object.keys(raw.body).length > 12) bad(`${w}.body must be an object`);
+        for (const [k, v] of Object.entries(raw.body)) {
+          if (!ID_RE.test(k)) bad(`${w}.body: bad key "${k}"`);
+          const s = str(v, `${w}.body.${k}`, 80);
+          if (!/^\$[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)?$/.test(s)) bad(`${w}.body.${k} must be a $variable`);
+        }
+        if ("else" in raw) code(raw.else, `${w}.else`);
+        return;
+      }
+      case "repeat": {
+        onlyKeys(raw, ["id", "do", "max", "steps", "onMax"], w);
+        if (nested) bad(`${w}: repeat cannot nest`);
+        int(raw.max, `${w}.max`, 1, PLAN_CAPS.repeat);
+        if (!Array.isArray(raw.steps) || !raw.steps.length) bad(`${w}.steps must be a non-empty list`);
+        if ("onMax" in raw) code(raw.onMax, `${w}.onMax`);
+        for (const s of raw.steps) step(s, ctx, true, true);
+        return;
+      }
+      case "stopIf": {
+        onlyKeys(raw, ["id", "do", "when"], w);
+        if (!inLoop) bad(`${w}: stopIf only inside repeat`);
+        cond(raw.when, `${w}.when`, { counter: true });
+        return;
+      }
+      case "go": {
+        onlyKeys(raw, ["id", "do", "to"], w);
+        if (nested) bad(`${w}: go only at the top level`);
+        str(raw.to, `${w}.to`, 48);
+        return;
+      }
+      case "fail": {
+        onlyKeys(raw, ["id", "do", "code"], w);
+        code(raw.code, `${w}.code`);
+        return;
+      }
+      default:
+        return bad(`${w}: unknown step "${String(d).slice(0, 40)}"`);
+    }
+  }
+  function gotoTargets(steps, top) {
+    for (const s of steps) {
+      if (s.do === "go" && !top.has(s.to)) bad(`step "${String(s.id)}": go target "${String(s.to)}" is not a top-level step`);
+      if (s.do === "wait" && Array.isArray(s.any)) {
+        for (const a of s.any) if (!top.has(a.go)) bad(`step "${String(s.id)}": go target "${a.go}" is not a top-level step`);
+      }
+    }
+  }
+  function checkPlan(raw) {
+    if (!isObj(raw)) return bad("plan must be an object");
+    onlyKeys(raw, ["hosts", "inputs", "limits", "timing", "page", "patterns", "steps"], "plan");
+    if (!Array.isArray(raw.hosts) || !raw.hosts.length || raw.hosts.length > 8) bad("hosts must be 1..8 hostnames");
+    const hosts = raw.hosts.map((h) => str(h, "host", 253).toLowerCase());
+    for (const h of hosts) if (!PLAN_HOST_ALLOWLIST.includes(h)) bad(`host "${h}" is outside the bundled allowlist`);
+    if (!Array.isArray(raw.inputs) || raw.inputs.some((i) => !PLAN_INPUTS.includes(i))) bad("inputs must be from link, email, orderId");
+    const inputs = raw.inputs;
+    if ("limits" in raw) {
+      const l = raw.limits;
+      if (!isObj(l)) return bad("limits must be an object");
+      onlyKeys(l, ["steps", "repeat", "runMs", "tabs"], "limits");
+      for (const k of ["steps", "repeat", "runMs", "tabs"]) {
+        if (k in l) int(l[k], `limits.${k}`, 1, PLAN_CAPS[k]);
+      }
+    }
+    if ("timing" in raw) {
+      const t = raw.timing;
+      if (!isObj(t)) return bad("timing must be an object");
+      onlyKeys(t, ["pollMs", "waitMs", "newTabWaitMs"], "timing");
+      if ("pollMs" in t) int(t.pollMs, "timing.pollMs", 100, MAX_MS2);
+      for (const k of ["waitMs", "newTabWaitMs"]) if (k in t) int(t[k], `timing.${k}`, 1, MAX_MS2);
+    }
+    const p = raw.page;
+    if (!isObj(p)) return bad("page must be an object");
+    onlyKeys(p, ["clickables", "labelCells", "alert", "alertText", "botCheck", "botCheckText"], "page");
+    for (const k of ["clickables", "labelCells", "alert", "botCheck"]) if (k in p) str(p[k], `page.${k}`);
+    for (const k of ["clickables", "labelCells", "alert", "alertText", "botCheck", "botCheckText"]) if (!(k in p)) bad(`page.${k} is required`);
+    rx(p.alertText, "page.alertText");
+    rx(p.botCheckText, "page.botCheckText");
+    if ("patterns" in raw) {
+      if (!isObj(raw.patterns)) return bad("patterns must be an object");
+      for (const [k, v] of Object.entries(raw.patterns)) {
+        if (!ID_RE.test(k)) bad(`patterns: bad name "${k}"`);
+        rx(v, `patterns.${k}`);
+      }
+    }
+    if (!Array.isArray(raw.steps) || !raw.steps.length) return bad("steps must be a non-empty list");
+    const ctx = { ids: /* @__PURE__ */ new Set(), top: /* @__PURE__ */ new Set(), plan: raw, inputs, hosts, count: 0, vars: /* @__PURE__ */ new Set() };
+    for (const s of raw.steps) if (isObj(s) && typeof s.id === "string") ctx.top.add(s.id);
+    for (const s of raw.steps) step(s, ctx, false, false);
+    gotoTargets(raw.steps, ctx.top);
+    const lim = effectiveLimits({ limits: raw.limits });
+    if (ctx.count > lim.steps) bad(`plan has ${ctx.count} steps, over its limit of ${lim.steps}`);
+  }
+  function validatePlan(raw) {
+    try {
+      checkPlan(raw);
+      return { ok: true };
+    } catch (e) {
+      if (e instanceof Bad) return { ok: false, reason: e.message };
+      return { ok: false, reason: "plan could not be checked" };
+    }
+  }
+  function validatePlanFile(raw) {
+    if (!isObj(raw)) return { ok: false, reason: "plan file must be an object" };
+    for (const k of Object.keys(raw)) if (k !== "version" && k !== "plans") return { ok: false, reason: `unknown top-level key "${k}"` };
+    if (typeof raw.version !== "number" || !Number.isInteger(raw.version) || raw.version < 1) return { ok: false, reason: "version must be a positive integer" };
+    if (!isObj(raw.plans)) return { ok: false, reason: "plans must be an object" };
+    for (const [name, plan] of Object.entries(raw.plans)) {
+      if (!ID_RE.test(name)) return { ok: false, reason: `bad plan name "${name}"` };
+      const c = validatePlan(plan);
+      if (!c.ok) return { ok: false, reason: `plan "${name}": ${c.reason}` };
+    }
+    return { ok: true, file: raw };
+  }
+  var PLAN_CAPS, PLAN_HOST_ALLOWLIST, PLAN_ENDPOINTS, PLAN_INPUTS, VALUE_INPUTS, CLICK_DENY_SOURCE, PLAN_FAILURE_CODES, DEFAULT_TIMING, ID_RE, MAX_STR, MAX_RX, MAX_MS2, OPENED, Bad, bad, bundledCheck2, BUNDLED_PLANS, BUNDLED_PLANS_ERROR;
+  var init_stepPlan = __esm({
+    "src/lib/stepPlan.ts"() {
+      "use strict";
+      init_plans_default();
+      init_egiftCommand();
+      PLAN_CAPS = { steps: 600, repeat: 100, runMs: 12e5, tabs: 4 };
+      PLAN_HOST_ALLOWLIST = EGIFT_HOSTS;
+      PLAN_ENDPOINTS = { egift: "/api/extension/egift" };
+      PLAN_INPUTS = ["link", "email", "orderId"];
+      VALUE_INPUTS = ["link", "email"];
+      CLICK_DENY_SOURCE = "\\b(?:cancel|delete|remove|place\\s+order|buy|pay|return|sign\\s*out)";
+      PLAN_FAILURE_CODES = [
+        "page-timeout",
+        "bot-check",
+        "email-rejected",
+        "email-no-response",
+        "no-open-button",
+        "out-of-sequence",
+        "total-mismatch",
+        "ended-early",
+        "save-failed",
+        "link-rejected",
+        "click-denied",
+        "plan-failed"
+      ];
+      DEFAULT_TIMING = { pollMs: 1500, waitMs: 4e4, newTabWaitMs: 1e4 };
+      ID_RE = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;
+      MAX_STR = 2e3;
+      MAX_RX = 500;
+      MAX_MS2 = 3e5;
+      OPENED = ["new-tab", "same-tab", "kept-in-tab"];
+      Bad = class extends Error {
+      };
+      bad = (m) => {
+        throw new Bad(m);
+      };
+      bundledCheck2 = validatePlanFile(plans_default_default);
+      BUNDLED_PLANS = bundledCheck2.ok ? bundledCheck2.file : null;
+      BUNDLED_PLANS_ERROR = bundledCheck2.ok ? null : bundledCheck2.reason;
+    }
+  });
+
+  // src/lib/planRun.ts
+  function egiftHook(plan) {
+    const re = (k, flags = "") => {
+      const src = plan.patterns?.[k];
+      try {
+        return src ? new RegExp(src, flags) : void 0;
+      } catch {
+        return void 0;
+      }
+    };
+    const pats = {};
+    for (const [k, flags] of [["code", ""], ["pin", "i"], ["sequence", "i"], ["amount", ""], ["codeValue", ""], ["pinValue", ""]]) {
+      const r = re(k, flags);
+      if (r) pats[k] = r;
+    }
+    return {
+      parse(kind, f, vars, st) {
+        if (kind !== "card") return "plan-failed";
+        const card = readCard({ text: f.text ?? "", code: f.code, pin: f.pin, counter: f.counter }, pats);
+        if (!card) return NOT_READY;
+        if (st.cards === 0) st.total = card.total;
+        if (card.index !== st.cards + 1) return "out-of-sequence";
+        if (card.total !== st.total) return "total-mismatch";
+        st.cards++;
+        const title = titleFor(Array.isArray(vars.titles) ? vars.titles : [], card.index, st.total, pats.amount);
+        if (title && card.value != null && card.value !== title.value) st.mismatched++;
+        vars.card = card;
+        vars.title = title;
+        return null;
+      },
+      postBody(to, vars, inputs) {
+        if (to !== "egift") return void 0;
+        return egiftPostBody(inputs.orderId, vars.card, { title: vars.title, image: vars.image ?? null });
+      },
+      afterPost(vars, st) {
+        if (vars.image) st.images++;
+        if (vars.title) st.named++;
+      },
+      atEnd(vars, st) {
+        const c = vars.card;
+        if (!c || c.index < st.total) return { stop: false };
+        return c.index !== st.total ? { stop: true, failure: "ended-early" } : { stop: true };
+      }
+    };
+  }
+  function hostOk(url, hosts) {
+    try {
+      const u = new URL(url);
+      return u.protocol === "https:" && !u.username && !u.password && hosts.includes(u.hostname.toLowerCase());
+    } catch {
+      return false;
+    }
+  }
+  function planErrorCode(e) {
+    return egiftErrorCode("page", e).replace(/^error-page/, "plan-error");
+  }
+  async function runPlan(name, plan, version, driver, inputs, opts = {}) {
+    const lim = effectiveLimits(plan);
+    const timing = effectiveTiming(plan);
+    const hook = (planHooks[name] ?? (() => noHook))(plan);
+    const st = { cards: 0, saved: 0, images: 0, named: 0, mismatched: 0, total: 0 };
+    const vars = {};
+    const lastSeen = {};
+    const trace = [];
+    const dry = !!opts.dryRun;
+    const start = driver.now();
+    let tab = null;
+    let executed = 0;
+    let opens = 0;
+    let cur = "";
+    let failure = null;
+    let failedStep;
+    const failFlow = (code2, step2) => ({ fail: code2, step: step2 });
+    const inputOf = (v) => v === "$link" ? inputs.link : v === "$email" ? inputs.email : v;
+    const need = () => {
+      if (tab == null) throw new Error("no tab");
+      return tab;
+    };
+    const conds = (c) => ({ page: plan.page, conds: c });
+    const holds = (c, i, r) => {
+      if (!r.hits[i]) return false;
+      if (c.changed && c.label) return r.labels[i] != null && r.labels[i] !== lastSeen[c.label];
+      return true;
+    };
+    async function wait(step2, iter) {
+      const t = need();
+      const list = [...step2.any?.map((a) => a.when) ?? [], ...step2.until ? [step2.until] : []];
+      const altAt = list.length;
+      if (step2.timeoutAlt) list.push(step2.timeoutAlt.when);
+      const req = conds(list);
+      const deadline = driver.now() + (step2.timeoutMs ?? timing.waitMs);
+      let last = null;
+      while (driver.now() < deadline) {
+        await driver.sleep(timing.pollMs);
+        try {
+          const r = await driver.probe(t, req);
+          if (!r) continue;
+          last = r;
+          if (step2.any) {
+            for (const [i, a] of step2.any.entries()) {
+              if (!holds(a.when, i, r)) continue;
+              if (a.opened) st.opened = a.opened;
+              return { flow: { go: a.go }, matched: `any[${i}]:${kindOf(a.when)}` };
+            }
+          } else if (step2.until && holds(step2.until, 0, r)) return { flow: "next", matched: `until:${kindOf(step2.until)}` };
+          if (r.alert && step2.alert) return { flow: failFlow(step2.alert, step2.id), matched: "alert" };
+        } catch {
+        }
+      }
+      let code2 = iter === 0 && step2.timeoutFirst ? step2.timeoutFirst : step2.timeout;
+      if (step2.timeoutAlt && last && last.hits[altAt]) code2 = step2.timeoutAlt.code;
+      if (last?.botCheck) code2 = "bot-check";
+      return { flow: failFlow(code2, step2.id), matched: last?.botCheck ? "botCheck" : "timeout" };
+    }
+    async function follow(step2, spec) {
+      let t = need();
+      const watcher = driver.watch(t);
+      const landed = conds([step2.landed]);
+      const attempts = step2.retryKeepInTab ? ["new-tab", "kept-in-tab"] : ["new-tab"];
+      let opened;
+      let child;
+      const adoptChild = (id) => {
+        if (++opens > lim.tabs) return false;
+        driver.adopt(id);
+        return true;
+      };
+      for (const attempt of attempts) {
+        await driver.sleep(step2.delayMs ?? 0);
+        if (attempt === "kept-in-tab") await driver.keepInTab(t);
+        const r = await driver.click(t, spec, CLICK_DENY_SOURCE);
+        if (r === "denied") return { flow: failFlow("click-denied", step2.id) };
+        if (r === "none") return { flow: failFlow(step2.else ?? "no-open-button", step2.id) };
+        const deadline = driver.now() + timing.newTabWaitMs;
+        while (driver.now() < deadline) {
+          await driver.sleep(timing.pollMs);
+          const c = (await watcher.portal())[0];
+          if (c != null) {
+            child = c;
+            opened = "new-tab";
+            break;
+          }
+          try {
+            const p = await driver.probe(t, landed);
+            if (p && p.hits[0]) {
+              opened = attempt === "new-tab" ? "same-tab" : "kept-in-tab";
+              break;
+            }
+          } catch {
+          }
+        }
+        if (opened) break;
+      }
+      if (!opened) {
+        const late = (await watcher.portal())[0];
+        if (late != null) {
+          child = late;
+          opened = "new-tab";
+        }
+      }
+      if (child != null) {
+        if (!adoptChild(child)) return { flow: failFlow("plan-failed", step2.id) };
+        t = child;
+        tab = t;
+      }
+      if (opened) st.opened = opened;
+      return { flow: "next", matched: opened ?? "none" };
+    }
+    async function exec(step2, iter) {
+      switch (step2.do) {
+        case "open": {
+          const url = inputOf(step2.url);
+          if (!hostOk(url, plan.hosts)) return { flow: failFlow("link-rejected", step2.id) };
+          if (++opens > lim.tabs) return { flow: failFlow("plan-failed", step2.id) };
+          tab = await driver.open(url);
+          return { flow: "next" };
+        }
+        case "wait":
+          return wait(step2, iter);
+        case "click": {
+          const spec = { page: plan.page, selector: step2.selector, clickable: step2.clickable, orText: step2.orText };
+          if (step2.follow) return follow(step2, spec);
+          await driver.sleep(step2.delayMs ?? 0);
+          const r = await driver.click(need(), spec, CLICK_DENY_SOURCE);
+          if (r === "denied") return { flow: failFlow("click-denied", step2.id) };
+          if (r === "none") return { flow: failFlow(step2.else ?? "ended-early", step2.id) };
+          return { flow: "next" };
+        }
+        case "fill": {
+          if (dry) return { flow: "halt", matched: "skipped" };
+          const spec = {
+            selector: step2.selector,
+            submit: step2.submit,
+            submitButton: step2.submitButton ?? 'button[type="submit"], input[type="submit"]',
+            buttons: step2.buttons ?? "button",
+            submitText: step2.submitText ?? "submit|continue|next|view|access"
+          };
+          const ok = await driver.fill(need(), spec, inputOf(step2.value), CLICK_DENY_SOURCE);
+          if (!ok && step2.else) return { flow: failFlow(step2.else, step2.id) };
+          await driver.sleep(step2.delayMs ?? 0);
+          return { flow: "next" };
+        }
+        case "read": {
+          const spec = { page: plan.page, fields: step2.fields, all: step2.all };
+          const notRead = () => ({ flow: failFlow(st.cards ? "ended-early" : "page-timeout", step2.id) });
+          if (!step2.parse) {
+            const res = await driver.read(need(), spec);
+            if (!res) return notRead();
+            if (step2.all) {
+              vars[step2.into] = res.all;
+              return { flow: "next" };
+            }
+            vars[step2.into] = res.fields;
+            return { flow: "next" };
+          }
+          const deadline = driver.now() + timing.waitMs;
+          let lastErr = null;
+          for (let tries = 0; ; tries++) {
+            if (tries) {
+              if (driver.now() >= deadline) {
+                if (lastErr) throw lastErr;
+                return { ...notRead(), matched: "not-ready" };
+              }
+              await driver.sleep(timing.pollMs);
+            }
+            let res = null;
+            try {
+              res = await driver.read(need(), spec);
+              lastErr = null;
+            } catch (e) {
+              lastErr = e;
+            }
+            if (!res) continue;
+            for (const [k, f] of Object.entries(step2.fields ?? {})) {
+              const v = res.fields[k];
+              if (f.label && v) lastSeen[f.label] = v;
+            }
+            vars[step2.into] = res.fields;
+            const code2 = hook.parse(step2.parse, res.fields, vars, st);
+            if (code2 === NOT_READY) continue;
+            if (code2) return { flow: failFlow(code2, step2.id) };
+            return { flow: "next", ...tries ? { matched: `retry:${tries}` } : {} };
+          }
+        }
+        case "shoot": {
+          if (dry) {
+            vars[step2.into] = null;
+            return { flow: "next", matched: "skipped" };
+          }
+          vars[step2.into] = await driver.shoot(need(), step2.selector).catch(() => null);
+          return { flow: "next" };
+        }
+        case "post": {
+          if (dry) return { flow: "next", matched: "skipped" };
+          let body = hook.postBody(step2.to, vars, inputs);
+          if (body === void 0) {
+            const b = {};
+            for (const [k, ref] of Object.entries(step2.body)) {
+              const [v, field] = ref.slice(1).split(".");
+              const val = vars[v];
+              b[k] = field && val && typeof val === "object" ? val[field] : val;
+            }
+            body = b;
+          }
+          let ok = false;
+          try {
+            ok = await driver.post(PLAN_ENDPOINTS[step2.to], body);
+          } catch {
+            ok = false;
+          }
+          if (!ok) return { flow: failFlow(step2.else ?? "save-failed", step2.id) };
+          st.saved++;
+          hook.afterPost(vars, st);
+          return { flow: "next" };
+        }
+        case "repeat": {
+          const max = Math.min(step2.max, lim.repeat);
+          for (let i = 0; i < max; i++) {
+            const f = await runList(step2.steps, i, false);
+            if (f === "break") return { flow: "next" };
+            if (f !== "next") return { flow: f };
+          }
+          return step2.onMax ? { flow: failFlow(step2.onMax, step2.id), matched: "max" } : { flow: "next", matched: "max" };
+        }
+        case "stopIf": {
+          if (step2.when.counterAtEnd) {
+            const e = hook.atEnd(vars, st);
+            if (e.failure) return { flow: failFlow(e.failure, step2.id), matched: "counterAtEnd" };
+            return e.stop ? { flow: "break", matched: "counterAtEnd" } : { flow: "next" };
+          }
+          const r = await driver.probe(need(), conds([step2.when]));
+          return r && holds(step2.when, 0, r) ? { flow: "break", matched: kindOf(step2.when) } : { flow: "next" };
+        }
+        case "go":
+          return { flow: { go: step2.to } };
+        case "fail":
+          return { flow: failFlow(step2.code, step2.id) };
+      }
+    }
+    async function runList(steps, iter, top) {
+      let i = 0;
+      while (i < steps.length) {
+        const step2 = steps[i];
+        cur = step2.id;
+        if (++executed > lim.steps) return failFlow("plan-failed", step2.id);
+        if (driver.now() - start > lim.runMs) return failFlow("plan-failed", step2.id);
+        const t0 = driver.now();
+        const r = await exec(step2, iter);
+        if (trace.length < MAX_TRACE) trace.push({ stepId: step2.id, ...r.matched ? { matched: r.matched } : {}, ms: driver.now() - t0 });
+        const f = r.flow;
+        if (f === "next") {
+          i++;
+          continue;
+        }
+        if (typeof f === "object" && "go" in f && top) {
+          const at = steps.findIndex((s) => s.id === f.go);
+          if (at < 0) return failFlow("plan-failed", step2.id);
+          i = at;
+          continue;
+        }
+        return f;
+      }
+      return "next";
+    }
+    try {
+      const f = await runList(plan.steps, 0, true);
+      if (typeof f === "object" && "fail" in f) {
+        failure = f.fail;
+        failedStep = f.step;
+      }
+      if (!failure && !dry && st.cards >= MAX_CARDS && st.saved < st.total) failure = "ended-early";
+    } catch (e) {
+      failure = planErrorCode(e);
+      failedStep = cur;
+    } finally {
+      await driver.closeAll().catch(() => {
+      });
+    }
+    const counts = { images: st.images, named: st.named, mismatched: st.mismatched };
+    const extra = { runner: `plan v${version}`, ...failedStep ? { step: failedStep } : {}, trace };
+    if (dry && !failure) return { status: "done", result: { cards: st.cards, saved: 0, opened: st.opened, ...counts, ...extra, dryRun: true } };
+    const base = egiftReport(st.cards, st.saved, failure, st.opened, counts);
+    return { status: base.status, result: { ...base.result, ...extra, ...dry ? { dryRun: true } : {} } };
+  }
+  var NOT_READY, noHook, planHooks, MAX_TRACE, kindOf;
+  var init_planRun = __esm({
+    "src/lib/planRun.ts"() {
+      "use strict";
+      init_stepPlan();
+      init_egiftCommand();
+      NOT_READY = "not-ready";
+      noHook = {
+        parse: () => "plan-failed",
+        postBody: () => void 0,
+        afterPost: () => {
+        },
+        atEnd: () => ({ stop: false })
+      };
+      planHooks = { costcoEgift: egiftHook };
+      MAX_TRACE = 800;
+      kindOf = (c) => ["exists", "clickable", "label", "text", "alert", "counterAtEnd"].find((k) => k in c) ?? "cond";
+    }
+  });
+
+  // src/lib/planPage.ts
+  function planProbe(req) {
+    const c = req.page;
+    const rx2 = (src, flags) => {
+      try {
+        return src ? new RegExp(src, flags) : null;
+      } catch {
+        return null;
+      }
+    };
+    const qa = (sel) => {
+      try {
+        return sel ? Array.from(document.querySelectorAll(sel)) : [];
+      } catch {
+        return [];
+      }
+    };
+    const text = (document.body?.innerText ?? "").slice(0, 1e5);
+    const label = (e) => (e.value || e.textContent || "").trim();
+    const clickables = qa(c.clickables);
+    const alertRe = rx2(c.alertText, "i");
+    const botRe = rx2(c.botCheckText, "i");
+    const labelled = (want) => {
+      const w = want.trim().toLowerCase();
+      if (!w) return null;
+      let best = null;
+      for (const el of qa(c.labelCells)) {
+        const t = (el.textContent ?? "").trim();
+        if (t.length <= w.length || t.length > w.length + 100 || !t.toLowerCase().startsWith(w)) continue;
+        if (!best || best.contains(el)) best = el;
+      }
+      if (!best) return null;
+      const span = Array.from(best.querySelectorAll("span")).map((s) => (s.textContent ?? "").trim()).find((t) => t && !t.toLowerCase().startsWith(w));
+      if (span) return span;
+      const rest = (best.textContent ?? "").trim().slice(w.length).trim();
+      return rest || null;
+    };
+    const alert = !!alertRe && qa(c.alert).some((el) => alertRe.test(el.textContent ?? ""));
+    const botCheck = qa(c.botCheck).length > 0 || !!botRe && botRe.test(text.slice(0, 5e3));
+    const hits = [];
+    const labels = [];
+    for (const k of req.conds) {
+      let hit = false;
+      let value = null;
+      if (k.exists !== void 0) hit = qa(k.exists).length > 0;
+      else if (k.clickable !== void 0) {
+        const want = k.clickable.toLowerCase();
+        hit = clickables.some((e) => label(e).toLowerCase().includes(want));
+      } else if (k.label !== void 0) {
+        value = labelled(k.label);
+        hit = value != null;
+      } else if (k.text !== void 0) {
+        const re = rx2(k.text, "i");
+        hit = !!re && re.test(text);
+      } else if (k.alert) hit = alert;
+      hits.push(hit);
+      labels.push(value);
+    }
+    return { hits, labels, alert, botCheck };
+  }
+  function planClick(spec, deny) {
+    const rx2 = (src, flags) => {
+      try {
+        return src ? new RegExp(src, flags) : null;
+      } catch {
+        return null;
+      }
+    };
+    const qa = (sel) => {
+      try {
+        return sel ? Array.from(document.querySelectorAll(sel)) : [];
+      } catch {
+        return [];
+      }
+    };
+    const label = (e) => (e.value || e.textContent || "").trim();
+    const denyRe = rx2(deny, "i");
+    let el = qa(spec.selector)[0] ?? null;
+    if (!el && spec.clickable) {
+      const want = spec.clickable.toLowerCase();
+      el = qa(spec.page.clickables).find((e) => label(e).toLowerCase().includes(want)) ?? null;
+    }
+    if (!el && spec.orText) {
+      const re = rx2(spec.orText, "i");
+      if (re) el = qa(spec.page.clickables).find((e) => re.test(label(e))) ?? null;
+    }
+    if (!el || el.disabled) return "none";
+    if (!denyRe || denyRe.test(label(el)) || denyRe.test(el.getAttribute("aria-label") ?? "")) return "denied";
+    el.click();
+    return "ok";
+  }
+  function planFill(spec, value, deny) {
+    const pick = (root, sel) => {
+      try {
+        return root.querySelector(sel);
+      } catch {
+        return null;
+      }
+    };
+    const input = pick(document, spec.selector);
+    if (!input) return false;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    input.focus();
+    setter?.call(input, value);
+    for (const type of ["input", "keyup", "change"]) input.dispatchEvent(new Event(type, { bubbles: true }));
+    input.blur();
+    if (!spec.submit) return true;
+    const form = input.closest("form");
+    let re = null;
+    try {
+      re = new RegExp(spec.submitText, "i");
+    } catch {
+    }
+    let denyRe = null;
+    try {
+      denyRe = new RegExp(deny, "i");
+    } catch {
+    }
+    const byText = (root) => {
+      try {
+        return Array.from(root.querySelectorAll(spec.buttons)).find((b) => !!re && re.test(b.textContent ?? "")) ?? null;
+      } catch {
+        return null;
+      }
+    };
+    const btn = (form && pick(form, spec.submitButton)) ?? pick(document, spec.submitButton) ?? (form && byText(form)) ?? byText(document);
+    if (btn) {
+      if (!denyRe || denyRe.test((btn.value || btn.textContent || "").trim())) return false;
+      btn.click();
+    } else form?.requestSubmit();
+    return true;
+  }
+  function planRead(spec) {
+    const c = spec.page;
+    const qa = (sel) => {
+      try {
+        return sel ? Array.from(document.querySelectorAll(sel)) : [];
+      } catch {
+        return [];
+      }
+    };
+    const text = (document.body?.innerText ?? "").slice(0, 1e5);
+    const labelled = (want) => {
+      const w = want.trim().toLowerCase();
+      if (!w) return null;
+      let best = null;
+      for (const el of qa(c.labelCells)) {
+        const t = (el.textContent ?? "").trim();
+        if (t.length <= w.length || t.length > w.length + 100 || !t.toLowerCase().startsWith(w)) continue;
+        if (!best || best.contains(el)) best = el;
+      }
+      if (!best) return null;
+      const span = Array.from(best.querySelectorAll("span")).map((s) => (s.textContent ?? "").trim()).find((t) => t && !t.toLowerCase().startsWith(w));
+      if (span) return span;
+      const rest = (best.textContent ?? "").trim().slice(w.length).trim();
+      return rest || null;
+    };
+    const fields = {};
+    for (const [name, f] of Object.entries(spec.fields ?? {})) {
+      let v = null;
+      if (f.label !== void 0) v = labelled(f.label);
+      else if (f.selector !== void 0) {
+        const el = qa(f.selector)[0];
+        v = el ? ((el === document.body ? el.innerText : el.textContent) ?? "").trim().slice(0, 1e5) || null : null;
+      } else if (f.regex !== void 0) {
+        let re = null;
+        try {
+          re = new RegExp(f.regex, "i");
+        } catch {
+          re = null;
+        }
+        const m = re ? re.exec(text) : null;
+        v = m ? m[1] ?? m[0] : null;
+      }
+      fields[name] = v;
+    }
+    const all = spec.all ? qa(spec.all).map((e) => (e.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 200)).filter(Boolean).slice(0, 60) : [];
+    return { fields, all };
+  }
+  var init_planPage = __esm({
+    "src/lib/planPage.ts"() {
+      "use strict";
+    }
+  });
+
+  // src/background/planDriver.ts
+  function hostOf2(url) {
+    try {
+      return url ? new URL(url).hostname.toLowerCase() : "";
+    } catch {
+      return "";
+    }
+  }
+  function watchNewTabs2(openerId, hosts) {
+    const seen = /* @__PURE__ */ new Set();
+    const onCreated = (t) => {
+      if (t.id != null && t.id !== openerId) seen.add(t.id);
+    };
+    chrome.tabs.onCreated.addListener(onCreated);
+    return {
+      stop: () => chrome.tabs.onCreated.removeListener(onCreated),
+      async portal() {
+        const out = [];
+        for (const id of [...seen]) {
+          try {
+            const t = await chrome.tabs.get(id);
+            if (t.openerTabId === openerId || hosts.includes(hostOf2(t.pendingUrl || t.url))) out.push(id);
+          } catch {
+            seen.delete(id);
+          }
+        }
+        return out;
+      }
+    };
+  }
+  function chromeDriver(base, headers, hosts, doFetch = fetch) {
+    const keep = setInterval(() => {
+      chrome.runtime.getPlatformInfo().catch(() => {
+      });
+    }, KEEPALIVE_MS4);
+    const opened = /* @__PURE__ */ new Set();
+    const watchers = [];
+    const cameras = /* @__PURE__ */ new Map();
+    const run = async (tabId, func, args, world) => {
+      const res = await chrome.scripting.executeScript({ target: { tabId }, ...world ? { world } : {}, func, args });
+      return res[0]?.result ?? null;
+    };
+    return {
+      async open(url) {
+        const tab = await chrome.tabs.create({ url, active: false });
+        if (tab.id == null) throw new Error("no tab id");
+        opened.add(tab.id);
+        return tab.id;
+      },
+      watch(opener) {
+        const w = watchNewTabs2(opener, hosts);
+        watchers.push(w);
+        return w;
+      },
+      adopt(tabId) {
+        opened.add(tabId);
+      },
+      probe: (tab, req) => run(tab, planProbe, [req]),
+      async click(tab, spec, deny) {
+        return await run(tab, planClick, [spec, deny]) ?? "none";
+      },
+      async fill(tab, spec, value, deny) {
+        return !!await run(tab, planFill, [spec, value, deny]);
+      },
+      read: (tab, spec) => run(tab, planRead, [spec]),
+      async shoot(tab, selector) {
+        let cam = cameras.get(tab);
+        if (!cam) {
+          cam = cardCamera(tab);
+          cameras.set(tab, cam);
+        }
+        return cam.shoot(selector);
+      },
+      async post(path, body) {
+        const r = await doFetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
+        return r.ok;
+      },
+      async keepInTab(tab) {
+        await run(tab, keepInTab, [], "MAIN");
+      },
+      async closeAll() {
+        clearInterval(keep);
+        for (const cam of cameras.values()) await cam.close().catch(() => {
+        });
+        cameras.clear();
+        for (const w of watchers) {
+          for (const id of await w.portal().catch(() => [])) opened.add(id);
+          w.stop();
+        }
+        for (const id of opened) await chrome.tabs.remove(id).catch(() => {
+        });
+        opened.clear();
+      },
+      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+      now: () => Date.now()
+    };
+  }
+  var KEEPALIVE_MS4;
+  var init_planDriver = __esm({
+    "src/background/planDriver.ts"() {
+      "use strict";
+      init_planPage();
+      init_egiftPage();
+      init_egiftShot();
+      KEEPALIVE_MS4 = 2e4;
+    }
+  });
+
+  // src/background/egiftPlan.ts
+  async function runEgiftPlan(base, headers, orderId, opts = {}, doFetch = fetch) {
+    const bundled = BUNDLED_PLANS;
+    const plan = bundled?.plans[PLAN_NAME];
+    if (!bundled || !plan) {
+      if (opts.dryRun) return { ...egiftReport(0, 0, "plan-failed"), result: { ...egiftReport(0, 0, "plan-failed").result, runner: "plan-invalid" } };
+      const r = await runEgiftOrder(base, headers, orderId, doFetch);
+      return { status: r.status, result: { ...r.result, runner: "builtin", planFallback: BUNDLED_PLANS_ERROR ? "plan-invalid" : "plan-missing" } };
+    }
+    if (!claimEgiftRun()) return { ...egiftReport(0, 0, "run-busy"), result: { ...egiftReport(0, 0, "run-busy").result, runner: `plan v${bundled.version}` } };
+    try {
+      const res = await doFetch(`${base}/api/extension/egift?orderId=${orderId}`, { headers, cache: "no-store" });
+      const fail = (c) => ({ status: "failed", result: { ...egiftReport(0, 0, c).result, runner: `plan v${bundled.version}`, trace: [] } });
+      if (!res.ok) return fail(`info-http-${res.status}`);
+      const info = parseEgiftInfo(await res.json().catch(() => null));
+      if (!info) return fail("no-link");
+      if (!isAllowedEgiftLink(info.link)) return fail("link-rejected");
+      const driver = chromeDriver(base, headers, plan.hosts, doFetch);
+      return await runPlan(PLAN_NAME, plan, bundled.version, driver, { link: info.link, email: info.email, orderId }, opts);
+    } finally {
+      releaseEgiftRun();
+    }
+  }
+  var PLAN_NAME;
+  var init_egiftPlan = __esm({
+    "src/background/egiftPlan.ts"() {
+      "use strict";
+      init_stepPlan();
+      init_planRun();
+      init_egiftCommand();
+      init_egiftRun();
+      init_planDriver();
+      PLAN_NAME = "costcoEgift";
     }
   });
 
@@ -2140,7 +3403,7 @@
     const t = setInterval(() => {
       chrome.runtime.getPlatformInfo().catch(() => {
       });
-    }, KEEPALIVE_MS4);
+    }, KEEPALIVE_MS5);
     try {
       return await work();
     } finally {
@@ -2307,7 +3570,7 @@
     }
     return null;
   }
-  var S, ordersUrl, readyWaitMs, syncTimeoutMs, detailWaitMs, ordersTimeoutMs, detailDelayMs, pollMs, sleep4, MAIN, active2, sweeping, currentCommandId, RUN_TAB_KEY2, KEEPALIVE_MS4, store2, waiting;
+  var S, ordersUrl, readyWaitMs, syncTimeoutMs, detailWaitMs, ordersTimeoutMs, detailDelayMs, pollMs, sleep4, MAIN, active2, sweeping, currentCommandId, RUN_TAB_KEY2, KEEPALIVE_MS5, store2, waiting;
   var init_costcoRun = __esm({
     "src/background/costcoRun.ts"() {
       "use strict";
@@ -2327,7 +3590,7 @@
       sweeping = true;
       currentCommandId = null;
       RUN_TAB_KEY2 = "costcoRunTab";
-      KEEPALIVE_MS4 = 2e4;
+      KEEPALIVE_MS5 = 2e4;
       store2 = () => chrome.storage.local;
       waiting = /* @__PURE__ */ new Map();
       chrome.tabs.onRemoved.addListener((tabId) => {
@@ -2379,9 +3642,9 @@
       async set(p) {
         await chrome.storage.local.set({ [PAIRING_KEY]: p });
       },
-      async clear(code) {
+      async clear(code2) {
         const got = await chrome.storage.local.get(PAIRING_KEY).catch(() => ({}));
-        if (got[PAIRING_KEY]?.code === code) await chrome.storage.local.remove(PAIRING_KEY);
+        if (got[PAIRING_KEY]?.code === code2) await chrome.storage.local.remove(PAIRING_KEY);
       }
     };
   }
@@ -2402,6 +3665,7 @@
       init_amazonRun();
       init_carrierRun();
       init_egiftRun();
+      init_egiftPlan();
       init_egiftCommand();
       init_trackCommand();
       init_visitCommand();
@@ -3218,7 +4482,7 @@
               continue;
             }
             try {
-              const report = await runEgiftOrder(base, headers, plan.orderId);
+              const report = plan.runner === "plan" ? await runEgiftPlan(base, headers, plan.orderId, { dryRun: plan.dryRun }) : await runEgiftOrder(base, headers, plan.orderId);
               await patchCommand(base, cmd.id, report.status, headers, report.result);
             } catch {
               await patchCommand(base, cmd.id, "failed", headers, { error: "error" });
