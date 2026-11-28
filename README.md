@@ -51,6 +51,10 @@ The `/api/import` endpoint needs to accept a `trackingNumbers` array on each ord
 
 ## Changelog
 
+### 1.5.2
+
+- **Track Carrier says why it failed.** A failed run now reports a short reason per page (carrier, timed out with the tab title and whether it looks like a bot or consent page, tab closed or failed to load, tracker answered with status N, or the error type) in `lastNote` and the command error, e.g. `no page could be read (3/3): fedex timed out, title 'Access Denied'`. Never page text or tracking numbers.
+
 ### 1.5.1
 
 - **Step plans come from the tracker.** The extension fetches step plans from your tracker's `/api/extension/plans` and runs one only when its signature checks out against the public key built into the extension. A plan file that is unsigned, fails the check or is older than the one in use is ignored, and the last good plan (or the bundled one) keeps running. Scraper step changes now ship with a tracker update instead of a new extension release.

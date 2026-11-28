@@ -913,10 +913,10 @@ async function pollAndExecuteCommands() {
       try {
         const post = async (body: Record<string, unknown>) => {
           const r = await fetch(`${base}/api/extension/carrier-page`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
-          return r.ok;
+          return { ok: r.ok, status: r.status };
         };
         const out = await runCarrierItems(plan.items, post, plan.statusWords);
-        await patchCommand(base, cmd.id, out.ok ? 'done' : 'failed', headers, out.ok ? out : { ...out, error: 'no page could be read' });
+        await patchCommand(base, cmd.id, out.ok ? 'done' : 'failed', headers, out.ok ? out : { ...out, error: `no page could be read (${out.failed}/${out.done + out.failed}): ${out.lastNote}`.slice(0, 200) });
       } catch (e) {
         await patchCommand(base, cmd.id, 'failed', headers, { error: String(e) });
       }

@@ -59,31 +59,69 @@ function readPage(max: number): { text: string } {
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
-async function readWhenReady(tabId: number, ready: RegExp): Promise<string | null> {
-  const deadline = Date.now() + WAIT_MS;
+const BLOCK_WORDS = ['access denied', 'unusual traffic', 'verify you are', 'are you a robot', 'captcha', 'blocked', 'forbidden', 'cookie', 'consent', 'privacy choices'];
+const MAX_NOTE = 200;
+
+/** True when text (a title or the page) mentions a bot check, consent or access-denied wall. Only this boolean leaves the page. */
+export function looksBlocked(text: string): boolean {
+  const t = text.toLowerCase();
+  return BLOCK_WORDS.some(w => t.includes(w));
+}
+
+/** The tab title, trimmed and without the tracking number, so it can go into a note. Nothing else of the page is kept. */
+export function safeTitle(title: string | undefined, trackingNumber: string): string {
+  const t = (title ?? '').split(trackingNumber).join('').replace(/[\r\n\t']+/g, ' ').replace(/\s+/g, ' ').trim();
+  return t.slice(0, 40);
+}
+
+/** Joins per-item reasons into one short note. */
+export function joinNotes(notes: readonly string[]): string {
+  return notes.join('; ').slice(0, MAX_NOTE);
+}
+
+export type ReadResult = { ok: true } | { ok: false; reason: string };
+export type PostResult = { ok: boolean; status: number };
+export type CarrierOpts = { waitMs?: number; pollMs?: number; gapMinMs?: number; gapMaxMs?: number };
+
+async function readWhenReady(tabId: number, ready: RegExp, waitMs: number, pollMs: number): Promise<{ text: string | null; blocked: boolean }> {
+  const deadline = Date.now() + waitMs;
+  let blocked = false;
   while (Date.now() < deadline) {
-    await sleep(POLL_MS);
+    await sleep(pollMs);
     try {
       const res = await chrome.scripting.executeScript({ target: { tabId }, func: readPage, args: [MAX_TEXT] });
       const text = res[0]?.result?.text ?? '';
-      if (ready.test(text)) return text;
+      if (ready.test(text)) return { text, blocked: false };
+      if (looksBlocked(text)) blocked = true;
     } catch { /* page still loading or navigating: try again */ }
   }
-  return null;
+  return { text: null, blocked };
 }
 
-async function readOne(item: CarrierItem, ready: RegExp, post: (body: Record<string, unknown>) => Promise<boolean>): Promise<boolean> {
+/** Why a page that never showed a status could not be read: tab gone, load error, or timed out (with its title). */
+async function timeoutReason(tabId: number, item: CarrierItem, blocked: boolean): Promise<string> {
+  let tab: chrome.tabs.Tab;
+  try { tab = await chrome.tabs.get(tabId); } catch { return `${item.carrier} tab closed`; }
+  if ((tab.url ?? '').startsWith('chrome-error:')) return `${item.carrier} failed to load`;
+  const title = safeTitle(tab.title, item.trackingNumber);
+  const wall = blocked || looksBlocked(title);
+  return `${item.carrier} timed out${title ? `, title '${title}'` : ', no title'}${wall ? ' (looks like a bot/consent page)' : ''}`;
+}
+
+async function readOne(item: CarrierItem, ready: RegExp, post: (body: Record<string, unknown>) => Promise<PostResult>, opts: Required<Pick<CarrierOpts, 'waitMs' | 'pollMs'>>): Promise<ReadResult> {
   const url = pageUrl(item);
   let tabId: number | undefined;
   try {
     const tab = await chrome.tabs.create({ url, active: false });
     tabId = tab.id;
-    if (tabId == null) return false;
-    const text = await readWhenReady(tabId, ready);
-    if (!text) return false;
-    return await post({ carrier: item.carrier, trackingNumber: item.trackingNumber, url, text });
-  } catch {
-    return false;
+    if (tabId == null) return { ok: false, reason: `${item.carrier} tab failed to open` };
+    const { text, blocked } = await readWhenReady(tabId, ready, opts.waitMs, opts.pollMs);
+    if (!text) return { ok: false, reason: await timeoutReason(tabId, item, blocked) };
+    const r = await post({ carrier: item.carrier, trackingNumber: item.trackingNumber, url, text });
+    return r.ok ? { ok: true } : { ok: false, reason: `${item.carrier} tracker answered ${r.status}` };
+  } catch (e) {
+    const name = e instanceof Error && e.name ? e.name : typeof e;
+    return { ok: false, reason: `${item.carrier} error ${name}`.slice(0, 60) };
   } finally {
     if (tabId != null) await chrome.tabs.remove(tabId).catch(() => {});
   }
@@ -91,28 +129,35 @@ async function readOne(item: CarrierItem, ready: RegExp, post: (body: Record<str
 
 /**
  * Runs the whole command. `post` sends one page to the tracker and says whether it was accepted.
- * Returns the counts to report back to the tracker; `ok` is false when nothing could be read.
+ * Returns the counts to report back to the tracker; `ok` is false when nothing could be read. `lastNote` holds
+ * the short per-item failure reasons (carrier, outcome, tab title): never page text or tracking numbers.
  */
 export async function runCarrierItems(
   items: readonly CarrierItem[],
-  post: (body: Record<string, unknown>) => Promise<boolean>,
+  post: (body: Record<string, unknown>) => Promise<PostResult>,
   statusWords: readonly string[] = DEFAULT_STATUS_WORDS,
-): Promise<{ ok: boolean; done: number; failed: number }> {
+  opts: CarrierOpts = {},
+): Promise<{ ok: boolean; done: number; failed: number; lastNote: string }> {
   const ready = statusRegex(statusWords.length ? statusWords : DEFAULT_STATUS_WORDS);
-  if (running) return { ok: false, done: 0, failed: items.length };
+  if (running) return { ok: false, done: 0, failed: items.length, lastNote: 'another carrier run is active' };
   running = true;
   // A background worker with nothing happening is stopped after about 30 seconds, which would end the run.
   const keep = setInterval(() => { chrome.runtime.getPlatformInfo().catch(() => {}); }, KEEPALIVE_MS);
   let done = 0;
   let failed = 0;
+  const notes: string[] = [];
+  const read = { waitMs: opts.waitMs ?? WAIT_MS, pollMs: opts.pollMs ?? POLL_MS };
+  const gapMin = opts.gapMinMs ?? GAP_MIN_MS;
+  const gapMax = opts.gapMaxMs ?? GAP_MAX_MS;
   try {
     for (let i = 0; i < items.length; i++) {
-      if (i > 0) await sleep(GAP_MIN_MS + Math.random() * (GAP_MAX_MS - GAP_MIN_MS));
-      if (await readOne(items[i], ready, post)) done++; else failed++;
+      if (i > 0) await sleep(gapMin + Math.random() * (gapMax - gapMin));
+      const r = await readOne(items[i], ready, post, read);
+      if (r.ok) done++; else { failed++; notes.push(r.reason); }
     }
   } finally {
     clearInterval(keep);
     running = false;
   }
-  return { ok: done > 0, done, failed };
+  return { ok: done > 0, done, failed, lastNote: joinNotes(notes) };
 }
